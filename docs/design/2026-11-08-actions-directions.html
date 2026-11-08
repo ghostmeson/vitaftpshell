@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitaFTPShell — ACTIONS directions</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #060709;
+    color: #b9bbc6;
+    font: 13.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1024px; margin: 0 auto; padding: 44px 32px 80px; }
+  .sheet-head { border-bottom: 1px solid #1b1c23; padding-bottom: 22px; margin-bottom: 40px; }
+  .sheet-head h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; color: #ededf0; letter-spacing: .005em; }
+  .sheet-head p { margin: 0; color: #838592; max-width: 68ch; }
+  .spec { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 16px; color: #6e707e; font-size: 12px; }
+  .spec b { color: #a9abb6; font-weight: 500; }
+  .dir { margin: 0 0 60px; }
+  .dir-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .dir-key {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border: 1px solid #2b2d36; color: #ededf0;
+    font-size: 11px; font-weight: 600;
+  }
+  .dir-name { color: #ededf0; font-weight: 600; font-size: 14px; }
+  .dir p { margin: 0 0 16px; color: #838592; max-width: 70ch; }
+  .dir p em { color: #b9bbc6; font-style: normal; }
+  canvas { display: block; width: 960px; height: 544px; background: #000; box-shadow: 0 0 0 1px #1b1c23; }
+  .foot { border-top: 1px solid #1b1c23; margin-top: 8px; padding-top: 20px; color: #6e707e; font-size: 12.5px; }
+  .foot p { margin: 0 0 8px; max-width: 74ch; }
+  .foot b { color: #a9abb6; font-weight: 500; }
+
+  body.only { background: #000; }
+  body.only .sheet { padding: 0; max-width: none; }
+  body.only .sheet-head, body.only .foot { display: none; }
+  body.only .dir { display: none; margin: 0; }
+  body.only .dir.on { display: block; }
+  body.only .dir-head, body.only .dir p { display: none; }
+  body.only canvas { box-shadow: none; }
+  body.only.big canvas { width: 1920px; height: 1088px; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="sheet-head">
+    <h1>vitaFTPShell — ACTIONS directions</h1>
+    <p>The action menu for the active pane: local copy, move, new folder, rename, delete, upload; remote download, rename, delete, new folder. Three layouts, same actions. The local copy/move destination is the open question shown below.</p>
+    <div class="spec">
+      <span><b>960 × 544</b></span>
+      <span><b>actions</b> 552 / 924 / 456 px</span>
+      <span><b>rows</b> 40 or 44 px</span>
+      <span><b>dock</b> 64 px</span>
+      <span><b>type</b> 5×7 face, 1.5 / 2 / 3 / 5 px</span>
+    </div>
+  </div>
+
+  <section class="dir" data-scene="a">
+    <div class="dir-head"><span class="dir-key">A</span><span class="dir-name">Action ledger + target</span></div>
+    <p>The actions on the left; the marked set, current path, destination, and the selected action’s consequence on the right. The target panel carries the copy/move destination explicitly.</p>
+    <canvas id="a" aria-label="ACTIONS direction A: action list with a target panel"></canvas>
+  </section>
+
+  <section class="dir" data-scene="b">
+    <div class="dir-head"><span class="dir-key">B</span><span class="dir-name">Single action table</span></div>
+    <p>The target in the band; actions and descriptions in one list; the selected consequence at the bottom. The densest, and the list gets the full width.</p>
+    <canvas id="b" aria-label="ACTIONS direction B: full-width action table"></canvas>
+  </section>
+
+  <section class="dir" data-scene="c">
+    <div class="dir-head"><span class="dir-key">C</span><span class="dir-name">Pane mode</span></div>
+    <p>The active pane becomes the action list; the other pane stays visible. The most contextual: the transfer destination is never hidden.</p>
+    <canvas id="c" aria-label="ACTIONS direction C: active pane replaced by actions, other pane visible"></canvas>
+  </section>
+
+  <div class="foot">
+    <p><b>State shown:</b> local active, three items marked (1.8 MB), current folder <b>UX0:/DATA/BACKUP/</b>, remote connected. COPY is selected, RENAME is disabled because three items are marked, and DELETE is flagged.</p>
+    <p><b>Open question:</b> the sheet shows the marks as the source and the current folder as the destination (mark, navigate, then COPY or MOVE <b>TO THIS FOLDER</b>). The alternative is a destination picker after the action; that adds a screen and more presses.</p>
+    <p><b>Not shown:</b> local single, remote single, remote multi, read-only and protected states, CONFIRM, and the text entry overlay.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  const COL = {
+    field: '#000000', panel: '#0D0E12', hair: '#1C1D24', dim: '#6E707E',
+    white: '#EDEDF0', yellow: '#FCEE0A', cyan: '#2AD8E8', cyanDim: '#19818B',
+    green: '#3BE07A', greenDim: '#2FA85C', red: '#FF2E4D'
+  };
+  const PX = { micro: 1.5, label: 2, value: 3, hero: 4, primary: 5 };
+  const W = 960, H = 544, M = 18, GAP = 12;
+
+  const GLYPHS = {
+    A: [0x0E,0x11,0x11,0x1F,0x11,0x11,0x11],
+    B: [0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E],
+    C: [0x0E,0x11,0x10,0x10,0x10,0x11,0x0E],
+    D: [0x1E,0x11,0x11,0x11,0x11,0x11,0x1E],
+    E: [0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F],
+    F: [0x1F,0x10,0x10,0x1E,0x10,0x10,0x10],
+    G: [0x0E,0x11,0x10,0x17,0x11,0x11,0x0E],
+    H: [0x11,0x11,0x11,0x1F,0x11,0x11,0x11],
+    I: [0x1F,0x04,0x04,0x04,0x04,0x04,0x1F],
+    J: [0x07,0x02,0x02,0x02,0x02,0x12,0x0C],
+    K: [0x11,0x12,0x14,0x18,0x14,0x12,0x11],
+    L: [0x10,0x10,0x10,0x10,0x10,0x10,0x1F],
+    M: [0x11,0x1B,0x15,0x15,0x11,0x11,0x11],
+    N: [0x11,0x19,0x15,0x13,0x11,0x11,0x11],
+    O: [0x0E,0x11,0x11,0x11,0x11,0x11,0x0E],
+    P: [0x1E,0x11,0x11,0x1E,0x10,0x10,0x10],
+    Q: [0x0E,0x11,0x11,0x11,0x15,0x12,0x0D],
+    R: [0x1E,0x11,0x11,0x1E,0x14,0x12,0x11],
+    S: [0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E],
+    T: [0x1F,0x04,0x04,0x04,0x04,0x04,0x04],
+    U: [0x11,0x11,0x11,0x11,0x11,0x11,0x0E],
+    V: [0x11,0x11,0x11,0x11,0x11,0x0A,0x04],
+    W: [0x11,0x11,0x11,0x15,0x15,0x1B,0x11],
+    X: [0x11,0x11,0x0A,0x04,0x0A,0x11,0x11],
+    Y: [0x11,0x11,0x0A,0x04,0x04,0x04,0x04],
+    Z: [0x1F,0x01,0x02,0x04,0x08,0x10,0x1F],
+    '0': [0x0E,0x13,0x15,0x15,0x15,0x19,0x0E],
+    '1': [0x04,0x0C,0x04,0x04,0x04,0x04,0x0E],
+    '2': [0x0E,0x11,0x01,0x06,0x08,0x10,0x1F],
+    '3': [0x1F,0x02,0x04,0x02,0x01,0x11,0x0E],
+    '4': [0x02,0x06,0x0A,0x12,0x1F,0x02,0x02],
+    '5': [0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E],
+    '6': [0x06,0x08,0x10,0x1E,0x11,0x11,0x0E],
+    '7': [0x1F,0x01,0x02,0x04,0x08,0x08,0x08],
+    '8': [0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E],
+    '9': [0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C],
+    ' ': [0,0,0,0,0,0,0],
+    ':': [0x00,0x04,0x04,0x00,0x04,0x04,0x00],
+    '.': [0x00,0x00,0x00,0x00,0x00,0x04,0x04],
+    '%': [0x19,0x1A,0x02,0x04,0x08,0x0B,0x13],
+    '/': [0x01,0x02,0x02,0x04,0x08,0x08,0x10],
+    '-': [0x00,0x00,0x00,0x1F,0x00,0x00,0x00],
+    '+': [0x00,0x04,0x04,0x1F,0x04,0x04,0x00],
+    ',': [0x00,0x00,0x00,0x00,0x0C,0x04,0x08],
+    '&': [0x0C,0x12,0x14,0x08,0x15,0x12,0x0D],
+    '[': [0x0E,0x08,0x08,0x08,0x08,0x08,0x0E],
+    ']': [0x0E,0x02,0x02,0x02,0x02,0x02,0x0E],
+    '<': [0x02,0x04,0x08,0x10,0x08,0x04,0x02],
+    '>': [0x08,0x04,0x02,0x01,0x02,0x04,0x08],
+    '_': [0,0,0,0,0,0,0x1F],
+    '|': [0x04,0x04,0x04,0x04,0x04,0x04,0x04]
+  };
+
+  function text(g, s, x, y, px, color, track = 0) {
+    g.fillStyle = color;
+    let cx = x;
+    for (const raw of String(s).toUpperCase()) {
+      const rows = GLYPHS[raw];
+      if (rows) {
+        for (let r = 0; r < 7; r++) {
+          const bits = rows[r];
+          if (!bits) continue;
+          let c = 0;
+          while (c < 5) {
+            if (!(bits & (1 << (4 - c)))) { c++; continue; }
+            const st = c;
+            while (c < 5 && (bits & (1 << (4 - c)))) c++;
+            g.fillRect(cx + st * px, y + r * px, (c - st) * px, px);
+          }
+        }
+      }
+      cx += 6 * px + track;
+    }
+    return cx;
+  }
+
+  function tw(s, px, track = 0) {
+    const n = String(s).length;
+    if (!n) return 0;
+    return n * (6 * px + track) - px - track;
+  }
+
+  function right(g, s, xr, y, px, color, track = 0) {
+    text(g, s, xr - tw(s, px, track), y, px, color, track);
+  }
+
+  function hair(g, x, y, w, color = COL.hair, h = 1) {
+    g.fillStyle = color;
+    g.fillRect(x, y, w, h);
+  }
+
+  function panelPath(g, x, y, w, h, c, cut) {
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w - c, y);
+    g.lineTo(x + w, y + c);
+    g.lineTo(x + w, y + h);
+    if (cut) {
+      g.lineTo(x + c, y + h);
+      g.lineTo(x, y + h - c);
+    } else {
+      g.lineTo(x, y + h);
+    }
+    g.closePath();
+  }
+
+  function panel(g, x, y, w, h, accent, opts = {}) {
+    const c = opts.hero ? 28 : 14;
+    panelPath(g, x, y, w, h, c, !!opts.cut);
+    g.fillStyle = COL.panel;
+    g.fill();
+    g.save();
+    g.globalAlpha = 0.45;
+    g.strokeStyle = accent;
+    g.lineWidth = 1;
+    g.stroke();
+    g.restore();
+  }
+
+  function bracket(g, x, y, dx, dy, accent) {
+    g.fillStyle = accent;
+    g.fillRect(dx > 0 ? x : x - 16, dy > 0 ? y : y - 2, 16, 2);
+    g.fillRect(dx > 0 ? x : x - 2, dy > 0 ? y : y - 16, 2, 16);
+  }
+
+  function wash(g, x, y, w, h, a = 0.06) {
+    g.fillStyle = `rgba(237,237,240,${a})`;
+    g.fillRect(x, y, w, h);
+  }
+
+  const SHAPES = {
+    x: [[0,0],[4,0],[1,1],[3,1],[2,2],[1,3],[3,3],[0,4],[4,4]],
+    o: [[1,0],[2,0],[3,0],[0,1],[4,1],[0,2],[4,2],[0,3],[4,3],[1,4],[2,4],[3,4]],
+    square: [[0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[4,1],[0,2],[4,2],[0,3],[4,3],[0,4],[1,4],[2,4],[3,4],[4,4]],
+    triangle: [[2,0],[1,1],[3,1],[0,2],[4,2],[0,3],[4,3],[0,4],[1,4],[2,4],[3,4],[4,4]]
+  };
+
+  function keycap(g, x, y, shape) {
+    const w = 18, h = 16, c = 3;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w - c, y);
+    g.lineTo(x + w, y + c);
+    g.lineTo(x + w, y + h);
+    g.lineTo(x, y + h);
+    g.closePath();
+    g.strokeStyle = COL.white;
+    g.lineWidth = 1;
+    g.stroke();
+
+    const cx = x + w / 2, cy = y + h / 2;
+    g.strokeStyle = COL.white;
+    g.lineWidth = 1.5;
+    g.lineCap = 'butt';
+    g.beginPath();
+    if (shape === 'x') {
+      g.moveTo(cx - 3.5, cy - 3.5); g.lineTo(cx + 3.5, cy + 3.5);
+      g.moveTo(cx + 3.5, cy - 3.5); g.lineTo(cx - 3.5, cy + 3.5);
+    } else if (shape === 'o') {
+      g.arc(cx, cy, 4.2, 0, Math.PI * 2);
+    } else if (shape === 'square') {
+      g.rect(cx - 3.5, cy - 3.5, 7, 7);
+    } else {
+      g.moveTo(cx, cy - 4.2);
+      g.lineTo(cx + 4.2, cy + 3.5);
+      g.lineTo(cx - 4.2, cy + 3.5);
+      g.closePath();
+    }
+    g.stroke();
+  }
+
+  function textRects(s, x, y, px, track = 0) {
+    const out = [];
+    let cx = x;
+    for (const raw of String(s).toUpperCase()) {
+      const rows = GLYPHS[raw];
+      if (rows) {
+        for (let r = 0; r < 7; r++) {
+          const bits = rows[r];
+          if (!bits) continue;
+          let c = 0;
+          while (c < 5) {
+            if (!(bits & (1 << (4 - c)))) { c++; continue; }
+            const st = c;
+            while (c < 5 && (bits & (1 << (4 - c)))) c++;
+            out.push([cx + st * px, y + r * px, (c - st) * px, px]);
+          }
+        }
+      }
+      cx += 6 * px + track;
+    }
+    return out;
+  }
+
+  function blit(g, rects, dx, dy, color, alpha = 1, additive = false) {
+    g.save();
+    g.globalAlpha = alpha;
+    if (additive) g.globalCompositeOperation = 'lighter';
+    g.fillStyle = color;
+    for (const [x, y, w, h] of rects) g.fillRect(x + dx, y + dy, w, h);
+    g.restore();
+  }
+
+  // ---------- ACTIONS chrome ----------
+
+  function fit(s, px, maxW) {
+    if (tw(s, px) <= maxW) return s;
+    let out = s;
+    while (out.length > 1 && tw(out + '..', px) > maxW) out = out.slice(0, -1);
+    return out + '..';
+  }
+
+  function drawActionsHeader(g) {
+    const wm = textRects('VITAFTPSHELL', M, 8, PX.hero);
+    for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) {
+      blit(g, wm, dx, dy, COL.yellow, 0.10, true);
+    }
+    blit(g, wm, -2, 0, COL.yellow, 0.45);
+    blit(g, wm, 2, 0, COL.cyan, 0.35);
+    blit(g, wm, 0, 0, COL.yellow);
+
+    text(g, 'ACTIONS', M, 42, PX.label, COL.white, 1);
+
+    const state = 'CONNECTED';
+    const stateX = 942 - tw(state, PX.micro);
+    const portX = stateX - 12 - tw(':21', PX.micro);
+    const siteX = portX - tw('FTP.GNU.ORG', PX.label);
+    text(g, 'FTP.GNU.ORG', siteX, 22, PX.label, COL.cyan);
+    text(g, ':21', portX, 25.5, PX.micro, COL.cyanDim);
+    text(g, state, stateX, 25.5, PX.micro, COL.green);
+
+    let rx = 942;
+    right(g, '1 CLIENT', rx, 45.5, PX.micro, COL.white);
+    rx -= tw('1 CLIENT', PX.micro) + 12;
+    const onX = rx - tw('ON', PX.micro);
+    text(g, 'ON', onX, 45.5, PX.micro, COL.green);
+    right(g, 'SERVER', onX - 12, 45.5, PX.micro, COL.dim);
+  }
+
+  function drawActionsLegend(g) {
+    let x = M;
+    const cap = (shape, label) => {
+      keycap(g, x, 510, shape);
+      x += 22;
+      text(g, label, x, 512, PX.micro, COL.dim);
+      x += tw(label, PX.micro) + 18;
+    };
+    cap('x', 'RUN');
+    cap('o', 'CLOSE');
+    text(g, 'UP/DOWN', x, 512, PX.micro, COL.dim);
+    x += tw('UP/DOWN', PX.micro) + 6;
+    text(g, 'ACTION', x, 512, PX.micro, COL.dim);
+  }
+
+  function drawDock(g) {
+    panel(g, 18, 440, 924, 64, COL.cyan);
+    text(g, 'READY', 32, 450, PX.label, COL.dim, 2);
+    text(g, 'COPY 3 ITEMS', 32 + tw('READY', PX.label, 2) + 16, 450, PX.label, COL.white);
+    right(g, '1.8 MB', 928, 453, PX.micro, COL.white);
+    text(g, 'X TO RUN', 32, 483, PX.micro, COL.dim);
+  }
+
+  function drawActionRow(g, a, x, y, w, h, selected) {
+    if (selected) {
+      wash(g, x + 1, y, w - 2, h, 0.06);
+      g.fillStyle = COL.white;
+      g.fillRect(x + 8, y, 2, h);
+    }
+    text(g, a.label, x + 32, y + 5, PX.label, a.disabled ? COL.dim : COL.white);
+    const descColor = a.disabled ? COL.dim : (a.danger ? COL.yellow : COL.dim);
+    text(g, a.desc, x + 32, y + 23, PX.micro, descColor);
+  }
+
+  function drawActionPanel(g, x, y, w, h, selected, active = false) {
+    panel(g, x, y, w, h, COL.cyan);
+    if (active) {
+      g.fillStyle = COL.yellow;
+      g.fillRect(x, y, 2, h);
+    }
+    text(g, 'LOCAL ACTIONS', x + 14, y + 8, PX.label, active ? COL.yellow : COL.dim, 2);
+    text(g, 'UX0:/DATA/BACKUP/', x + 14, y + 26, PX.micro, COL.cyan);
+    right(g, '3 MARKED', x + w - 14, y + 11.5, PX.micro, COL.yellow);
+    hair(g, x + 14, y + 43, w - 28);
+    ACTIONS.forEach((a, i) => drawActionRow(g, a, x, y + 48 + i * 44, w, 44, i === selected));
+  }
+
+  // ---------- A: action ledger + target ----------
+
+  function drawTargetA(g) {
+    panel(g, 582, 76, 360, 352, COL.cyan);
+    text(g, 'TARGET', 596, 84, PX.label, COL.dim, 2);
+    text(g, 'LOCAL', 596, 108, PX.label, COL.cyan);
+    text(g, 'UX0:/DATA/BACKUP/', 596, 126, PX.micro, COL.cyanDim);
+
+    text(g, '3', 596, 148, PX.primary, COL.white);
+    text(g, 'MARKED', 596 + tw('3', PX.primary) + 14, 169, PX.label, COL.dim);
+    right(g, '1.8 MB', 928, 169, PX.label, COL.white);
+
+    hair(g, 596, 210, 332);
+
+    text(g, 'DESTINATION', 596, 224, PX.label, COL.dim);
+    right(g, 'THIS FOLDER', 928, 224, PX.label, COL.white);
+    text(g, 'COPY 3 ITEMS', 596, 300, PX.label, COL.white);
+    text(g, 'TO UX0:/DATA/BACKUP/', 596, 320, PX.micro, COL.dim);
+    text(g, 'MARKS STAY SELECTED', 596, 400, PX.micro, COL.dim);
+  }
+
+  function sceneA(g) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawActionsHeader(g);
+    drawActionPanel(g, 18, 76, 552, 352, SELECTED);
+    drawTargetA(g);
+    drawDock(g);
+    drawActionsLegend(g);
+  }
+
+  // ---------- B: single action table ----------
+
+  function sceneB(g) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawActionsHeader(g);
+
+    panel(g, 18, 76, 924, 352, COL.cyan);
+    text(g, 'LOCAL ACTIONS', 32, 84, PX.label, COL.dim, 2);
+    text(g, 'UX0:/DATA/BACKUP/', 32, 102, PX.micro, COL.cyan);
+    right(g, '3 MARKED', 780, 87.5, PX.micro, COL.yellow);
+    right(g, '1.8 MB', 928, 87.5, PX.micro, COL.white);
+    hair(g, 32, 119, 924 - 28);
+
+    ACTIONS.forEach((a, i) => {
+      const y = 124 + i * 40;
+      const selected = i === SELECTED;
+      if (selected) {
+        wash(g, 19, y, 922, 40, 0.06);
+        g.fillStyle = COL.white;
+        g.fillRect(26, y, 2, 40);
+      }
+      text(g, a.label, 32, y + 4, PX.label, a.disabled ? COL.dim : COL.white);
+      const descColor = a.disabled ? COL.dim : (a.danger ? COL.yellow : COL.dim);
+      right(g, a.desc, 928, y + 21, PX.micro, descColor);
+    });
+
+    text(g, 'COPY 3 ITEMS TO UX0:/DATA/BACKUP/', 32, 390, PX.micro, COL.dim);
+
+    drawDock(g);
+    drawActionsLegend(g);
+  }
+
+  // ---------- C: pane-mode actions ----------
+
+  function drawRemotePane(g) {
+    panel(g, 486, 76, 456, 352, COL.cyan);
+    text(g, 'REMOTE', 500, 84, PX.label, COL.dim, 2);
+    text(g, 'FTP.GNU.ORG:21', 500, 102, PX.micro, COL.dim);
+    text(g, '/GNU/', 500 + tw('FTP.GNU.ORG:21', PX.micro) + 8, 102, PX.micro, COL.cyanDim);
+    hair(g, 500, 119, 456 - 28);
+    for (let i = 0; i < 10; i++) {
+      const idx = 2 + i;
+      const row = REMOTE_ROWS[idx];
+      if (!row) break;
+      const y = 124 + i * 30;
+      const cursor = idx === 9;
+      if (cursor) {
+        wash(g, 487, y, 454, 30, 0.025);
+        g.fillStyle = COL.hair;
+        g.fillRect(494, y, 2, 30);
+      }
+      if (row.mark) {
+        g.fillStyle = COL.yellow;
+        g.fillRect(505, y + 12, 6, 6);
+      }
+      text(g, row.n, 518, y + 8, PX.label, row.k === 'up' ? COL.dim : COL.white);
+      if (row.k === 'up') right(g, 'UP', 928, y + 11.5, PX.micro, COL.dim);
+      else if (row.k === 'dir') right(g, 'DIR', 928, y + 11.5, PX.micro, COL.dim);
+      else right(g, row.s || '--', 928, y + 11.5, PX.micro, row.s ? COL.white : COL.dim);
+    }
+    g.fillStyle = COL.hair;
+    g.fillRect(936, 124, 2, 300);
+    g.fillStyle = COL.dim;
+    g.fillRect(936, 174, 2, 250);
+  }
+
+  function sceneC(g) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawActionsHeader(g);
+    drawActionPanel(g, 18, 76, 456, 352, SELECTED, true);
+    drawRemotePane(g);
+    drawDock(g);
+    drawActionsLegend(g);
+  }
+
+  // ---------- data and render ----------
+
+  const ACTIONS = [
+    { label: 'UPLOAD', desc: 'TO FTP.GNU.ORG/GNU/' },
+    { label: 'COPY', desc: 'TO THIS FOLDER' },
+    { label: 'MOVE', desc: 'TO THIS FOLDER' },
+    { label: 'NEW FOLDER', desc: 'IN THIS FOLDER' },
+    { label: 'RENAME', desc: 'ONE ITEM ONLY', disabled: true },
+    { label: 'DELETE', desc: 'CANNOT BE UNDONE', danger: true }
+  ];
+  const SELECTED = 1;
+
+  const REMOTE_ROWS = [
+    { n: '..', k: 'up' },
+    { n: 'AUTOCONF/', k: 'dir' },
+    { n: 'BASH/', k: 'dir' },
+    { n: 'COREUTILS/', k: 'dir' },
+    { n: 'EMACS/', k: 'dir' },
+    { n: 'GCC/', k: 'dir' },
+    { n: 'GETTEXT/', k: 'dir' },
+    { n: 'GNULIB/', k: 'dir' },
+    { n: 'README', s: '2.4 KB' },
+    { n: 'EMACS-29.4.TAR.XZ', s: '118.7 MB' },
+    { n: 'EMACS-29.3.TAR.XZ', s: '116.2 MB' },
+    { n: 'SHA256SUMS', s: '1.1 KB' }
+  ];
+
+  const SCENES = { a: sceneA, b: sceneB, c: sceneC };
+
+  function render(id) {
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+    const scale = 2;
+    canvas.width = W * scale;
+    canvas.height = H * scale;
+    const g = canvas.getContext('2d');
+    g.scale(scale, scale);
+    g.imageSmoothingEnabled = false;
+    SCENES[id](g);
+  }
+
+  for (const id of Object.keys(SCENES)) render(id);
+
+  const params = new URLSearchParams(location.search);
+  const only = params.get('only');
+  if (only && SCENES[only]) {
+    document.body.classList.add('only');
+    if (params.get('big')) document.body.classList.add('big');
+    document.querySelectorAll('.dir').forEach(el => {
+      el.classList.toggle('on', el.dataset.scene === only);
+    });
+  }
+
+})();
+</script>
+</body>
+</html>

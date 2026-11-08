@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitaFTPShell — SERVER states, direction A</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #060709;
+    color: #b9bbc6;
+    font: 13.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1024px; margin: 0 auto; padding: 44px 32px 80px; }
+  .sheet-head { border-bottom: 1px solid #1b1c23; padding-bottom: 22px; margin-bottom: 40px; }
+  .sheet-head h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; color: #ededf0; letter-spacing: .005em; }
+  .sheet-head p { margin: 0; color: #838592; max-width: 68ch; }
+  .spec { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 16px; color: #6e707e; font-size: 12px; }
+  .spec b { color: #a9abb6; font-weight: 500; }
+  .dir { margin: 0 0 60px; }
+  .dir-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .dir-key {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border: 1px solid #2b2d36; color: #ededf0;
+    font-size: 11px; font-weight: 600;
+  }
+  .dir-name { color: #ededf0; font-weight: 600; font-size: 14px; }
+  .dir p { margin: 0 0 16px; color: #838592; max-width: 70ch; }
+  .dir p em { color: #b9bbc6; font-style: normal; }
+  canvas { display: block; width: 960px; height: 544px; background: #000; box-shadow: 0 0 0 1px #1b1c23; }
+  .foot { border-top: 1px solid #1b1c23; margin-top: 8px; padding-top: 20px; color: #6e707e; font-size: 12.5px; }
+  .foot p { margin: 0 0 8px; max-width: 74ch; }
+  .foot b { color: #a9abb6; font-weight: 500; }
+
+  body.only { background: #000; }
+  body.only .sheet { padding: 0; max-width: none; }
+  body.only .sheet-head, body.only .foot { display: none; }
+  body.only .dir { display: none; margin: 0; }
+  body.only .dir.on { display: block; }
+  body.only .dir-head, body.only .dir p { display: none; }
+  body.only canvas { box-shadow: none; }
+  body.only.big canvas { width: 1920px; height: 1088px; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="sheet-head">
+    <h1>vitaFTPShell — SERVER, direction A states</h1>
+    <p>Direction A is chosen: a status panel with the address and controls, plus a dedicated warning panel and a client panel. This sheet develops the server states. The no-network error uses the same error line as the bind failure and is noted below.</p>
+    <div class="spec">
+      <span><b>960 × 544</b></span>
+      <span><b>status</b> 552 × 352</span>
+      <span><b>warning</b> 360 × 200</span>
+      <span><b>client</b> 360 × 140</span>
+      <span><b>type</b> 5×7 face, 1.5 / 2 / 3 / 5 px</span>
+    </div>
+  </div>
+
+  <section class="dir" data-scene="s1">
+    <div class="dir-head"><span class="dir-key">1</span><span class="dir-name">OFF at launch</span></div>
+    <p>The launch state. The warning is visible before the first start; the start slab is focused; the address is dim because nothing is listening.</p>
+    <canvas id="s1" aria-label="SERVER off at launch"></canvas>
+  </section>
+
+  <section class="dir" data-scene="s2">
+    <div class="dir-head"><span class="dir-key">2</span><span class="dir-name">Starting</span></div>
+    <p>The listener is binding. A cancel slab replaces start; the address stays dim until the bind completes.</p>
+    <canvas id="s2" aria-label="SERVER starting the listener"></canvas>
+  </section>
+
+  <section class="dir" data-scene="s3">
+    <div class="dir-head"><span class="dir-key">3</span><span class="dir-name">ON, no client</span></div>
+    <p>Running with no client. The stop slab is focused, the address is live, and the client panel says no client.</p>
+    <canvas id="s3" aria-label="SERVER running with no client"></canvas>
+  </section>
+
+  <section class="dir" data-scene="s4">
+    <div class="dir-head"><span class="dir-key">4</span><span class="dir-name">ON, client browsing</span></div>
+    <p>One client browsing <b>/UX0:/DATA/</b>. The client panel names the operation and path; the dock counts one client.</p>
+    <canvas id="s4" aria-label="SERVER running with one client browsing"></canvas>
+  </section>
+
+  <section class="dir" data-scene="s5">
+    <div class="dir-head"><span class="dir-key">5</span><span class="dir-name">ON, client transferring</span></div>
+    <p>One client uploading <b>FILE.VPK</b>. The client panel carries the operation, path, and bytes; the dock becomes the transfer bar. Stopping now opens CONFIRM.</p>
+    <canvas id="s5" aria-label="SERVER running with one client uploading"></canvas>
+  </section>
+
+  <section class="dir" data-scene="s6">
+    <div class="dir-head"><span class="dir-key">6</span><span class="dir-name">Bind failure</span></div>
+    <p>A bind failure. The port is focused for editing, the error names the port, and the server stays OFF. No-network uses the same line with <b>NO NETWORK - CONNECT TO WI-FI</b>.</p>
+    <canvas id="s6" aria-label="SERVER bind failure with the port focused"></canvas>
+  </section>
+
+  <div class="foot">
+    <p><b>Settled in this pass:</b> the status panel with the big state, address, port, clients, access, and the start/stop/cancel slab; the warning panel carries the risk and the launch/stop lifecycle; the client panel carries identity, operation, path, and bytes; the dock shows the server status or the active server transfer; the error line sits under the address, and the port takes focus on a bind failure.</p>
+    <p><b>Still open:</b> the exact no-network copy; what the UI shows when a second client is refused (the PC gets a busy reply, the Vita still shows one client); the port-entry overlay; and the stop-during-write confirmation, which belongs to CONFIRM.</p>
+    <p><b>Not shown:</b> CONFIRM, text entry, the second client’s busy reply, and the session log.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  const COL = {
+    field: '#000000', panel: '#0D0E12', hair: '#1C1D24', dim: '#6E707E',
+    white: '#EDEDF0', yellow: '#FCEE0A', cyan: '#2AD8E8', cyanDim: '#19818B',
+    green: '#3BE07A', greenDim: '#2FA85C', red: '#FF2E4D'
+  };
+  const PX = { micro: 1.5, label: 2, value: 3, hero: 4, primary: 5 };
+  const W = 960, H = 544, M = 18, GAP = 12;
+
+  const GLYPHS = {
+    A: [0x0E,0x11,0x11,0x1F,0x11,0x11,0x11],
+    B: [0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E],
+    C: [0x0E,0x11,0x10,0x10,0x10,0x11,0x0E],
+    D: [0x1E,0x11,0x11,0x11,0x11,0x11,0x1E],
+    E: [0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F],
+    F: [0x1F,0x10,0x10,0x1E,0x10,0x10,0x10],
+    G: [0x0E,0x11,0x10,0x17,0x11,0x11,0x0E],
+    H: [0x11,0x11,0x11,0x1F,0x11,0x11,0x11],
+    I: [0x1F,0x04,0x04,0x04,0x04,0x04,0x1F],
+    J: [0x07,0x02,0x02,0x02,0x02,0x12,0x0C],
+    K: [0x11,0x12,0x14,0x18,0x14,0x12,0x11],
+    L: [0x10,0x10,0x10,0x10,0x10,0x10,0x1F],
+    M: [0x11,0x1B,0x15,0x15,0x11,0x11,0x11],
+    N: [0x11,0x19,0x15,0x13,0x11,0x11,0x11],
+    O: [0x0E,0x11,0x11,0x11,0x11,0x11,0x0E],
+    P: [0x1E,0x11,0x11,0x1E,0x10,0x10,0x10],
+    Q: [0x0E,0x11,0x11,0x11,0x15,0x12,0x0D],
+    R: [0x1E,0x11,0x11,0x1E,0x14,0x12,0x11],
+    S: [0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E],
+    T: [0x1F,0x04,0x04,0x04,0x04,0x04,0x04],
+    U: [0x11,0x11,0x11,0x11,0x11,0x11,0x0E],
+    V: [0x11,0x11,0x11,0x11,0x11,0x0A,0x04],
+    W: [0x11,0x11,0x11,0x15,0x15,0x1B,0x11],
+    X: [0x11,0x11,0x0A,0x04,0x0A,0x11,0x11],
+    Y: [0x11,0x11,0x0A,0x04,0x04,0x04,0x04],
+    Z: [0x1F,0x01,0x02,0x04,0x08,0x10,0x1F],
+    '0': [0x0E,0x13,0x15,0x15,0x15,0x19,0x0E],
+    '1': [0x04,0x0C,0x04,0x04,0x04,0x04,0x0E],
+    '2': [0x0E,0x11,0x01,0x06,0x08,0x10,0x1F],
+    '3': [0x1F,0x02,0x04,0x02,0x01,0x11,0x0E],
+    '4': [0x02,0x06,0x0A,0x12,0x1F,0x02,0x02],
+    '5': [0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E],
+    '6': [0x06,0x08,0x10,0x1E,0x11,0x11,0x0E],
+    '7': [0x1F,0x01,0x02,0x04,0x08,0x08,0x08],
+    '8': [0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E],
+    '9': [0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C],
+    ' ': [0,0,0,0,0,0,0],
+    ':': [0x00,0x04,0x04,0x00,0x04,0x04,0x00],
+    '.': [0x00,0x00,0x00,0x00,0x00,0x04,0x04],
+    '%': [0x19,0x1A,0x02,0x04,0x08,0x0B,0x13],
+    '/': [0x01,0x02,0x02,0x04,0x08,0x08,0x10],
+    '-': [0x00,0x00,0x00,0x1F,0x00,0x00,0x00],
+    '+': [0x00,0x04,0x04,0x1F,0x04,0x04,0x00],
+    ',': [0x00,0x00,0x00,0x00,0x0C,0x04,0x08],
+    '&': [0x0C,0x12,0x14,0x08,0x15,0x12,0x0D],
+    '[': [0x0E,0x08,0x08,0x08,0x08,0x08,0x0E],
+    ']': [0x0E,0x02,0x02,0x02,0x02,0x02,0x0E],
+    '<': [0x02,0x04,0x08,0x10,0x08,0x04,0x02],
+    '>': [0x08,0x04,0x02,0x01,0x02,0x04,0x08],
+    '_': [0,0,0,0,0,0,0x1F],
+    '|': [0x04,0x04,0x04,0x04,0x04,0x04,0x04]
+  };
+
+  function text(g, s, x, y, px, color, track = 0) {
+    g.fillStyle = color;
+    let cx = x;
+    for (const raw of String(s).toUpperCase()) {
+      const rows = GLYPHS[raw];
+      if (rows) {
+        for (let r = 0; r < 7; r++) {
+          const bits = rows[r];
+          if (!bits) continue;
+          let c = 0;
+          while (c < 5) {
+            if (!(bits & (1 << (4 - c)))) { c++; continue; }
+            const st = c;
+            while (c < 5 && (bits & (1 << (4 - c)))) c++;
+            g.fillRect(cx + st * px, y + r * px, (c - st) * px, px);
+          }
+        }
+      }
+      cx += 6 * px + track;
+    }
+    return cx;
+  }
+
+  function tw(s, px, track = 0) {
+    const n = String(s).length;
+    if (!n) return 0;
+    return n * (6 * px + track) - px - track;
+  }
+
+  function right(g, s, xr, y, px, color, track = 0) {
+    text(g, s, xr - tw(s, px, track), y, px, color, track);
+  }
+
+  function hair(g, x, y, w, color = COL.hair, h = 1) {
+    g.fillStyle = color;
+    g.fillRect(x, y, w, h);
+  }
+
+  function panelPath(g, x, y, w, h, c, cut) {
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w - c, y);
+    g.lineTo(x + w, y + c);
+    g.lineTo(x + w, y + h);
+    if (cut) {
+      g.lineTo(x + c, y + h);
+      g.lineTo(x, y + h - c);
+    } else {
+      g.lineTo(x, y + h);
+    }
+    g.closePath();
+  }
+
+  function panel(g, x, y, w, h, accent, opts = {}) {
+    const c = opts.hero ? 28 : 14;
+    panelPath(g, x, y, w, h, c, !!opts.cut);
+    g.fillStyle = COL.panel;
+    g.fill();
+    g.save();
+    g.globalAlpha = 0.45;
+    g.strokeStyle = accent;
+    g.lineWidth = 1;
+    g.stroke();
+    g.restore();
+  }
+
+  function bracket(g, x, y, dx, dy, accent) {
+    g.fillStyle = accent;
+    g.fillRect(dx > 0 ? x : x - 16, dy > 0 ? y : y - 2, 16, 2);
+    g.fillRect(dx > 0 ? x : x - 2, dy > 0 ? y : y - 16, 2, 16);
+  }
+
+  function wash(g, x, y, w, h, a = 0.06) {
+    g.fillStyle = `rgba(237,237,240,${a})`;
+    g.fillRect(x, y, w, h);
+  }
+
+  const SHAPES = {
+    x: [[0,0],[4,0],[1,1],[3,1],[2,2],[1,3],[3,3],[0,4],[4,4]],
+    o: [[1,0],[2,0],[3,0],[0,1],[4,1],[0,2],[4,2],[0,3],[4,3],[1,4],[2,4],[3,4]],
+    square: [[0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[4,1],[0,2],[4,2],[0,3],[4,3],[0,4],[1,4],[2,4],[3,4],[4,4]],
+    triangle: [[2,0],[1,1],[3,1],[0,2],[4,2],[0,3],[4,3],[0,4],[1,4],[2,4],[3,4],[4,4]]
+  };
+
+  function keycap(g, x, y, shape) {
+    const w = 18, h = 16, c = 3;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w - c, y);
+    g.lineTo(x + w, y + c);
+    g.lineTo(x + w, y + h);
+    g.lineTo(x, y + h);
+    g.closePath();
+    g.strokeStyle = COL.white;
+    g.lineWidth = 1;
+    g.stroke();
+
+    const cx = x + w / 2, cy = y + h / 2;
+    g.strokeStyle = COL.white;
+    g.lineWidth = 1.5;
+    g.lineCap = 'butt';
+    g.beginPath();
+    if (shape === 'x') {
+      g.moveTo(cx - 3.5, cy - 3.5); g.lineTo(cx + 3.5, cy + 3.5);
+      g.moveTo(cx + 3.5, cy - 3.5); g.lineTo(cx - 3.5, cy + 3.5);
+    } else if (shape === 'o') {
+      g.arc(cx, cy, 4.2, 0, Math.PI * 2);
+    } else if (shape === 'square') {
+      g.rect(cx - 3.5, cy - 3.5, 7, 7);
+    } else {
+      g.moveTo(cx, cy - 4.2);
+      g.lineTo(cx + 4.2, cy + 3.5);
+      g.lineTo(cx - 4.2, cy + 3.5);
+      g.closePath();
+    }
+    g.stroke();
+  }
+
+  function textRects(s, x, y, px, track = 0) {
+    const out = [];
+    let cx = x;
+    for (const raw of String(s).toUpperCase()) {
+      const rows = GLYPHS[raw];
+      if (rows) {
+        for (let r = 0; r < 7; r++) {
+          const bits = rows[r];
+          if (!bits) continue;
+          let c = 0;
+          while (c < 5) {
+            if (!(bits & (1 << (4 - c)))) { c++; continue; }
+            const st = c;
+            while (c < 5 && (bits & (1 << (4 - c)))) c++;
+            out.push([cx + st * px, y + r * px, (c - st) * px, px]);
+          }
+        }
+      }
+      cx += 6 * px + track;
+    }
+    return out;
+  }
+
+  function blit(g, rects, dx, dy, color, alpha = 1, additive = false) {
+    g.save();
+    g.globalAlpha = alpha;
+    if (additive) g.globalCompositeOperation = 'lighter';
+    g.fillStyle = color;
+    for (const [x, y, w, h] of rects) g.fillRect(x + dx, y + dy, w, h);
+    g.restore();
+  }
+
+  // ---------- SERVER A: shared chrome ----------
+
+  function fit(s, px, maxW) {
+    if (tw(s, px) <= maxW) return s;
+    let out = s;
+    while (out.length > 1 && tw(out + '..', px) > maxW) out = out.slice(0, -1);
+    return out + '..';
+  }
+
+  function drawServerHeader(g, s) {
+    const wm = textRects('VITAFTPSHELL', M, 8, PX.hero);
+    for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) {
+      blit(g, wm, dx, dy, COL.yellow, 0.10, true);
+    }
+    blit(g, wm, -2, 0, COL.yellow, 0.45);
+    blit(g, wm, 2, 0, COL.cyan, 0.35);
+    blit(g, wm, 0, 0, COL.yellow);
+
+    text(g, 'SERVER', M, 42, PX.label, COL.white, 1);
+    right(g, 'NOT CONNECTED', 942, 25.5, PX.micro, COL.dim);
+
+    if (s.state === 'ON') {
+      const count = `${s.clients} CLIENT${s.clients === 1 ? '' : 'S'}`;
+      right(g, count, 942, 45.5, PX.micro, COL.white);
+      const onX = 942 - tw(count, PX.micro) - 12 - tw('ON', PX.micro);
+      text(g, 'ON', onX, 45.5, PX.micro, COL.green);
+      right(g, 'SERVER', onX - 12, 45.5, PX.micro, COL.dim);
+    } else if (s.state === 'STARTING') {
+      const startX = 942 - tw('STARTING', PX.micro);
+      text(g, 'STARTING', startX, 45.5, PX.micro, COL.yellow);
+      right(g, 'SERVER', startX - 12, 45.5, PX.micro, COL.dim);
+    } else {
+      right(g, 'OFF', 942, 45.5, PX.micro, COL.dim);
+      right(g, 'SERVER', 942 - tw('OFF', PX.micro) - 12, 45.5, PX.micro, COL.dim);
+    }
+  }
+
+  function drawServerLegend(g, mode) {
+    let x = M;
+    const cap = (shape, label) => {
+      keycap(g, x, 510, shape);
+      x += 22;
+      text(g, label, x, 512, PX.micro, COL.dim);
+      x += tw(label, PX.micro) + 18;
+    };
+    const first = { start: 'START SERVER', cancel: 'CANCEL', stop: 'STOP SERVER', editport: 'EDIT PORT' }[mode];
+    const second = mode === 'editport' ? 'START' : 'PORT';
+    cap('x', first);
+    cap('o', 'CLOSE');
+    text(g, 'UP/DOWN', x, 512, PX.micro, COL.dim);
+    x += tw('UP/DOWN', PX.micro) + 6;
+    text(g, second, x, 512, PX.micro, COL.dim);
+  }
+
+  function slab(g, x, y, w, h, label, primary, focused) {
+    const fill = primary ? COL.yellow : '#14151A';
+    const textColor = primary ? COL.field : COL.white;
+    if (focused) {
+      g.strokeStyle = COL.white;
+      g.lineWidth = 2;
+      g.strokeRect(x - 4, y - 4, w + 8, h + 8);
+    }
+    g.fillStyle = fill;
+    g.fillRect(x, y, w, h);
+    g.fillStyle = primary ? '#FFF27A' : COL.hair;
+    g.fillRect(x, y, w, 1);
+    g.fillStyle = primary ? '#C9BD08' : COL.field;
+    g.fillRect(x, y + h - 3, w, 3);
+    const twLabel = tw(label, PX.label, 1);
+    text(g, label, x + (w - twLabel) / 2, y + (h - 14) / 2, PX.label, textColor, 1);
+  }
+
+  function drawReadout(g, label, value, x, y, w, focused = false) {
+    if (focused) {
+      wash(g, 19, y - 7, 520, 30, 0.04);
+      g.fillStyle = COL.white;
+      g.fillRect(26, y - 7, 2, 30);
+    }
+    text(g, label, x, y, PX.label, focused ? COL.white : COL.dim);
+    right(g, value, x + w, y, PX.value, COL.white);
+  }
+
+  function drawStatus(g, s) {
+    panel(g, 18, 76, 552, 352, COL.cyan);
+    text(g, 'STATUS', 32, 84, PX.label, COL.dim, 2);
+    text(g, s.state, 32, 108, PX.primary, s.stateColor);
+
+    text(g, 'FTP://', 32, 166.5, PX.micro, COL.dim);
+    const ipX = 32 + tw('FTP://', PX.micro) + 8;
+    text(g, s.ip, ipX, 156, PX.value, s.live ? COL.cyan : COL.dim);
+    text(g, ':1337', ipX + tw(s.ip, PX.value) + 6, 166.5, PX.micro, s.live ? COL.cyanDim : COL.dim);
+
+    if (s.error) text(g, s.error, 32, 190, PX.micro, COL.yellow);
+
+    drawReadout(g, 'PORT', '1337', 32, 214, 506, s.portFocus);
+    drawReadout(g, 'CLIENTS', String(s.clients), 32, 244, 506);
+    drawReadout(g, 'ACCESS', 'READ-WRITE', 32, 274, 506);
+    slab(g, 32, 340, 488, 40, s.slab.label, s.slab.primary, s.slabFocus);
+  }
+
+  function drawWarningA(g) {
+    panel(g, 582, 76, 360, 200, COL.yellow);
+    text(g, 'WARNING', 596, 84, PX.label, COL.yellow, 2);
+    const lines = [
+      ['ANONYMOUS CLIENTS CAN READ', COL.yellow],
+      ['AND WRITE UX0:, UR0:, AND UMA0:.', COL.yellow],
+      ['UX0:/DATA/VITAFTPSHELL IS EXCLUDED.', COL.dim],
+      ['UR0:TAI AND UX0:TAI ARE READ-ONLY.', COL.dim],
+      ['UR0:TAI/BOOT_CONFIG.TXT IS DENIED.', COL.dim],
+      ['THE SERVER IS OFF AT LAUNCH.', COL.dim],
+      ['STOPPING CLOSES THE LISTENER', COL.dim],
+      ['AND THE ACTIVE SESSION.', COL.dim]
+    ];
+    lines.forEach(([s, c], i) => text(g, s, 596, 108 + i * 16, PX.micro, c));
+  }
+
+  function drawClientA(g, kind) {
+    panel(g, 582, 288, 360, 140, COL.cyan);
+    text(g, 'CLIENT', 596, 296, PX.label, COL.dim, 2);
+    if (kind === 'none') {
+      text(g, 'NO CLIENT', 596, 320, PX.label, COL.dim);
+      text(g, 'ONE CLIENT AT A TIME', 596, 342, PX.micro, COL.dim);
+      return;
+    }
+    right(g, 'CONNECTED', 928, 299.5, PX.micro, COL.green);
+    text(g, '192.168.1.10', 596, 320, PX.label, COL.white);
+    const op = kind === 'transfer' ? 'UPLOAD' : 'BROWSING';
+    const path = kind === 'transfer' ? '/UX0:/DATA/FILE.VPK' : '/UX0:/DATA/';
+    text(g, op, 596, 342, PX.label, COL.white);
+    text(g, path, 596 + tw(op, PX.label) + 10, 345.5, PX.micro, COL.cyan);
+    text(g, kind === 'transfer' ? '1.2 MB OF 29.5 MB' : 'NO TRANSFER', 596, 362, PX.micro, kind === 'transfer' ? COL.white : COL.dim);
+    text(g, 'ONE CLIENT AT A TIME', 596, 382, PX.micro, COL.dim);
+  }
+
+  function drawDock(g, d) {
+    panel(g, 18, 440, 924, 64, COL.cyan);
+    text(g, d.state, 32, 450, PX.label, d.stateColor, 2);
+    let x = 32 + tw(d.state, PX.label, 2) + 16;
+    if (d.subject) {
+      text(g, d.subject, x, 450, PX.label, COL.white);
+      x += tw(d.subject, PX.label);
+      if (d.path) text(g, d.path, x + 10, 453.5, PX.micro, COL.cyan);
+    }
+    let rx = 928;
+    for (const part of [...(d.right || [])].reverse()) {
+      right(g, part.s, rx, 453, PX.micro, part.c);
+      rx -= tw(part.s, PX.micro) + 12;
+    }
+    if (d.progress !== null && d.progress !== undefined) {
+      g.fillStyle = COL.hair;
+      g.fillRect(32, 473, 896, 4);
+      g.fillStyle = d.barColor;
+      g.fillRect(32, 473, Math.round(896 * d.progress), 4);
+    }
+    text(g, d.left, 32, 483, PX.micro, d.leftColor || COL.dim);
+    if (d.left2) text(g, d.left2, 32 + tw(d.left, PX.micro) + 24, 483, PX.micro, COL.white);
+    if (d.rightText) right(g, d.rightText, 928, 483, PX.micro, d.rightColor || COL.dim);
+  }
+
+  function drawState(g, s) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawServerHeader(g, s);
+    drawStatus(g, s);
+    drawWarningA(g);
+    drawClientA(g, s.client);
+    drawDock(g, s.dock);
+    drawServerLegend(g, s.legend);
+  }
+
+  // ---------- states ----------
+
+  const OFF = {
+    state: 'OFF', stateColor: COL.dim, ip: '192.168.1.42', live: false,
+    error: null, clients: 0, portFocus: false, slabFocus: true,
+    slab: { label: 'START SERVER', primary: true },
+    client: 'none',
+    dock: { state: 'IDLE', stateColor: COL.dim, subject: 'SERVER OFF', right: [{ s: 'PORT 1337', c: COL.dim }], progress: null, left: 'X TO START' },
+    legend: 'start'
+  };
+
+  const STARTING = {
+    state: 'STARTING', stateColor: COL.yellow, ip: '192.168.1.42', live: false,
+    error: null, clients: 0, portFocus: false, slabFocus: true,
+    slab: { label: 'CANCEL', primary: false },
+    client: 'none',
+    dock: { state: 'STARTING', stateColor: COL.yellow, subject: 'SERVER', right: [{ s: 'PORT 1337', c: COL.dim }], progress: null, left: 'X TO CANCEL' },
+    legend: 'cancel'
+  };
+
+  const ON0 = {
+    state: 'ON', stateColor: COL.green, ip: '192.168.1.42', live: true,
+    error: null, clients: 0, portFocus: false, slabFocus: true,
+    slab: { label: 'STOP SERVER', primary: false },
+    client: 'none',
+    dock: { state: 'RUNNING', stateColor: COL.green, subject: '0 CLIENTS', right: [{ s: 'PORT 1337', c: COL.dim }], progress: null, left: 'X TO STOP' },
+    legend: 'stop'
+  };
+
+  const ON_BROWSE = {
+    state: 'ON', stateColor: COL.green, ip: '192.168.1.42', live: true,
+    error: null, clients: 1, portFocus: false, slabFocus: true,
+    slab: { label: 'STOP SERVER', primary: false },
+    client: 'browse',
+    dock: { state: 'RUNNING', stateColor: COL.green, subject: '1 CLIENT', right: [{ s: 'PORT 1337', c: COL.dim }], progress: null, left: 'X TO STOP' },
+    legend: 'stop'
+  };
+
+  const ON_TRANSFER = {
+    state: 'ON', stateColor: COL.green, ip: '192.168.1.42', live: true,
+    error: null, clients: 1, portFocus: false, slabFocus: true,
+    slab: { label: 'STOP SERVER', primary: false },
+    client: 'transfer',
+    dock: { state: 'UPLOAD', stateColor: COL.yellow, subject: 'FILE.VPK', right: [{ s: '1 CLIENT', c: COL.dim }], progress: 0.04, barColor: COL.yellow, left: '1.2 MB OF 29.5 MB', left2: '4%', rightText: '1.8 MB/S', rightColor: COL.white },
+    legend: 'stop'
+  };
+
+  const BIND_ERROR = {
+    state: 'OFF', stateColor: COL.dim, ip: '192.168.1.42', live: false,
+    error: 'PORT 1337 IS IN USE - TRY ANOTHER PORT', clients: 0, portFocus: true, slabFocus: false,
+    slab: { label: 'START SERVER', primary: true },
+    client: 'none',
+    dock: { state: 'IDLE', stateColor: COL.dim, subject: 'SERVER OFF', right: [{ s: 'PORT 1337', c: COL.dim }], progress: null, left: 'START FAILED', leftColor: COL.yellow },
+    legend: 'editport'
+  };
+
+  const STATES = { s1: OFF, s2: STARTING, s3: ON0, s4: ON_BROWSE, s5: ON_TRANSFER, s6: BIND_ERROR };
+
+  function render(id) {
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+    const scale = 2;
+    canvas.width = W * scale;
+    canvas.height = H * scale;
+    const g = canvas.getContext('2d');
+    g.scale(scale, scale);
+    g.imageSmoothingEnabled = false;
+    drawState(g, STATES[id]);
+  }
+
+  for (const id of Object.keys(STATES)) render(id);
+
+  const params = new URLSearchParams(location.search);
+  const only = params.get('only');
+  if (only && STATES[only]) {
+    document.body.classList.add('only');
+    if (params.get('big')) document.body.classList.add('big');
+    document.querySelectorAll('.dir').forEach(el => {
+      el.classList.toggle('on', el.dataset.scene === only);
+    });
+  }
+
+})();
+</script>
+</body>
+</html>

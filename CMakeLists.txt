@@ -1,0 +1,73 @@
+cmake_minimum_required(VERSION 3.16)
+
+# The Vita toolchain file must be selected before project().
+# build.sh sets VITASDK; CMake can also be invoked manually with
+# -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake.
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  if(DEFINED ENV{VITASDK})
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VITASDK}/share/vita.toolchain.cmake"
+        CACHE PATH "Vita toolchain file")
+  else()
+    message(FATAL_ERROR "VITASDK is not set. Run ./build.sh or export VITASDK.")
+  endif()
+endif()
+
+project(vitaftpshell C)
+
+# Provides vita_create_self() and vita_create_vpk().
+include("${VITASDK}/share/vita.cmake" REQUIRED)
+
+set(VITA_APP_NAME "vitaFTPShell")
+set(VITA_TITLEID  "VFTPSHELL")   # Exactly 9 uppercase characters.
+set(VITA_VERSION  "01.00")       # Must match ##.##; also becomes APP_VER.
+
+# Monotonic build number, supplied by build.sh. It goes in the artifact name so
+# successive builds are distinguishable on the console and in ux0:data; it is
+# deliberately NOT part of APP_VER, which must stay ##.## (KTD17).
+set(VITAFTPSHELL_BUILD "0" CACHE STRING "Build number, set by build.sh")
+if(VITAFTPSHELL_BUILD STREQUAL "0")
+  message(FATAL_ERROR
+    "VITAFTPSHELL_BUILD is 0. Run ./build.sh so BUILD_NUMBER supplies the "
+    "build; a manual CMake build must pass -DVITAFTPSHELL_BUILD=<n>.")
+endif()
+
+set(VITAFTPSHELL_VPK
+    "vitaftpshell-v${VITA_VERSION}-b${VITAFTPSHELL_BUILD}.vpk")
+
+# The 2026.08 host tool leaves VERSION/CONTENT_ID empty unless told otherwise.
+set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -s VERSION=${VITA_VERSION}")
+set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -s CONTENT_ID=HB0001-${VITA_TITLEID}_00-0000000000000000")
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
+
+# Reserve 64 KiB of headroom before the RW segment. Without this, some code
+# sizes make vita-elf-create fail with "segment 1 overlaps".
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--defsym=__sce_headroom=0x10000")
+
+# Phase 1 is the build shape only: no adapters or runtime exist yet, so there is
+# nothing to link beyond libc. libvita2d and the SDK stubs arrive with U3/U12,
+# when source actually calls them; linking them now would be an unused link.
+add_executable(vitaftpshell
+  src/main.c
+)
+
+target_include_directories(vitaftpshell PRIVATE src)
+
+# One UNSAFE eboot (D32). There is no safe variant: the server and the local
+# pane need ur0: and uma0:, and the safe authid refuses them.
+vita_create_self(vitaftpshell.self vitaftpshell UNSAFE)
+
+# Placeholder art. U14 replaces icon, background, and startup image with the
+# settled LiveArea art.
+set(VITAFTPSHELL_VPK_FILES
+  FILE sce_sys/icon0.png sce_sys/icon0.png
+  FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
+  FILE sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
+  FILE sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
+)
+
+vita_create_vpk(${VITAFTPSHELL_VPK} ${VITA_TITLEID} vitaftpshell.self
+  VERSION ${VITA_VERSION}
+  NAME ${VITA_APP_NAME}
+  ${VITAFTPSHELL_VPK_FILES}
+)

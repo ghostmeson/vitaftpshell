@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitaFTPShell — WORKSPACE directions</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #060709;
+    color: #b9bbc6;
+    font: 13.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1024px; margin: 0 auto; padding: 44px 32px 80px; }
+  .sheet-head { border-bottom: 1px solid #1b1c23; padding-bottom: 22px; margin-bottom: 40px; }
+  .sheet-head h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; color: #ededf0; letter-spacing: .005em; }
+  .sheet-head p { margin: 0; color: #838592; max-width: 68ch; }
+  .spec { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 16px; color: #6e707e; font-size: 12px; }
+  .spec b { color: #a9abb6; font-weight: 500; }
+  .dir { margin: 0 0 60px; }
+  .dir-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .dir-key {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border: 1px solid #2b2d36; color: #ededf0;
+    font-size: 11px; font-weight: 600;
+  }
+  .dir-name { color: #ededf0; font-weight: 600; font-size: 14px; }
+  .dir p { margin: 0 0 16px; color: #838592; max-width: 70ch; }
+  .dir p em { color: #b9bbc6; font-style: normal; }
+  canvas { display: block; width: 960px; height: 544px; background: #000; box-shadow: 0 0 0 1px #1b1c23; }
+  .foot { border-top: 1px solid #1b1c23; margin-top: 8px; padding-top: 20px; color: #6e707e; font-size: 12.5px; }
+  .foot p { margin: 0 0 8px; max-width: 74ch; }
+  .foot b { color: #a9abb6; font-weight: 500; }
+
+  body.only { background: #000; }
+  body.only .sheet { padding: 0; max-width: none; }
+  body.only .sheet-head, body.only .foot { display: none; }
+  body.only .dir { display: none; margin: 0; }
+  body.only .dir.on { display: block; }
+  body.only .dir-head, body.only .dir p { display: none; }
+  body.only canvas { box-shadow: none; }
+  body.only.big canvas { width: 1920px; height: 1088px; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="sheet-head">
+    <h1>vitaFTPShell — WORKSPACE directions</h1>
+    <p>Three compositions for the one screen the product is built around. Same content, same type, same palette in all three; only the structure of the two panes and the transfer dock changes. Geometry and copy are provisional.</p>
+    <div class="spec">
+      <span><b>960 × 544</b></span>
+      <span><b>C_FIELD</b> #000000</span>
+      <span><b>C_PANEL</b> #0D0E12</span>
+      <span><b>type</b> 5×7 face, 1.5 / 2 / 4 px</span>
+      <span><b>spacing</b> 4 / 8 / 12 / 16 / 24 / 32</span>
+    </div>
+  </div>
+
+  <section class="dir" data-scene="a">
+    <div class="dir-head"><span class="dir-key">A</span><span class="dir-name">Two ledgers</span></div>
+    <p>Two equal panels, one per side. The most literal reading of “two live panes”: both trees stay fully visible, comparison is free, and each side keeps its own header. <em>Cost:</em> the most chrome, and the active side needs an edge to stand out.</p>
+    <canvas id="a" aria-label="Direction A: two equal panes with a full-width transfer dock"></canvas>
+  </section>
+
+  <section class="dir" data-scene="b">
+    <div class="dir-head"><span class="dir-key">B</span><span class="dir-name">One instrument</span></div>
+    <p>One hero frame around both lists, split by a seam, with the transfer dock inside the same frame. The workspace reads as a single console surface. <em>Cost:</em> the two sides feel less independent, and the frame is a lot of outline.</p>
+    <canvas id="b" aria-label="Direction B: one hero frame containing both panes and the transfer dock"></canvas>
+  </section>
+
+  <section class="dir" data-scene="c">
+    <div class="dir-head"><span class="dir-key">C</span><span class="dir-name">Focus</span></div>
+    <p>One expanded list; the other collapses to a context strip that still names its path and marks. Widest names and the strongest single-task focus. <em>Cost:</em> you stop seeing the destination tree while you browse, which is a real cost for a transfer tool.</p>
+    <canvas id="c" aria-label="Direction C: one expanded pane with the other collapsed to a context strip"></canvas>
+  </section>
+
+  <div class="foot">
+    <p><b>State shown:</b> remote active, two items marked, one of two downloading at 42%, server ON with one idle client.</p>
+    <p><b>Not shown yet:</b> idle dock, finished and failed dock, SITES, SITE EDITOR, SERVER, ACTIONS, CONFIRM, text entry, loading and empty states.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  const COL = {
+    field: '#000000', panel: '#0D0E12', hair: '#1C1D24', dim: '#6E707E',
+    white: '#EDEDF0', yellow: '#FCEE0A', cyan: '#2AD8E8', cyanDim: '#19818B',
+    green: '#3BE07A', greenDim: '#2FA85C', red: '#FF2E4D'
+  };
+  const PX = { micro: 1.5, label: 2, value: 3, hero: 4, primary: 5 };
+  const W = 960, H = 544, M = 18, GAP = 12;
+
+  const GLYPHS = {
+    A: [0x0E,0x11,0x11,0x1F,0x11,0x11,0x11],
+    B: [0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E],
+    C: [0x0E,0x11,0x10,0x10,0x10,0x11,0x0E],
+    D: [0x1E,0x11,0x11,0x11,0x11,0x11,0x1E],
+    E: [0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F],
+    F: [0x1F,0x10,0x10,0x1E,0x10,0x10,0x10],
+    G: [0x0E,0x11,0x10,0x17,0x11,0x11,0x0E],
+    H: [0x11,0x11,0x11,0x1F,0x11,0x11,0x11],
+    I: [0x1F,0x04,0x04,0x04,0x04,0x04,0x1F],
+    J: [0x07,0x02,0x02,0x02,0x02,0x12,0x0C],
+    K: [0x11,0x12,0x14,0x18,0x14,0x12,0x11],
+    L: [0x10,0x10,0x10,0x10,0x10,0x10,0x1F],
+    M: [0x11,0x1B,0x15,0x15,0x11,0x11,0x11],
+    N: [0x11,0x19,0x15,0x13,0x11,0x11,0x11],
+    O: [0x0E,0x11,0x11,0x11,0x11,0x11,0x0E],
+    P: [0x1E,0x11,0x11,0x1E,0x10,0x10,0x10],
+    Q: [0x0E,0x11,0x11,0x11,0x15,0x12,0x0D],
+    R: [0x1E,0x11,0x11,0x1E,0x14,0x12,0x11],
+    S: [0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E],
+    T: [0x1F,0x04,0x04,0x04,0x04,0x04,0x04],
+    U: [0x11,0x11,0x11,0x11,0x11,0x11,0x0E],
+    V: [0x11,0x11,0x11,0x11,0x11,0x0A,0x04],
+    W: [0x11,0x11,0x11,0x15,0x15,0x1B,0x11],
+    X: [0x11,0x11,0x0A,0x04,0x0A,0x11,0x11],
+    Y: [0x11,0x11,0x0A,0x04,0x04,0x04,0x04],
+    Z: [0x1F,0x01,0x02,0x04,0x08,0x10,0x1F],
+    '0': [0x0E,0x13,0x15,0x15,0x15,0x19,0x0E],
+    '1': [0x04,0x0C,0x04,0x04,0x04,0x04,0x0E],
+    '2': [0x0E,0x11,0x01,0x06,0x08,0x10,0x1F],
+    '3': [0x1F,0x02,0x04,0x02,0x01,0x11,0x0E],
+    '4': [0x02,0x06,0x0A,0x12,0x1F,0x02,0x02],
+    '5': [0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E],
+    '6': [0x06,0x08,0x10,0x1E,0x11,0x11,0x0E],
+    '7': [0x1F,0x01,0x02,0x04,0x08,0x08,0x08],
+    '8': [0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E],
+    '9': [0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C],
+    ' ': [0,0,0,0,0,0,0],
+    ':': [0x00,0x04,0x04,0x00,0x04,0x04,0x00],
+    '.': [0x00,0x00,0x00,0x00,0x00,0x04,0x04],
+    '%': [0x19,0x1A,0x02,0x04,0x08,0x0B,0x13],
+    '/': [0x01,0x02,0x02,0x04,0x08,0x08,0x10],
+    '-': [0x00,0x00,0x00,0x1F,0x00,0x00,0x00],
+    '+': [0x00,0x04,0x04,0x1F,0x04,0x04,0x00],
+    ',': [0x00,0x00,0x00,0x00,0x0C,0x04,0x08],
+    '&': [0x0C,0x12,0x14,0x08,0x15,0x12,0x0D],
+    '[': [0x0E,0x08,0x08,0x08,0x08,0x08,0x0E],
+    ']': [0x0E,0x02,0x02,0x02,0x02,0x02,0x0E],
+    '<': [0x02,0x04,0x08,0x10,0x08,0x04,0x02],
+    '>': [0x08,0x04,0x02,0x01,0x02,0x04,0x08],
+    '_': [0,0,0,0,0,0,0x1F],
+    '|': [0x04,0x04,0x04,0x04,0x04,0x04,0x04]
+  };
+
+  function text(g, s, x, y, px, color, track = 0) {
+    g.fillStyle = color;
+    let cx = x;
+    for (const raw of String(s).toUpperCase()) {
+      const rows = GLYPHS[raw];
+      if (rows) {
+        for (let r = 0; r < 7; r++) {
+          const bits = rows[r];
+          if (!bits) continue;
+          let c = 0;
+          while (c < 5) {
+            if (!(bits & (1 << (4 - c)))) { c++; continue; }
+            const st = c;
+            while (c < 5 && (bits & (1 << (4 - c)))) c++;
+            g.fillRect(cx + st * px, y + r * px, (c - st) * px, px);
+          }
+        }
+      }
+      cx += 6 * px + track;
+    }
+    return cx;
+  }
+
+  function tw(s, px, track = 0) {
+    const n = String(s).length;
+    if (!n) return 0;
+    return n * (6 * px + track) - px - track;
+  }
+
+  function right(g, s, xr, y, px, color, track = 0) {
+    text(g, s, xr - tw(s, px, track), y, px, color, track);
+  }
+
+  function hair(g, x, y, w, color = COL.hair, h = 1) {
+    g.fillStyle = color;
+    g.fillRect(x, y, w, h);
+  }
+
+  function panelPath(g, x, y, w, h, c, cut) {
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w - c, y);
+    g.lineTo(x + w, y + c);
+    g.lineTo(x + w, y + h);
+    if (cut) {
+      g.lineTo(x + c, y + h);
+      g.lineTo(x, y + h - c);
+    } else {
+      g.lineTo(x, y + h);
+    }
+    g.closePath();
+  }
+
+  function panel(g, x, y, w, h, accent, opts = {}) {
+    const c = opts.hero ? 28 : 14;
+    panelPath(g, x, y, w, h, c, !!opts.cut);
+    g.fillStyle = COL.panel;
+    g.fill();
+    g.save();
+    g.globalAlpha = 0.45;
+    g.strokeStyle = accent;
+    g.lineWidth = 1;
+    g.stroke();
+    g.restore();
+  }
+
+  function bracket(g, x, y, dx, dy, accent) {
+    g.fillStyle = accent;
+    g.fillRect(dx > 0 ? x : x - 16, dy > 0 ? y : y - 2, 16, 2);
+    g.fillRect(dx > 0 ? x : x - 2, dy > 0 ? y : y - 16, 2, 16);
+  }
+
+  function wash(g, x, y, w, h, a = 0.06) {
+    g.fillStyle = `rgba(237,237,240,${a})`;
+    g.fillRect(x, y, w, h);
+  }
+
+  const SHAPES = {
+    x: [[0,0],[4,0],[1,1],[3,1],[2,2],[1,3],[3,3],[0,4],[4,4]],
+    o: [[1,0],[2,0],[3,0],[0,1],[4,1],[0,2],[4,2],[0,3],[4,3],[1,4],[2,4],[3,4]],
+    square: [[0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[4,1],[0,2],[4,2],[0,3],[4,3],[0,4],[1,4],[2,4],[3,4],[4,4]],
+    triangle: [[2,0],[1,1],[3,1],[0,2],[4,2],[0,3],[4,3],[0,4],[1,4],[2,4],[3,4],[4,4]]
+  };
+
+  function keycap(g, x, y, shape) {
+    const w = 18, h = 16, c = 3;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w - c, y);
+    g.lineTo(x + w, y + c);
+    g.lineTo(x + w, y + h);
+    g.lineTo(x, y + h);
+    g.closePath();
+    g.strokeStyle = COL.white;
+    g.lineWidth = 1;
+    g.stroke();
+
+    const cx = x + w / 2, cy = y + h / 2;
+    g.strokeStyle = COL.white;
+    g.lineWidth = 1.5;
+    g.lineCap = 'butt';
+    g.beginPath();
+    if (shape === 'x') {
+      g.moveTo(cx - 3.5, cy - 3.5); g.lineTo(cx + 3.5, cy + 3.5);
+      g.moveTo(cx + 3.5, cy - 3.5); g.lineTo(cx - 3.5, cy + 3.5);
+    } else if (shape === 'o') {
+      g.arc(cx, cy, 4.2, 0, Math.PI * 2);
+    } else if (shape === 'square') {
+      g.rect(cx - 3.5, cy - 3.5, 7, 7);
+    } else {
+      g.moveTo(cx, cy - 4.2);
+      g.lineTo(cx + 4.2, cy + 3.5);
+      g.lineTo(cx - 4.2, cy + 3.5);
+      g.closePath();
+    }
+    g.stroke();
+  }
+
+  const LOCAL = {
+    title: 'LOCAL',
+    path: 'UX0:/DATA/',
+    free: '23.4 GB',
+    marks: 0,
+    cursor: 1,
+    offset: 0,
+    site: null
+  };
+  const REMOTE = {
+    title: 'REMOTE',
+    path: '/GNU/',
+    site: 'FTP.GNU.ORG:21',
+    free: null,
+    marks: 2,
+    total: '118.7 MB',
+    cursor: 9,
+    offset: 2
+  };
+
+  const LOCAL_ROWS = [
+    { n: '..', k: 'up' },
+    { n: 'VITAFTPSHELL/', k: 'dir' },
+    { n: 'VITASHELL/', k: 'dir' },
+    { n: 'ADRENALINE/', k: 'dir' },
+    { n: 'EMULATORS/', k: 'dir' },
+    { n: 'SCREENSHOTS/', k: 'dir' },
+    { n: 'SEPLUGINS/', k: 'dir' },
+    { n: 'CONFIG.TXT', s: '1.2 KB' },
+    { n: 'NOTES.TXT', s: '340 B' },
+    { n: 'DOWNLOAD/', k: 'dir' },
+    { n: 'VPK/', k: 'dir' }
+  ];
+
+  const REMOTE_ROWS = [
+    { n: '..', k: 'up' },
+    { n: 'AUTOCONF/', k: 'dir' },
+    { n: 'BASH/', k: 'dir' },
+    { n: 'COREUTILS/', k: 'dir' },
+    { n: 'EMACS/', k: 'dir' },
+    { n: 'GCC/', k: 'dir' },
+    { n: 'GETTEXT/', k: 'dir' },
+    { n: 'GNULIB/', k: 'dir' },
+    { n: 'README', s: '2.4 KB', mark: true },
+    { n: 'EMACS-29.4.TAR.XZ', s: '118.7 MB', mark: true },
+    { n: 'EMACS-29.3.TAR.XZ', s: '116.2 MB' },
+    { n: 'SHA256SUMS', s: '1.1 KB' }
+  ];
+
+  function textRects(s, x, y, px, track = 0) {
+    const out = [];
+    let cx = x;
+    for (const raw of String(s).toUpperCase()) {
+      const rows = GLYPHS[raw];
+      if (rows) {
+        for (let r = 0; r < 7; r++) {
+          const bits = rows[r];
+          if (!bits) continue;
+          let c = 0;
+          while (c < 5) {
+            if (!(bits & (1 << (4 - c)))) { c++; continue; }
+            const st = c;
+            while (c < 5 && (bits & (1 << (4 - c)))) c++;
+            out.push([cx + st * px, y + r * px, (c - st) * px, px]);
+          }
+        }
+      }
+      cx += 6 * px + track;
+    }
+    return out;
+  }
+
+  function blit(g, rects, dx, dy, color, alpha = 1, additive = false) {
+    g.save();
+    g.globalAlpha = alpha;
+    if (additive) g.globalCompositeOperation = 'lighter';
+    g.fillStyle = color;
+    for (const [x, y, w, h] of rects) g.fillRect(x + dx, y + dy, w, h);
+    g.restore();
+  }
+
+  function drawHeader(g) {
+    // The wordmark is the one loud element, and the one place glow is allowed.
+    const wm = textRects('VITAFTPSHELL', M, 8, PX.hero);
+    for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) {
+      blit(g, wm, dx, dy, COL.yellow, 0.10, true);
+    }
+    blit(g, wm, -2, 0, COL.yellow, 0.45);
+    blit(g, wm, 2, 0, COL.cyan, 0.35);
+    blit(g, wm, 0, 0, COL.yellow);
+
+    text(g, 'WORKSPACE', M, 42, PX.label, COL.white, 1);
+
+    const site = 'FTP.GNU.ORG';
+    const port = ':21';
+    const state = 'CONNECTED';
+    const stateX = 942 - tw(state, PX.micro);
+    const portX = stateX - 12 - tw(port, PX.micro);
+    const siteX = portX - tw(site, PX.label);
+    text(g, site, siteX, 22, PX.label, COL.cyan);
+    text(g, port, portX, 25.5, PX.micro, COL.cyanDim);
+    text(g, state, stateX, 25.5, PX.micro, COL.green);
+
+    const onX = 942 - tw('1 CLIENT', PX.micro) - 12 - tw('ON', PX.micro);
+    right(g, 'SERVER', onX - 12, 45.5, PX.micro, COL.dim);
+    text(g, 'ON', onX, 45.5, PX.micro, COL.green);
+    right(g, '1 CLIENT', 942, 45.5, PX.micro, COL.white);
+  }
+
+  function drawLegend(g, y = 512) {
+    const parts = [
+      ['x', 'OPEN'], ['o', 'UP'], ['square', 'MARK'], ['triangle', 'SITES']
+    ];
+    let x = M;
+    for (const [shape, label] of parts) {
+      keycap(g, x, y - 2, shape);
+      x += 18;
+      text(g, label, x, y, PX.micro, COL.dim);
+      x += tw(label, PX.micro) + 18;
+    }
+    text(g, 'L/R', x, y, PX.micro, COL.dim);
+    x += tw('L/R', PX.micro) + 6;
+    text(g, 'PANE', x, y, PX.micro, COL.dim);
+    x += tw('PANE', PX.micro) + 20;
+    text(g, 'START', x, y, PX.micro, COL.dim);
+    x += tw('START', PX.micro) + 6;
+    text(g, 'SERVER', x, y, PX.micro, COL.dim);
+    x += tw('SERVER', PX.micro) + 20;
+    text(g, 'SELECT', x, y, PX.micro, COL.dim);
+    x += tw('SELECT', PX.micro) + 6;
+    text(g, 'ACTIONS', x, y, PX.micro, COL.dim);
+  }
+
+  function drawRow(g, row, x, y, w, marked, cursor, active) {
+    const nameX = x + 32;
+    const sizeR = x + w - 14;
+    if (cursor) {
+      wash(g, x + 1, y, w - 2, 30, active ? 0.06 : 0.025);
+      g.fillStyle = active ? COL.white : COL.hair;
+      g.fillRect(x + 8, y, 2, 30);
+    }
+    if (marked) {
+      g.fillStyle = COL.yellow;
+      g.fillRect(x + 19, y + 12, 6, 6);
+    }
+    const dim = row.k === 'up';
+    text(g, row.n, nameX, y + 8, PX.label, dim ? COL.dim : COL.white);
+    if (row.k === 'up') right(g, 'UP', sizeR, y + 11.5, PX.micro, COL.dim);
+    else if (row.k === 'dir') right(g, 'DIR', sizeR, y + 11.5, PX.micro, COL.dim);
+    else right(g, row.s || '--', sizeR, y + 11.5, PX.micro, row.s ? COL.white : COL.dim);
+  }
+
+  function drawList(g, view, rows, x, y, w, count, active, paneMarked) {
+    for (let i = 0; i < count; i++) {
+      const idx = view.offset + i;
+      if (idx >= rows.length) break;
+      const row = rows[idx];
+      const ry = y + i * 30;
+      const cursor = idx === view.cursor;
+      const marked = !!row.mark;
+      drawRow(g, row, x, ry, w, marked, cursor, active);
+    }
+    // Scrollbar: only when the list overflows.
+    if (rows.length > count) {
+      const h = count * 30;
+      const thumb = Math.max(24, Math.round(h * count / rows.length));
+      const pos = Math.round((h - thumb) * view.offset / Math.max(1, rows.length - count));
+      g.fillStyle = COL.hair;
+      g.fillRect(x + w - 6, y, 2, h);
+      g.fillStyle = COL.dim;
+      g.fillRect(x + w - 6, y + pos, 2, thumb);
+    }
+  }
+
+  function drawPaneTitle(g, view, x, y, w, active, inset = 14) {
+    const nameColor = active ? COL.yellow : COL.dim;
+    text(g, view.title, x + 14, y + 8, PX.label, nameColor, 2);
+    if (view.marks > 0) {
+      const count = `${view.marks} MARKED`;
+      right(g, view.total, x + w - inset, y + 11.5, PX.micro, COL.white);
+      right(g, count, x + w - inset - tw(view.total, PX.micro) - 12, y + 11.5, PX.micro, COL.yellow);
+    }
+    const pathColor = active ? COL.cyan : COL.cyanDim;
+    if (view.site) {
+      text(g, view.site, x + 14, y + 26, PX.micro, COL.dim);
+      text(g, view.path, x + 14 + tw(view.site, PX.micro) + 8, y + 26, PX.micro, pathColor);
+    } else {
+      text(g, view.path, x + 14, y + 26, PX.micro, pathColor);
+    }
+    if (view.free) {
+      right(g, view.free, x + w - inset, y + 26, PX.micro, COL.white);
+      right(g, 'FREE', x + w - inset - tw(view.free, PX.micro) - 8, y + 26, PX.micro, COL.dim);
+    }
+  }
+
+  function drawDock(g, x, y, w, inside = false) {
+    if (!inside) panel(g, x, y, w, 64, COL.cyan);
+    text(g, 'DOWNLOAD', x + 14, y + 10, PX.label, COL.yellow, 2);
+    text(g, 'EMACS-29.4.TAR.XZ', x + 14 + tw('DOWNLOAD', PX.label, 2) + 16, y + 10, PX.label, COL.white);
+    right(g, '1 OF 2', x + w - 14, y + 13, PX.micro, COL.dim);
+
+    const bx = x + 14, bw = w - 28, by = y + 33;
+    g.fillStyle = COL.hair;
+    g.fillRect(bx, by, bw, 4);
+    g.fillStyle = COL.yellow;
+    g.fillRect(bx, by, Math.round(bw * 0.42), 4);
+
+    text(g, '49.8 MB OF 118.7 MB', bx, y + 43, PX.label, COL.white);
+    const pctX = bx + tw('49.8 MB OF 118.7 MB', PX.label) + 24;
+    text(g, '42%', pctX, y + 43, PX.label, COL.white);
+    right(g, '1.8 MB/S', x + w - 14, y + 46.5, PX.micro, COL.white);
+  }
+
+  // ---------- A: two ledgers ----------
+
+  function sceneA(g) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawHeader(g);
+
+    const pw = 456, dx = M + pw + GAP, py = 76, ph = 352;
+    panel(g, M, py, pw, ph, COL.cyan);
+    panel(g, dx, py, pw, ph, COL.cyan);
+
+    // active edge on the remote pane
+    g.fillStyle = COL.yellow;
+    g.fillRect(dx, py, 2, ph);
+
+    drawPaneTitle(g, LOCAL, M, py, pw, false);
+    hair(g, M + 14, py + 43, pw - 28);
+    drawList(g, LOCAL, LOCAL_ROWS, M, py + 48, pw, 10, false, 0);
+
+    drawPaneTitle(g, REMOTE, dx, py, pw, true);
+    hair(g, dx + 14, py + 43, pw - 28);
+    drawList(g, REMOTE, REMOTE_ROWS, dx, py + 48, pw, 10, true, 2);
+
+    drawDock(g, M, 440, 924);
+    drawLegend(g);
+  }
+
+  // ---------- B: one instrument ----------
+
+  function sceneB(g) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawHeader(g);
+
+    const px = M, py = 76, pw = 924, ph = 424;
+    panel(g, px, py, pw, ph, COL.cyan, { hero: true });
+    bracket(g, px - 6, py - 6, 1, 1, COL.cyan);
+    bracket(g, px + pw + 6, py + ph + 6, -1, -1, COL.cyan);
+
+    // seam
+    hair(g, 480, py + 1, 1, COL.hair);
+
+    // active segment along the top of the right half
+    g.fillStyle = COL.yellow;
+    g.fillRect(480, py, 462, 2);
+
+    drawPaneTitle(g, LOCAL, px, py, 462, false, 34);
+    drawPaneTitle(g, REMOTE, 480, py, 462, true, 34);
+    hair(g, px + 14, py + 43, pw - 28);
+
+    drawList(g, LOCAL, LOCAL_ROWS, px, py + 50, 462, 10, false, 0);
+    drawList(g, REMOTE, REMOTE_ROWS, 480, py + 50, 462, 10, true, 2);
+
+    // dock inside the frame
+    hair(g, px + 14, 430, pw - 28);
+    drawDock(g, px, 436, pw, true);
+
+    drawLegend(g);
+  }
+
+  // ---------- C: focus + context ----------
+
+  function sceneC(g) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawHeader(g);
+
+    const px = M, py = 76, pw = 924;
+    panel(g, px, py, pw, 304, COL.cyan, { hero: true });
+    bracket(g, px - 6, py - 6, 1, 1, COL.cyan);
+    bracket(g, px + pw + 6, py + 304 + 6, -1, -1, COL.cyan);
+
+    g.fillStyle = COL.yellow;
+    g.fillRect(px, py, 2, 304);
+
+    drawPaneTitle(g, REMOTE, px, py, pw, true, 34);
+    hair(g, px + 14, py + 43, pw - 28);
+    drawList(g, REMOTE, REMOTE_ROWS, px, py + 48, pw, 8, true, 2);
+
+    // context strip
+    const cy = 392, ch = 36;
+    panel(g, px, cy, pw, ch, COL.hair);
+    text(g, 'LOCAL', px + 14, cy + 9, PX.label, COL.dim, 2);
+    text(g, 'UX0:/DATA/', px + 14 + tw('LOCAL', PX.label, 2) + 12, cy + 12.5, PX.micro, COL.cyan);
+    text(g, 'VITAFTPSHELL/', px + 14 + tw('LOCAL', PX.label, 2) + 12 + tw('UX0:/DATA/', PX.micro) + 12, cy + 12.5, PX.micro, COL.dim);
+    right(g, 'L/R TO SWITCH', px + pw - 14, cy + 12.5, PX.micro, COL.dim);
+
+    drawDock(g, M, 440, 924);
+    drawLegend(g);
+  }
+
+  // ---------- render ----------
+
+  const SCENES = { a: sceneA, b: sceneB, c: sceneC };
+
+  function render(id) {
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+    const S = 2;
+    canvas.width = W * S;
+    canvas.height = H * S;
+    const g = canvas.getContext('2d');
+    g.scale(S, S);
+    g.imageSmoothingEnabled = false;
+    SCENES[id](g);
+  }
+
+  for (const id of Object.keys(SCENES)) render(id);
+
+  // Isolated view for screenshots: ?only=a&big=1
+  const params = new URLSearchParams(location.search);
+  const only = params.get('only');
+  if (only && SCENES[only]) {
+    document.body.classList.add('only');
+    if (params.get('big')) document.body.classList.add('big');
+    document.querySelectorAll('.dir').forEach(el => {
+      el.classList.toggle('on', el.dataset.scene === only);
+    });
+  }
+})();
+</script>
+</body>
+</html>
