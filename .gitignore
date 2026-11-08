@@ -1,0 +1,4 @@
+# Build output. BUILD_NUMBER is deliberately not ignored: it identifies the
+# artifact and must survive a build-directory wipe (KTD17).
+build/
+.source-stamp
