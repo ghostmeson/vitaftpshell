@@ -8,7 +8,7 @@ moving a file is one action.
 **Status:** `building`. Strategy, requirements, the screen-by-screen design, and
 the architecture plan are complete. Phase 1 is done: the build shape, packaging,
 send script, and layering guard exist, and the first stub VPK,
-`vitaftpshell-v01.00-b2.vpk`, builds. No protocol engine, renderer, screen, or
+`vitaftpshell-v01.00-b3.vpk`, builds. No protocol engine, renderer, screen, or
 adapter exists yet, so the app has not run on hardware.
 
 ## What v1 is

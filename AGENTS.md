@@ -8,7 +8,7 @@ records what is already settled. Read both before changing anything.
 
 `building`. Phase 1 (U1) is complete: the source tree, `CMakeLists.txt`,
 `build.sh`, `send.sh`, the layering guard, and one
-`vitaftpshell-v01.00-b2.vpk` exist. The VPK is a stub app; no protocol engine,
+`vitaftpshell-v01.00-b3.vpk` exist. The VPK is a stub app; no protocol engine,
 renderer, screen, or adapter exists yet. Do not start coding from this file
 alone: the plan is the source of truth for behavior, sequencing, and
 verification, and `docs/DESIGN.md` is the layout authority.
