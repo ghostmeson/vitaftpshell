@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-09 — Phase 1 (U1): build shape, packaging, send script, placeholder LiveArea art, and the whole-tree layering guard | Start Phase 2: U2, U3, U4, U5 (ports and fakes, graphics base, parsers and paths, store and log) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b2.vpk`; it is a stub app, so the project is `building`, and no hardware run means not `verified`. `docs/ARCHITECTURE.md` is the module contract; the plan is the source of truth. |
+| `vitaFTPShell` | `building` | 2026-11-09 — Phase 1 (U1): build shape, packaging, send script, placeholder LiveArea art, and the whole-tree layering guard | Start Phase 2: U2, U3, U4, U5 (ports and fakes, graphics base, parsers and paths, store and log) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b3.vpk`; it is a stub app, so the project is `building`, and no hardware run means not `verified`. `docs/ARCHITECTURE.md` is the module contract; the plan is the source of truth. |
 
 ## Phases
 
@@ -109,7 +109,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 2026-11-08 | Architecture plan | Enriched the plan: R24 and R42 tightened, R71–R73 added, KTD1–KTD18, six diagrams, the server command table, U1–U14, the hardware matrix, and the verification contract. Rewrote `docs/ARCHITECTURE.md`; updated `THIRD_PARTY.md`, `DESIGN.md`, and `AGENTS.md`. No source. |
 | 2026-11-08 | Plan review | Architecture, coherence, feasibility, and security review. Split the operation unit into queue, planner, and executor (U8, U16, U17) and added the handoff unit (U15). Fixed the handoff publication protocol, the data-phase sub-states and abort reply alignment, the canonical path form and both rename operands, the protected `data` folders, the data-peer check, templed-write sync and aside recovery, the shared connect budget, the directory-merge conflict rule, the partial-delete report, and the MLST row. Added D41–D42; U7 no longer cites R71. |
 | 2026-11-08 | Plan review — open items | Confirmed D41 (server uploads overwrite, disclosed), the 450 for a PC's listing during a local batch, and the same-peer data connection. No plan change. |
-| 2026-11-09 | Phase 1 — build shape (U1) | Added `CMakeLists.txt` (VFTPSHELL, 01.00, UNSAFE), `build.sh` with a source-hash build number and one-artifact pruning, `send.sh` with a stale-artifact refusal, `src/main.c`, placeholder `sce_sys/` art, `.gitignore`, and `tools/test/run.sh` with the whole-tree layering guard. Built `vitaftpshell-v01.00-b2.vpk`; the guard fails on `psp2/` and `psp2common/` includes outside the seven-file allowlist. Code review applied two fixes and rejected two findings with evidence. No hardware run. |
+| 2026-11-09 | Phase 1 — build shape (U1) | Added `CMakeLists.txt` (VFTPSHELL, 01.00, UNSAFE), `build.sh` with a source-hash build number and one-artifact pruning, `send.sh` with a stale-artifact refusal, `src/main.c`, placeholder `sce_sys/` art, `.gitignore`, and `tools/test/run.sh` with the whole-tree layering guard. Built `vitaftpshell-v01.00-b3.vpk`; the guard fails on `psp2/` and `psp2common/` includes outside the seven-file allowlist. Code review applied two fixes and rejected two findings with evidence. No hardware run. |
 
 ## Links
 

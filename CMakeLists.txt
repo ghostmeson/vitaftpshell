@@ -57,7 +57,7 @@ target_include_directories(vitaftpshell PRIVATE src)
 # pane need ur0: and uma0:, and the safe authid refuses them.
 vita_create_self(vitaftpshell.self vitaftpshell UNSAFE)
 
-# Placeholder art. U14 replaces icon, background, and startup image with the
+# Placeholder art. U13 replaces icon, background, and startup image with the
 # settled LiveArea art.
 set(VITAFTPSHELL_VPK_FILES
   FILE sce_sys/icon0.png sce_sys/icon0.png

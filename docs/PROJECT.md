@@ -15,7 +15,7 @@ card to a PC, without making the PC the workspace.
 
 `building`. Strategy, requirements, the screen-by-screen design, and the
 architecture plan are complete. Phase 1 (U1) is done: `build.sh` emits one
-`vitaftpshell-v01.00-b2.vpk` from a minimal stub `src/main.c`, `send.sh` uploads
+`vitaftpshell-v01.00-b3.vpk` from a minimal stub `src/main.c`, `send.sh` uploads
 it, and `tools/test/run.sh` enforces the whole-tree layering guard. No protocol
 engine, renderer, screen, or platform adapter exists yet, and nothing has run on
 hardware.
