@@ -8,7 +8,7 @@ layer is adapted rather than invented.
 
 | Project | License | Use | Status |
 |---|---|---|---|
-| [COCKPIT](../../vita-cockpit/) — this workspace | MIT | `src/gfx/` is adapted from its `draw`, `font`, and `theme`, with its notice | Planned; adapted, not copied blind |
+| COCKPIT — Copyright (c) 2026 Upakul Talukdar | MIT | `src/gfx/` is adapted from its `draw`, `font`, and `theme` | Adapted, with the notice in [`LICENSES/COCKPIT-MIT.txt`](../LICENSES/COCKPIT-MIT.txt) |
 | [VitaShell](https://github.com/TheOfficialFloW/VitaShell) | GPLv3 | Behavioral reference for the file manager and server commands | Reference only; not vendored |
 | [libftpvita](https://github.com/xerpi/libftpvita) | MIT | Behavioral reference for server commands | Reference only; not used |
 
@@ -19,15 +19,13 @@ and rollback, so reusing it would cost more than it saves.
 
 ## When code is adapted
 
-- record the upstream repository and commit, or the workspace path and decision;
+- record the upstream repository and commit, or the source project and decision;
 - list the files and the modifications;
 - keep the copyright and license notices;
-- confirm the license is compatible with GPLv3;
-- do not copy the code into the MIT projects in this workspace.
+- confirm the license is compatible with GPLv3.
 
-The project stays GPLv3 by choice (D40). That keeps the island boundary in the
-workspace and leaves the door open to reuse VitaShell code later without a
-relicense.
+The project stays GPLv3 by choice (D40), which keeps the door open to reuse
+VitaShell code later without a relicense.
 
 ## Protocol references
 
@@ -39,7 +37,9 @@ relicense.
 
 ## Product references
 
-- [COCKPIT design system](../../vita-cockpit/docs/DESIGN.md) — the visual
-  authority for palette, type, spacing, and restraint.
+- COCKPIT — Copyright (c) 2026 Upakul Talukdar — the design system that shapes
+  the palette, type, spacing, and restraint rules. vitaFTPShell restates the
+  rules it uses in [`DESIGN.md`](DESIGN.md); the derived graphics code keeps its
+  MIT notice in [`LICENSES/COCKPIT-MIT.txt`](../LICENSES/COCKPIT-MIT.txt).
 - [FileZilla](https://filezilla-project.org/) — behavior reference for saved
   sites and two-pane transfers; no code is reused.

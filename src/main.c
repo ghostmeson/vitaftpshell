@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+
 /*
  * Composition root (docs/ARCHITECTURE.md). It constructs the adapters and
  * starts the runtime; nothing else constructs.

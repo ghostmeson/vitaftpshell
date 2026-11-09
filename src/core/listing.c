@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+
 #include "core/listing.h"
 
 #include <stdlib.h>

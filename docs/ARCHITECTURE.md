@@ -266,7 +266,7 @@ so a rendered state is the shipped composition, not a copy.
 
 ## Build shape
 
-- CMake plus `build.sh`, as in `vita-cockpit/`.
+- CMake plus `build.sh`, following the pattern established by COCKPIT.
 - `VITA_TITLEID` `VFTPSHELL`, version `01.00`, one `UNSAFE` self.
 - `BUILD_NUMBER` in the project root; the source hash decides whether it
   increments. The hash stamp is local to the checkout, so a clean checkout
@@ -341,9 +341,9 @@ depends on it, naming the claim and the reason. The open ones:
 ## GPLv3 boundary
 
 The project is GPLv3 by choice (D40). COCKPIT's MIT graphics layer is adapted with
-its notice; nothing from VitaShell or libftpvita is vendored. Reused code keeps its
-notices and stays inside `vitaFTPShell/`; it must not be copied into the MIT
-projects in the workspace.
+its notice in [`LICENSES/COCKPIT-MIT.txt`](../LICENSES/COCKPIT-MIT.txt); nothing
+from VitaShell or libftpvita is vendored. Reused code keeps its notices and stays
+under GPLv3 (D44).
 
 ## Open architecture questions
 

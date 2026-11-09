@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-09 — Phase 3 (U6–U7): passive FTP client and server state machines, scripted peers, and ten host suites; b7 | Start Phase 4: U8, U16, U17, U9, U15 (queue, planner, executor, reducer, handoff) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b7.vpk` is still a stub; the engine is host-tested and not linked into the app target until U13. No hardware run, so not `verified`. |
+| `vitaFTPShell` | `building` | 2026-11-09 — standalone repository: own git history, public GPLv3 repo, rewritten README and `.gitignore`, COCKPIT MIT notice, host-test CI; b8 | Start Phase 4: U8, U16, U17, U9, U15 (queue, planner, executor, reducer, handoff) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b8.vpk` is still a stub; the engine is host-tested and not linked into the app target until U13. No hardware run, so not `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
@@ -58,8 +58,8 @@ target console with evidence. Host tests alone cannot promote it.
   saved sites with remembered passwords; plain passive FTP.
 - **Not in v1:** SFTP, FTPS, HTTP, WebDAV, resume, sync, background transfers,
   multiple active transfers, multiple server clients, a credential vault.
-- **License:** GPLv3 by choice, nothing vendored. This is an island inside the
-  MIT workspace.
+- **License:** GPLv3 by choice, nothing vendored. COCKPIT-derived graphics keep
+  their MIT notice.
 
 ## Risks
 
@@ -70,7 +70,7 @@ target console with evidence. Host tests alone cannot promote it.
 | Unverified WiFi path | The repo's socket code is `built`, not hardware-tested | First hardware session proves connect, PASV, upload, download, and timeouts |
 | Public FTP decline | The anonymous-first flow depends on public sites | Personal servers keep the product useful; no protocol widening in v1 |
 | Controller-only UI | A dense two-pane manager can become unusable | Design phase goes screen by screen before implementation |
-| GPLv3 boundary | Code cannot flow back into the MIT projects | Keep reused code inside `vitaFTPShell/`; document provenance |
+| GPLv3 boundary | Copyleft code and notices must stay intact | Keep the license and third-party notices; document provenance |
 
 ## Log
 
@@ -114,6 +114,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 2026-11-09 | Phase 1 — build shape (U1) | Added `CMakeLists.txt` (VFTPSHELL, 01.00, UNSAFE), `build.sh` with a source-hash build number and one-artifact pruning, `send.sh` with a stale-artifact refusal, `src/main.c`, placeholder `sce_sys/` art, `.gitignore`, and `tools/test/run.sh` with the whole-tree layering guard. Built `vitaftpshell-v01.00-b3.vpk`; the guard fails on `psp2/` and `psp2common/` includes outside the seven-file allowlist. Code review applied two fixes and rejected two findings with evidence. No hardware run. |
 | 2026-11-09 | Phase 2 — ports, gfx, and policy (U2–U5) | Added the six port contracts and controllable fakes; adapted COCKPIT's MIT gfx with `font_fit` and the seven-surface layout table; added the software vita2d preview; added reply, listing, path, and format policy; added the site book, settings, atomic store, and typed session-log events. Eight host suites pass, the preview renders 960x544, and the build emits `vitaftpshell-v01.00-b5.vpk` (still a stub). No hardware run. |
 | 2026-11-09 | Phase 3 — protocol engines (U6–U7) | Added the shared FTP line reader, remote-path normalizer, and templed write; the passive client machine (resolve, greeting, login, FEAT/MLSD with LIST fallback, browse, RETR/STOR, mutations, cancel, deadlines, cause classes); the passive server machine (control and control+1 bind, one client slot, the command table, MLST/SIZE/MDTM, data peer check, templed STOR, ABOR, 450 busy, network loss, stop); and the scripted fake server/client. Ten host suites pass under ASan/UBSan; the preview still renders 960x544; the build emits `vitaftpshell-v01.00-b7.vpk` (still a stub). Two independent reviews (client/shared and server) found 13 issues; all were fixed: the final-226 drain deadline, the ABOR grace for either reply order, browse MLSD fallback and the 450-listing guard, malformed-reply ABOR, the rename event path, the pending-accept disarm, control-write teardown, the no-slash virtual path, stronger denial tests, the fake send/overflow hooks, and long-name rejection. No hardware run. |
+| 2026-11-09 | Standalone repository | Detached vitaFTPShell into its own GPLv3 repository with its commit history, a public README and `.gitignore`, the COCKPIT MIT notice under `LICENSES/`, host-test CI, SPDX headers on every source file, and D44. Build b8; no source behavior change. |
 
 ## Links
 
@@ -121,5 +122,5 @@ target console with evidence. Host tests alone cannot promote it.
 - v1 requirements: `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`
 - Documentation map: `docs/README.md`
 - Third-party code and licenses: `docs/THIRD_PARTY.md`
-- Workspace board: `../PROJECTS.md`
-- Workspace contract: `../AGENTS.md`
+- Project contract: `AGENTS.md`
+- Public repository: https://github.com/ghostmeson/vitaftpshell

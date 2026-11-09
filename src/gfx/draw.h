@@ -1,3 +1,10 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ *
+ * Portions adapted from COCKPIT, Copyright (c) 2026 Upakul Talukdar,
+ * licensed under the MIT License. See LICENSES/COCKPIT-MIT.txt.
+ */
+
 #ifndef VFTP_GFX_DRAW_H
 #define VFTP_GFX_DRAW_H
 

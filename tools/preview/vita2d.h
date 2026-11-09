@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+
 #ifndef PREVIEW_VITA2D_H
 #define PREVIEW_VITA2D_H
 

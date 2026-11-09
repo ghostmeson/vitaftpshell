@@ -8,11 +8,11 @@ user-directed: the risk mark and the high-risk confirmation (D30, D31), and the
 
 ## Visual authority
 
-The visual language is [`vita-cockpit/docs/DESIGN.md`](../../vita-cockpit/docs/DESIGN.md).
-That document is binding. This project inherits its palette, type scale, spacing
-scale, panel anatomy, and restraint rules. If this document and the COCKPIT
-document disagree, the COCKPIT document wins unless a numbered decision here
-supersedes it.
+This document is the layout authority for vitaFTPShell. It inherits the COCKPIT
+design system — palette, type scale, spacing scale, panel anatomy, and restraint
+rules — restated in the fixed constraints below and in `src/gfx/theme.c`. Where
+a value is not restated, the theme constants are authoritative. Any change to a
+settled value is a design change and needs a numbered decision.
 
 ## Fixed now
 
