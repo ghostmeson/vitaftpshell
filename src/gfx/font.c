@@ -1,0 +1,236 @@
+#include "gfx/font.h"
+
+#include <stddef.h>
+#include <string.h>
+
+#include "gfx/draw.h"
+
+/*
+ * Adapted from COCKPIT (MIT). See docs/THIRD_PARTY.md.
+ *
+ * Rows are 5-bit, bit 4 is the leftmost column. Latin uppercase, digits, and
+ * the punctuation the HUD actually uses.
+ */
+
+typedef struct {
+    char ch;
+    uint8_t rows[FONT_GLYPH_H];
+} Glyph;
+
+static const Glyph GLYPHS[] = {
+    {'A', {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}},
+    {'B', {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E}},
+    {'C', {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E}},
+    {'D', {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}},
+    {'E', {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F}},
+    {'F', {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10}},
+    {'G', {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0E}},
+    {'H', {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}},
+    {'I', {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1F}},
+    {'J', {0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C}},
+    {'K', {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11}},
+    {'L', {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F}},
+    {'M', {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}},
+    {'N', {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}},
+    {'O', {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}},
+    {'P', {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10}},
+    {'Q', {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D}},
+    {'R', {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}},
+    {'S', {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E}},
+    {'T', {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}},
+    {'U', {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}},
+    {'V', {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}},
+    {'W', {0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11}},
+    {'X', {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11}},
+    {'Y', {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04}},
+    {'Z', {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F}},
+
+    {'0', {0x0E, 0x13, 0x15, 0x15, 0x15, 0x19, 0x0E}},
+    {'1', {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}},
+    {'2', {0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F}},
+    {'3', {0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E}},
+    {'4', {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02}},
+    {'5', {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E}},
+    {'6', {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E}},
+    {'7', {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}},
+    {'8', {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}},
+    {'9', {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C}},
+
+    {' ', {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+    {':', {0x00, 0x04, 0x04, 0x00, 0x04, 0x04, 0x00}},
+    {'.', {0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x04}},
+    {'%', {0x19, 0x1A, 0x02, 0x04, 0x08, 0x0B, 0x13}},
+    {'/', {0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10}},
+    {'-', {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00}},
+    {'+', {0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00}},
+    {',', {0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08}},
+    {'&', {0x0C, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0D}},
+    {'[', {0x0E, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0E}},
+    {']', {0x0E, 0x02, 0x02, 0x02, 0x02, 0x02, 0x0E}},
+    {'<', {0x02, 0x04, 0x08, 0x10, 0x08, 0x04, 0x02}},
+    {'>', {0x08, 0x04, 0x02, 0x01, 0x02, 0x04, 0x08}},
+    {'_', {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F}},
+    {'|', {0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}},
+};
+
+static const uint8_t *lookup(char ch)
+{
+    if (ch >= 'a' && ch <= 'z')
+        ch = (char)(ch - 'a' + 'A');
+
+    for (size_t i = 0; i < sizeof(GLYPHS) / sizeof(GLYPHS[0]); ++i) {
+        if (GLYPHS[i].ch == ch)
+            return GLYPHS[i].rows;
+    }
+    return NULL;
+}
+
+static int emit_glyph(const uint8_t *rows, float x, float y, float px,
+                      Rect *out, int max, int n)
+{
+    for (int row = 0; row < FONT_GLYPH_H; ++row) {
+        uint8_t bits = rows[row];
+        int col = 0;
+
+        while (col < FONT_GLYPH_W) {
+            uint32_t mask = 1u << (FONT_GLYPH_W - 1 - col);
+
+            if ((bits & mask) == 0) {
+                ++col;
+                continue;
+            }
+
+            int start = col;
+            while (col < FONT_GLYPH_W &&
+                   (bits & (1u << (FONT_GLYPH_W - 1 - col))))
+                ++col;
+
+            if (n < max && out != NULL) {
+                out[n].x = x + (float)start * px;
+                out[n].y = y + (float)row * px;
+                out[n].w = (float)(col - start) * px;
+                out[n].h = px;
+            }
+
+            ++n;
+        }
+    }
+
+    return n;
+}
+
+static void draw_glyph(const uint8_t *rows, float x, float y, float px,
+                       uint32_t c)
+{
+    Rect runs[FONT_MAX_RUNS];
+    int n = emit_glyph(rows, x, y, px, runs, FONT_MAX_RUNS, 0);
+
+    if (n > FONT_MAX_RUNS)
+        n = FONT_MAX_RUNS;
+
+    draw_rects(runs, n, c);
+}
+
+void font_text_tracked(const char *s, float x, float y, float px, uint32_t c,
+                       float extra)
+{
+    if (s == NULL || px <= 0.0f)
+        return;
+
+    float cx = x;
+    for (const char *p = s; *p != '\0'; ++p) {
+        const uint8_t *rows = lookup(*p);
+        if (rows != NULL)
+            draw_glyph(rows, cx, y, px, c);
+        cx += (float)FONT_ADVANCE * px + extra;
+    }
+}
+
+void font_text(const char *s, float x, float y, float px, uint32_t c)
+{
+    font_text_tracked(s, x, y, px, c, 0.0f);
+}
+
+static float font_width_tracked(const char *s, float px, float extra)
+{
+    if (s == NULL || px <= 0.0f)
+        return 0.0f;
+
+    size_t n = strlen(s);
+    if (n == 0)
+        return 0.0f;
+
+    return ((float)n * ((float)FONT_ADVANCE * px + extra)) - px - extra;
+}
+
+float font_width(const char *s, float px)
+{
+    return font_width_tracked(s, px, 0.0f);
+}
+
+void font_text_right(const char *s, float x_right, float y, float px,
+                     uint32_t c)
+{
+    font_text(s, x_right - font_width(s, px), y, px, c);
+}
+
+int font_rects(const char *s, float x, float y, float px, Rect *out, int max)
+{
+    if (s == NULL || px <= 0.0f || out == NULL || max <= 0)
+        return 0;
+
+    int n = 0;
+    float cx = x;
+
+    for (const char *p = s; *p != '\0'; ++p) {
+        const uint8_t *rows = lookup(*p);
+        if (rows != NULL)
+            n = emit_glyph(rows, cx, y, px, out, max, n);
+
+        if (n >= max)
+            return max;
+
+        cx += (float)FONT_ADVANCE * px;
+    }
+
+    return n;
+}
+
+void font_fit(const char *s, float px, float max_w, char *out, size_t out_n)
+{
+    if (out == NULL || out_n == 0)
+        return;
+
+    out[0] = '\0';
+    if (s == NULL || px <= 0.0f || max_w <= 0.0f || out_n < 3)
+        return;
+
+    if (font_width(s, px) <= max_w) {
+        strncpy(out, s, out_n - 1);
+        out[out_n - 1] = '\0';
+        return;
+    }
+
+    float cell = (float)FONT_ADVANCE * px;
+    float ellipsis = (float)(2 * FONT_ADVANCE - 1) * px;
+    if (ellipsis > max_w)
+        return;
+
+    int cells = (int)((max_w + px) / cell);
+    int keep = cells - 2;
+    if (keep < 0)
+        keep = 0;
+
+    size_t len = strlen(s);
+    if ((size_t)keep > len)
+        keep = (int)len;
+
+    if ((size_t)keep + 3 > out_n)
+        keep = (int)out_n - 3;
+    if (keep < 0)
+        keep = 0;
+
+    memcpy(out, s, (size_t)keep);
+    memcpy(out + keep, "..", 2);
+    out[keep + 2] = '\0';
+}

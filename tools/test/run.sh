@@ -14,10 +14,10 @@ OUT="$ROOT/build/test"
 CC="${CC:-cc}"
 
 # --- Layering guard ---------------------------------------------------------
-# Only these files may include a psp2/ or vita2d.h header (AGENTS.md). The
-# allowlist is whole-tree: a violation in src/app or src/ui fails just as a
-# violation in src/core does, because that is where a select() or a vita2d
-# call is most likely to drift in.
+# Only these files may include a psp2/ or vita2d.h header (AGENTS.md). The scan
+# covers every directory under src/, so a violation in src/app or src/ui fails
+# just as a violation in src/core does. tools/ is host-only and is deliberately
+# outside the guard: its preview stub *is* the software vita2d, not the SDK.
 ALLOWED=(
   "src/platform/psp2_net.c"
   "src/platform/psp2_fs.c"
@@ -52,8 +52,7 @@ while IFS= read -r -d '' file; do
   done < <(grep -nE \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](psp2/|psp2common/|psp2kern/|vita2d\.h)' \
     "$file" || true)
-done < <(find "$ROOT" \( -path "$ROOT/build" -o -path "$ROOT/.git" \) -prune \
-  -o -type f \( -name '*.c' -o -name '*.h' \) -print0)
+done < <(find "$ROOT/src" -type f \( -name '*.c' -o -name '*.h' \) -print0)
 
 if [[ "$violations" -ne 0 ]]; then
   echo "layering guard: FAILED ($violations violation(s))" >&2
@@ -68,7 +67,7 @@ shopt -s nullglob
 
 tests=("$ROOT"/tools/test/test_*.c)
 if [[ "${#tests[@]}" -eq 0 ]]; then
-  echo "host tests: none yet (Phase 1 is the build shape)"
+  echo "host tests: none yet"
   exit 0
 fi
 
@@ -77,9 +76,23 @@ core_sources=("$ROOT"/src/core/*.c "$ROOT"/src/core/ftp/*.c)
 
 for test_src in "${tests[@]}"; do
   name="$(basename "$test_src" .c)"
+
+  # The graphics test links the renderer against the software vita2d shim, not
+  # the policy core. It is the one test with its own link line.
+  if [[ "$name" == "test_gfx" ]]; then
+    "$CC" -std=c99 -O1 -g -Wall -Wextra \
+      -I"$ROOT/src" -I"$ROOT/tools/preview" \
+      "$test_src" "$ROOT"/src/gfx/*.c "$ROOT/tools/preview/vita2d_soft.c" \
+      -lz -lm -o "$OUT/$name"
+    "$OUT/$name"
+    continue
+  fi
+
+  # Bash 3.2 treats an empty array as unbound under `set -u`.
   "$CC" -std=c99 -O1 -g -Wall -Wextra \
     -I"$ROOT/src" -I"$ROOT/tools/fake" \
-    "$test_src" "${fake_sources[@]}" "${core_sources[@]}" \
+    "$test_src" ${fake_sources[@]+"${fake_sources[@]}"} \
+    ${core_sources[@]+"${core_sources[@]}"} \
     -o "$OUT/$name"
   "$OUT/$name"
 done
