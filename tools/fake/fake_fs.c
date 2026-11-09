@@ -369,6 +369,10 @@ static FsResult fs_rename(void *ctx, const char *from, const char *to)
     if (src == NULL)
         return FS_NOT_FOUND;
 
+    /* A rename to the same path is a no-op, not a delete-then-move. */
+    if (strcmp(from, to) == 0)
+        return FS_OK;
+
     FakeNode *dst = find(to);
     if (dst != NULL) {
         if (!s_rename_replaces)

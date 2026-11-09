@@ -134,6 +134,40 @@ static void test_net_queue_and_wait(void)
     CHECK(link.address_known == 0);
 }
 
+static void test_net_lifecycle(void)
+{
+    fake_net_reset();
+    NetPort *net = fake_net_port();
+    NetAddress peer = {0xC0A8012Au, 21};
+
+    /* A closed socket returns its slot. */
+    for (int i = 0; i < FAKE_NET_SOCKETS; ++i) {
+        NetSocket *s = NULL;
+        CHECK(net->connect(net->ctx, &peer, 100, &s) == NET_OK);
+        net->close(net->ctx, s);
+    }
+    NetSocket *s = NULL;
+    CHECK(net->connect(net->ctx, &peer, 100, &s) == NET_OK);
+
+    /* Queued bytes make the socket readable, and EOF is distinguishable. */
+    fake_net_queue_rx(s, "x", 1);
+    NetWaitSet set;
+    set.count = 1;
+    set.items[0].socket = s;
+    set.items[0].flags = NET_WAIT_READ;
+    NetReadySet ready;
+    CHECK(net->wait(net->ctx, &set, 1, &ready) == NET_OK);
+    CHECK(ready.count == 1);
+
+    uint8_t byte = 0;
+    size_t got = 0;
+    CHECK(net->receive(net->ctx, s, &byte, 1, &got) == NET_OK);
+    fake_net_shutdown(s);
+    CHECK(net->wait(net->ctx, &set, 1, &ready) == NET_OK);
+    CHECK(ready.count == 1);
+    CHECK(net->receive(net->ctx, s, &byte, 1, &got) == NET_CLOSED);
+}
+
 static void test_rename_capability(void)
 {
     fake_fs_reset();
@@ -150,6 +184,9 @@ static void test_rename_capability(void)
     fake_fs_set_rename_replaces(1);
     CHECK(fs->rename_replaces(fs->ctx) == 1);
     CHECK(fs->rename(fs->ctx, "ux0:data/a", "ux0:data/b") == FS_OK);
+
+    CHECK(fs->rename(fs->ctx, "ux0:data/b", "ux0:data/b") == FS_OK);
+    CHECK(fake_fs_exists("ux0:data/b"));
 }
 
 static void test_clock(void)
@@ -186,6 +223,10 @@ static void test_log(void)
     CHECK(fake_log_count() == 0);
 
     CHECK(log->append(log->ctx, "after", 5) == LOG_OK);
+
+    fake_log_reset();
+    fake_log_set_capacity(8);
+    CHECK(log->append(log->ctx, "01234567890123456789", 20) == LOG_DROPPED);
 }
 
 static void test_ime(void)
@@ -217,6 +258,7 @@ int main(void)
     test_fs_listing();
     test_fs_partial_listing();
     test_net_queue_and_wait();
+    test_net_lifecycle();
     test_rename_capability();
     test_clock();
     test_log();

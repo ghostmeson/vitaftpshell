@@ -2,7 +2,6 @@
 
 #include <string.h>
 
-#define FAKE_NET_SOCKETS 16
 #define FAKE_NET_RX_MAX 8192
 #define FAKE_NET_TX_MAX 8192
 #define FAKE_NET_ACCEPT_MAX 4
@@ -11,6 +10,7 @@ struct NetSocket {
     int used;
     int open;
     int listening;
+    int peer_closed;
     NetAddress peer;
     unsigned ready;
     unsigned char rx[FAKE_NET_RX_MAX];
@@ -38,7 +38,7 @@ static NetSocket *alloc_socket(void)
             memset(&s_sockets[i], 0, sizeof(s_sockets[i]));
             s_sockets[i].used = 1;
             s_sockets[i].open = 1;
-            s_sockets[i].ready = NET_WAIT_READ | NET_WAIT_WRITE;
+            s_sockets[i].ready = NET_WAIT_WRITE;
             return &s_sockets[i];
         }
     }
@@ -96,6 +96,7 @@ static NetResult fake_send(void *ctx, NetSocket *socket, const void *data,
         return NET_WOULD_BLOCK;
     memcpy(socket->tx + socket->tx_len, data, len);
     socket->tx_len += len;
+    socket->ready |= NET_WAIT_WRITE;
     *sent = len;
     return NET_OK;
 }
@@ -108,6 +109,8 @@ static NetResult fake_receive(void *ctx, NetSocket *socket, void *data,
         return NET_INVALID;
     if (socket->rx_len == 0) {
         *got = 0;
+        if (socket->peer_closed)
+            return NET_CLOSED;
         return NET_WOULD_BLOCK;
     }
 
@@ -115,6 +118,8 @@ static NetResult fake_receive(void *ctx, NetSocket *socket, void *data,
     memcpy(data, socket->rx, n);
     memmove(socket->rx, socket->rx + n, socket->rx_len - n);
     socket->rx_len -= n;
+    if (socket->rx_len == 0)
+        socket->ready &= ~NET_WAIT_READ;
     *got = n;
     return NET_OK;
 }
@@ -125,8 +130,10 @@ static void fake_close(void *ctx, NetSocket *socket)
     if (socket != NULL) {
         socket->open = 0;
         socket->listening = 0;
+        socket->ready = 0;
         socket->rx_len = 0;
         socket->tx_len = 0;
+        socket->used = 0;
     }
 }
 
@@ -143,6 +150,7 @@ static NetResult fake_listen(void *ctx, const NetAddress *addr,
         return NET_BUSY;
     socket->listening = 1;
     socket->peer = *addr;
+    socket->ready = NET_WAIT_READ; /* a listener is always polled for accept */
     s_last_listener = socket;
     *out = socket;
     return NET_OK;
@@ -276,6 +284,15 @@ void fake_net_queue_rx(NetSocket *socket, const void *data, size_t len)
         return;
     memcpy(socket->rx + socket->rx_len, data, len);
     socket->rx_len += len;
+    socket->ready |= NET_WAIT_READ;
+}
+
+void fake_net_shutdown(NetSocket *socket)
+{
+    if (socket == NULL)
+        return;
+    socket->peer_closed = 1;
+    socket->ready |= NET_WAIT_READ; /* wake the reader for the EOF */
 }
 
 size_t fake_net_tx_len(NetSocket *socket)
@@ -307,4 +324,5 @@ void fake_net_queue_accept(NetSocket *listener, uint32_t addr, uint16_t port)
     listener->pending[listener->pending_count].addr = addr;
     listener->pending[listener->pending_count].port = port;
     listener->pending_count++;
+    listener->ready |= NET_WAIT_READ;
 }

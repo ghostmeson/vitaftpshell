@@ -41,6 +41,7 @@ static void test_canonical(void)
     CHECK(path_canonicalize("data/x", &p) == PATH_INVALID);
     CHECK(path_canonicalize("", &p) == PATH_INVALID);
     CHECK(path_canonicalize("ux1:data", &p) == PATH_INVALID);
+    CHECK(path_canonicalize("ur0:tai\\boot_config.txt", &p) == PATH_INVALID);
 }
 
 static void test_parent_join(void)
@@ -63,6 +64,7 @@ static void test_volume(void)
 {
     CHECK(path_is_volume_root("ux0:"));
     CHECK(path_is_volume_root("UR0:/"));
+    CHECK(path_is_volume_root("uma0:"));
     CHECK(!path_is_volume_root("ux0:data"));
 
     Volume v;
@@ -92,6 +94,18 @@ static void test_denials_and_risk(void)
     CHECK(path_check_write("UR0:/TAI/./BOOT_CONFIG.TXT", 0, &risk) ==
           PATH_DENIED);
     CHECK(path_check_write("ux0:tai/boot_config.txt", 1, &risk) == PATH_DENIED);
+    CHECK(path_check_write("ur0:tai\\boot_config.txt", 0, &risk) ==
+          PATH_INVALID);
+    CHECK(path_check_write("ur0:tai\\boot_config.txt", 1, &risk) ==
+          PATH_INVALID);
+
+    CHECK(path_check_read("ux0:data/vitaFTPShell/sites.cfg", 1, &risk) ==
+          PATH_DENIED);
+    CHECK(path_check_read("ux0:data/vitaFTPShell/sites.cfg", 0, &risk) ==
+          PATH_OK);
+    CHECK(path_check_read("ur0:tai/config.txt", 1, &risk) == PATH_OK);
+    CHECK(path_check_read("ur0:tai/boot_config.txt", 1, &risk) == PATH_DENIED);
+    CHECK(path_check_read("ur0:tai/boot_config.txt", 0, &risk) == PATH_OK);
 
     CHECK(path_check_write("ur0:tai/config.txt", 0, &risk) == PATH_OK);
     CHECK(risk == PATH_RISK_HIGH);

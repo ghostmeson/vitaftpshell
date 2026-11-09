@@ -18,7 +18,7 @@ architecture plan are complete. Phases 1 and 2 are done: the build shape, the
 six port contracts and fakes, the gfx base and layout table, the reply/listing/
 path/format policy, and the site/settings/store/log policy exist. `tools/test/
 run.sh` passes nine host suites, `tools/preview/run.sh` renders a 960x544 PNG,
-and `build.sh` emits `vitaftpshell-v01.00-b4.vpk` from a stub `src/main.c`. No
+and `build.sh` emits `vitaftpshell-v01.00-b5.vpk` from a stub `src/main.c`. No
 protocol engine, screen, or platform adapter exists yet, and nothing has run on
 hardware.
 

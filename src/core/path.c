@@ -113,6 +113,12 @@ PathResult path_canonicalize(const char *input, Path *out)
     if (input == NULL || out == NULL)
         return PATH_INVALID;
 
+    /* The denial table must see the bytes the adapter will open. A backslash
+     * is not a separator here, and accepting it would let one spelling reach a
+     * denied file if the platform folds it. */
+    if (strchr(input, '\\') != NULL)
+        return PATH_INVALID;
+
     const char *p = input;
     while (*p == '/')
         p++;
@@ -220,7 +226,11 @@ int path_is_volume_root(const char *path)
     Path canonical;
     if (path_canonicalize(path, &canonical) != PATH_OK)
         return 0;
-    return strlen(canonical.text) == 4;
+    for (int v = 0; v < VOLUME_COUNT; ++v) {
+        if (ci_equal(canonical.text, path_volume_name((Volume)v)))
+            return 1;
+    }
+    return 0;
 }
 
 int path_volume(const char *path, Volume *out)
@@ -292,6 +302,24 @@ static PathResult check_path(const char *path, int server_role, PathRisk *risk)
 
     if (path_is_protected(p))
         return PATH_PROTECTED;
+
+    if (risk != NULL)
+        *risk = path_is_high_risk(p) ? PATH_RISK_HIGH : PATH_RISK_NORMAL;
+    return PATH_OK;
+}
+
+PathResult path_check_read(const char *path, int server_role, PathRisk *risk)
+{
+    Path canonical;
+    PathResult result = path_canonicalize(path, &canonical);
+    if (result != PATH_OK)
+        return result;
+
+    const char *p = canonical.text;
+    if (server_role && ci_equal(p, "ur0:tai/boot_config.txt"))
+        return PATH_DENIED;
+    if (server_role && is_under(p, APP_DATA))
+        return PATH_DENIED;
 
     if (risk != NULL)
         *risk = path_is_high_risk(p) ? PATH_RISK_HIGH : PATH_RISK_NORMAL;

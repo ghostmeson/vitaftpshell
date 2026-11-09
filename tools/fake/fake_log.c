@@ -15,6 +15,8 @@ static LogResult fake_append(void *ctx, const char *line, size_t len)
     (void)ctx;
     if (line == NULL || len >= FAKE_LOG_LINE_MAX)
         return LOG_DROPPED;
+    if (s_capacity > 0 && len + 1 > s_capacity)
+        return LOG_DROPPED; /* cannot fit even an empty file */
     if (s_capacity > 0 && s_used + len + 1 > s_capacity)
         return LOG_ROTATE;
     if (s_count == FAKE_LOG_LINES)
