@@ -22,6 +22,15 @@ typedef struct {
     float x, y, w, h;
 } Rect;
 
+/*
+ * Frame lifetime. These are the only vita2d calls outside the primitives, so
+ * the composition root never names vita2d and the host shim can stand in.
+ */
+int draw_init(void);
+void draw_shutdown(void);
+void draw_begin_frame(void);
+void draw_present(void);
+
 uint32_t draw_dim(uint32_t c, float f);
 
 void draw_rect(float x, float y, float w, float h, uint32_t c);

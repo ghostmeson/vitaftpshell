@@ -68,6 +68,10 @@ void ftp_server_destroy(FtpServer *server);
 
 FtpServerResult ftp_server_start(FtpServer *server, uint16_t control_port);
 void ftp_server_stop(FtpServer *server);
+
+/* U13: the worker's one transfer slot. While an app-side transfer or a local
+ * operation owns the slot, data and mutating commands answer 450. */
+void ftp_server_set_external_busy(FtpServer *server, int busy);
 void ftp_server_tick(FtpServer *server);
 
 FtpServerState ftp_server_state(const FtpServer *server);
@@ -75,5 +79,9 @@ int ftp_server_clients(const FtpServer *server);
 int ftp_server_busy(const FtpServer *server);
 uint16_t ftp_server_control_port(const FtpServer *server);
 uint16_t ftp_server_data_port(const FtpServer *server);
+/* The control peer and the last command, for the SERVER panel. */
+NetAddress ftp_server_peer(const FtpServer *server);
+const char *ftp_server_last_command(const FtpServer *server);
+NetAddress ftp_server_lan_address(const FtpServer *server);
 
 #endif

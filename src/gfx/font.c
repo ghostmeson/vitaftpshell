@@ -80,6 +80,13 @@ static const Glyph GLYPHS[] = {
     {'|', {0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}},
 };
 
+static FontTraceFn s_trace;
+
+void font_set_trace(FontTraceFn fn)
+{
+    s_trace = fn;
+}
+
 static const uint8_t *lookup(char ch)
 {
     if (ch >= 'a' && ch <= 'z')
@@ -143,6 +150,9 @@ void font_text_tracked(const char *s, float x, float y, float px, uint32_t c,
 {
     if (s == NULL || px <= 0.0f)
         return;
+
+    if (s_trace != NULL)
+        s_trace(s, x, y, px, c);
 
     float cx = x;
     for (const char *p = s; *p != '\0'; ++p) {

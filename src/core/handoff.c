@@ -186,7 +186,7 @@ int handoff_server_state(Handoff *handoff, UiServerRun *run, int *clients)
 
 int handoff_listing_begin(Handoff *handoff, UiPane pane)
 {
-    if (handoff == NULL || pane < 0 || pane >= UI_PANE_COUNT)
+    if (handoff == NULL || pane >= UI_PANE_COUNT)
         return -1;
 
     HandoffListings *listings = &handoff->listings[pane];
@@ -219,7 +219,7 @@ int handoff_listing_begin(Handoff *handoff, UiPane pane)
 int handoff_listing_publish(Handoff *handoff, UiPane pane, int slot,
                             const void *rows, int row_count)
 {
-    if (handoff == NULL || pane < 0 || pane >= UI_PANE_COUNT || slot < 0 ||
+    if (handoff == NULL || pane >= UI_PANE_COUNT || slot < 0 ||
         slot >= HANDOFF_LIST_GENS)
         return 0;
 
@@ -236,7 +236,7 @@ int handoff_listing_publish(Handoff *handoff, UiPane pane, int slot,
 int handoff_listing_acquire(Handoff *handoff, UiPane pane, const void **rows,
                             int *row_count, uint32_t *generation)
 {
-    if (handoff == NULL || pane < 0 || pane >= UI_PANE_COUNT)
+    if (handoff == NULL || pane >= UI_PANE_COUNT)
         return 0;
 
     HandoffListings *listings = &handoff->listings[pane];
@@ -281,7 +281,7 @@ int handoff_listing_acquire(Handoff *handoff, UiPane pane, const void **rows,
 
 void handoff_listing_release(Handoff *handoff, UiPane pane)
 {
-    if (handoff == NULL || pane < 0 || pane >= UI_PANE_COUNT)
+    if (handoff == NULL || pane >= UI_PANE_COUNT)
         return;
     HandoffListings *listings = &handoff->listings[pane];
     if (listings->reader_slot < 0)
@@ -292,9 +292,28 @@ void handoff_listing_release(Handoff *handoff, UiPane pane)
 
 unsigned handoff_listing_lost(const Handoff *handoff, UiPane pane)
 {
-    if (handoff == NULL || pane < 0 || pane >= UI_PANE_COUNT)
+    if (handoff == NULL || pane >= UI_PANE_COUNT)
         return 0;
     return handoff->listings[pane].lost;
+}
+
+void handoff_confirm_request(Handoff *handoff, const HandoffConfirm *confirm)
+{
+    if (handoff == NULL || confirm == NULL)
+        return;
+    handoff->confirm = *confirm;
+    handoff->confirm.valid = 1;
+    STORE_REL(&handoff->confirm_valid, 1);
+}
+
+int handoff_confirm_take(Handoff *handoff, HandoffConfirm *out)
+{
+    if (handoff == NULL || !LOAD_ACQ(&handoff->confirm_valid))
+        return 0;
+    if (out != NULL)
+        *out = handoff->confirm;
+    STORE_REL(&handoff->confirm_valid, 0);
+    return 1;
 }
 
 int handoff_bulk_write(Handoff *handoff, const void *data, size_t len,

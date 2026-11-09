@@ -19,13 +19,13 @@ hardware screenshot.*
 
 ## Status
 
-**Pre-alpha: the current VPK is a placeholder.** Strategy, requirements, screen
-design, architecture, and the protocol policy are complete. The FTP client and
-server engines, the transfer queue, the local operation planner and executor,
-the input reducer with its UI state, the cross-thread handoff, the path policy,
-and the host test harness are implemented and tested on the host. The on-device
-UI, platform adapters, and worker runtime are still to come, so the app does not
-transfer files yet and has not run on hardware.
+**Pre-alpha: the app builds and the screens and runtime are linked, but it has
+not run on hardware.** Strategy, requirements, screen design, architecture, and
+the protocol policy are complete. The FTP client and server engines, the
+transfer queue, the local operation planner and executor, the input reducer with
+its UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
+adapters, the app/worker runtime, the path policy, and the host test harness are
+implemented and tested on the host. The first console launch is Phase 6 (U14).
 
 Implemented and covered by host tests today:
 
@@ -51,7 +51,15 @@ Implemented and covered by host tests today:
 - canonical path, protected-path, denial, and risk policy; MLSD, Unix, and DOS
   listing parsers; reply and passive-mode parsing; the site book, settings,
   atomic store, and typed session-log events;
-- the COCKPIT-derived graphics base and the settled seven-surface layout table.
+- the COCKPIT-derived graphics base and the settled seven-surface layout table;
+- the WORKSPACE, SITES, SITE EDITOR, SERVER, ACTIONS, CONFIRM, and TEXT ENTRY
+  screens, drawn from `UiState` alone, with the settled geometry and copy;
+- the six Vita adapters: NetPort over sceNet and the BSD socket calls, FsPort
+  over sceIo, InputPort over SceCtrl, TextInputPort over the system IME, the
+  monotonic ClockPort, and the rotating LogPort;
+- the app/worker split: the app owns the frame loop and the one writer of
+  `UiState`; the worker owns the client, server, queue, local executor, site
+  book, settings, and log, and exchanges fixed records across the handoff.
 
 Roadmap and the single next action live in [`PROJECTS.md`](PROJECTS.md). The
 behavior contract is
@@ -96,14 +104,17 @@ answer.
 The policy and graphics layers run without VitaSDK:
 
 ```sh
-./tools/test/run.sh        # layering guard + sixteen host suites
-./tools/preview/run.sh     # renders build/preview/workspace.png at 960x544
+./tools/test/run.sh        # layering guard + nineteen host suites
+./tools/preview/run.sh     # renders 36 settled states to build/preview/
 ```
 
-The test runner compiles the real core against fake network, filesystem, input,
-IME, clock, and log ports. The layering guard fails if any file under `src/`
-outside the seven documented adapter files includes a `psp2/` or `vita2d.h`
-header.
+The test runner compiles the real core, screens, and runtime against fake
+network, filesystem, input, IME, clock, and log ports. The render suites assert
+the recorded draw calls and strings at the settled geometry; the integration
+suite drives the real reducer and worker through connect, list, mark, download,
+cancel, a failed site save, shutdown with an active transfer, and quit with the
+server on. The layering guard fails if any file under `src/` outside the seven
+documented adapter files includes a `psp2/` or `vita2d.h` header.
 
 ### Install
 
@@ -166,8 +177,8 @@ the host without a Vita header.
 | Runtime | `src/app/` | Frame loop, worker thread, rings, and snapshot handoff (U13) |
 | Composition | `src/main.c` | Constructs adapters and starts the runtime |
 
-One worker thread will own every long operation; the main thread owns only the
-UI. One writer owns each piece of shared state. See
+One worker thread owns every long operation; the main thread owns only the UI.
+One writer owns each piece of shared state. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the ports, the data phase, the
 threading handoff, and the path/denial table.
 
@@ -176,9 +187,11 @@ threading handoff, and the path/denial table.
 ```text
 src/core/        portable policy: protocol engines, parsers, path rules, store
 src/gfx/         theme, font, draw, and the settled layout table
-src/platform/    plain-C port contracts (adapters land in U12)
-src/main.c       composition root; a build-shape stub until U13
-tools/test/      layering guard and host suites
+src/ui/          the seven screens, the dock, legends, and the renderer
+src/app/         frame loop, the one worker, and the handoff consumer
+src/platform/    plain-C port contracts and the six psp2_* adapters
+src/main.c       composition root; constructs adapters and starts the app
+tools/test/      layering guard, host suites, and the app/worker integration test
 tools/fake/      controllable NetPort, FsPort, input, IME, clock, log, and FTP peers
 tools/preview/   software vita2d shim and the 960x544 preview
 docs/            architecture, design, decisions, plan, third-party notices

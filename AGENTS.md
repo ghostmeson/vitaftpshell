@@ -6,16 +6,17 @@ anything.
 
 ## Status
 
-`building`. Phases 1-4 are complete: the build shape, the six port contracts
+`building`. Phases 1-5 are complete: the build shape, the six port contracts
 and host fakes, the COCKPIT gfx base with the seven-surface layout table, the
 reply/listing/path/format policy, the site book/settings/store/log policy, the
 passive FTP client and server state machines, the transfer queue and slot
 arbitration, the local operation planner and executor, the input reducer and UI
-state, and the cross-thread handoff all exist. `tools/test/run.sh` passes
-sixteen host suites and `tools/preview/run.sh` renders a 960x544 PNG. The VPK
-is still a stub (`vitaftpshell-v01.00-b10.vpk`): no screen or platform adapter
-exists yet, and the engine is not linked into the app target until U13. Do not
-start coding from this file alone: the plan is the source of truth for behavior,
+state, the cross-thread handoff, the seven screen surfaces, the six Vita
+adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
+nineteen host suites, and `tools/preview/run.sh` renders 36 settled states.
+`build.sh` emits `vitaftpshell-v01.00-b15.vpk` with the real app linked. Nothing
+has run on hardware yet; the first console launch is Phase 6 (U14). Do not start
+coding from this file alone: the plan is the source of truth for behavior,
 sequencing, and verification, and `docs/DESIGN.md` is the layout authority.
 
 ## Read order
@@ -186,9 +187,9 @@ run is the only evidence that promotes the project to `verified`.
 - Target: PS Vita 3.65 Enso, VitaSDK 2026.08, libvita2d.
 - `./build.sh` builds one UNSAFE eboot and one VPK; `./tools/test/run.sh` runs
   the layering guard and the host tests; `./tools/preview/run.sh` renders the
-  gfx layer on the host; `./send.sh <vita-ip>` uploads the current VPK. The
-  renderer's libvita2d link and the SDK stubs join when U13 adds the gfx and
-  adapter sources to the app target.
+  screens on the host; `./send.sh <vita-ip>` uploads the current VPK. The app
+  target links the real core, gfx, ui, app, and adapters with libvita2d and the
+  SDK stubs the adapters call.
 - Every build emits `vitaftpshell-v<version>-b<build>.vpk`.
 - `send.sh` refuses an artifact whose build number does not match
   `BUILD_NUMBER`, so a failed build cannot upload the previous VPK.
@@ -243,17 +244,18 @@ None at the product or architecture level. The planning session resolved authid,
 passive ports, threading, listing caps, the site and log formats, MLSD, the server
 foundation, the local `tai` policy, and the five deferred product choices; the
 answers are D30-D43 and the plan's KTDs; D44-D47 record the standalone
-repository and the Phase 4 implementation shapes.
+repository and the Phase 4 implementation shapes; D48-D52 record the Phase 5
+composition, UI evidence, and safety backstops.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
 
 - the exact listing-arena size, after a memory measurement on hardware;
 - the reply-line cap, nominally 4096 bytes, against real servers;
-- whether `sceIoRename` replaces an existing target, and which fallback KTD12
-  needs as a result;
-- the `FsEntry.mtime` unit (the server assumes Unix seconds) and whether the
-  adapter must convert or report unknown;
+- whether `sceIoRename` replaces an existing target; the adapter reports 0, so
+  the aside fallback is always used (D48);
+- the `FsEntry.mtime` unit (the server assumes Unix seconds); the adapter
+  reports unknown and the UI renders `--` (D48);
 - directory sync after a rename: `FsPort` has no call for it, so power-loss
   durability needs a port extension or a confirmed platform guarantee;
 - the IME initialization order;
@@ -275,10 +277,14 @@ vitaFTPShell/
   LICENSES/            third-party license notices (COCKPIT MIT)
   .github/workflows/   host-test CI
   src/
-    main.c             composition root; a build-shape stub until U13
+    main.c             composition root; constructs adapters, starts the app
     core/              policy: parsers, path, store, log, queue, planner,
                        executor, input/UI state, handoff
     core/ftp/          passive FTP client and server state machines
+    gfx/               theme, font, draw primitives; draw.c owns vita2d
+    ui/                the seven screens, dock, legends, shared parts, render
+    app/               app frame loop and the one worker
+    platform/          port headers and the six psp2_* adapters
   sce_sys/             placeholder icon and LiveArea art (U14 replaces)
   tools/
     test/run.sh        layering guard and host test runner
@@ -290,7 +296,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D47
+    DECISIONS.md       numbered decisions, D1-D52
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification
     features/          future feature documents

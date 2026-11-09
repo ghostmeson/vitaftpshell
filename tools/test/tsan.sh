@@ -18,7 +18,7 @@ if ! "$CC" -std=c99 -O1 -g -pthread -fsanitize=thread -DHANDOFF_PLAIN \
   "$ROOT/src/core/handoff.c" "$ROOT/src/core/uiact.c" \
   "$ROOT/src/core/uistate.c" "$ROOT/src/core/input.c" \
   "$ROOT/src/core/xfer.c" "$ROOT/src/core/path.c" \
-  "$ROOT/src/core/cause.c" \
+  "$ROOT/src/core/cause.c" "$ROOT/src/core/fmt.c" \
   -o "$OUT/test_handoff_plain" 2>"$OUT/compile.log"; then
   echo "tsan: not available here; ordering check skipped"
   exit 0

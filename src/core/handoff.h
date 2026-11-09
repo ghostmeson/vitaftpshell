@@ -23,7 +23,8 @@
 #define HANDOFF_CMD_CAP 64
 #define HANDOFF_EVT_CAP 128
 #define HANDOFF_LIST_GENS 3
-#define HANDOFF_BULK_BYTES 8192
+#define HANDOFF_BULK_BYTES 16384
+#define HANDOFF_CONFIRM_ITEMS 16
 
 typedef struct {
     UiCommand command;
@@ -33,9 +34,17 @@ typedef struct {
 typedef enum {
     HANDOFF_EVT_PROGRESS = 0,
     HANDOFF_EVT_STATE,
+    HANDOFF_EVT_TRANSFER_STARTED,
     HANDOFF_EVT_TRANSFER_DONE,
     HANDOFF_EVT_SERVER_STATE,
-    HANDOFF_EVT_ERROR
+    HANDOFF_EVT_ERROR,
+    HANDOFF_EVT_SESSION,
+    HANDOFF_EVT_LISTING_BEGIN,
+    HANDOFF_EVT_LISTING_END,
+    HANDOFF_EVT_SITE_BOOK,
+    HANDOFF_EVT_SERVER_CLIENT,
+    HANDOFF_EVT_TRANSFER_CANCELLED,
+    HANDOFF_EVT_EDIT_SITE
 } HandoffEventKind;
 
 typedef struct {
@@ -51,7 +60,42 @@ typedef struct {
     OpStage stage;
     char path[PATH_MAX_LEN];
     char detail[128];
+    UiPane pane;
+    int truncated;
+    int connected;
+    char op[32];
+    int item_index;
+    int item_total;
+    uint64_t rate;
+    int rate_known;
+    uint64_t elapsed_ms;
+    int elapsed_known;
+    uint64_t free_bytes;
+    int free_known;
+    int port;
+    XferDirection direction;
+    int value;
+    char address[32];
+    int address_known;
+    Site site;
 } HandoffEvent;
+
+typedef struct {
+    char name[PATH_NAME_MAX];
+    uint64_t size;
+    int size_known;
+} HandoffConfirmItem;
+
+typedef struct {
+    int valid;
+    UiConfirmKind kind;
+    int item_count;
+    int existing_count;
+    int high_risk;
+    char risk_path[PATH_MAX_LEN];
+    char context[128];
+    HandoffConfirmItem items[HANDOFF_CONFIRM_ITEMS];
+} HandoffConfirm;
 
 typedef struct {
     const void *rows;
@@ -104,6 +148,9 @@ typedef struct {
 
     HandoffListings listings[UI_PANE_COUNT];
     HandoffBulk bulk;
+
+    int confirm_valid;
+    HandoffConfirm confirm;
 } Handoff;
 
 void handoff_init(Handoff *handoff);
@@ -128,6 +175,9 @@ int handoff_listing_acquire(Handoff *handoff, UiPane pane, const void **rows,
                             int *row_count, uint32_t *generation);
 void handoff_listing_release(Handoff *handoff, UiPane pane);
 unsigned handoff_listing_lost(const Handoff *handoff, UiPane pane);
+
+void handoff_confirm_request(Handoff *handoff, const HandoffConfirm *confirm);
+int handoff_confirm_take(Handoff *handoff, HandoffConfirm *out);
 
 int handoff_bulk_write(Handoff *handoff, const void *data, size_t len,
                        uint32_t generation);

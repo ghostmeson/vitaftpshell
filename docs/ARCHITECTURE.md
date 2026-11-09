@@ -1,12 +1,13 @@
 # Architecture
 
-**Status:** settled by the v1 plan. Phases 1-4 have built the project shape,
-the shared foundation, the protocol engines, and the operations and state layer:
-the build and packaging, the six port contracts and host fakes, the gfx base and
-layout table, the reply/listing/path/format policy, the site/settings/store/log
-policy, the passive FTP client and server, the transfer queue, the local planner
-and executor, the input reducer and UI state, and the handoff. The screens,
-adapters, and runtime remain contracts until their units land. The plan
+**Status:** settled by the v1 plan. Phases 1-5 have built the project shape, the
+shared foundation, the protocol engines, the operations and state layer, the
+screens, the adapters, and the runtime: the build and packaging, the six port
+contracts and host fakes, the gfx base and layout table, the reply/listing/path/
+format policy, the site/settings/store/log policy, the passive FTP client and
+server, the transfer queue, the local planner and executor, the input reducer
+and UI state, the handoff, the seven screen surfaces, the six Vita adapters, and
+the app/worker composition. The first console launch is U14. The plan
 [`plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md)
 owns sequencing and the unit-level detail; this document owns the shape.
 
@@ -138,8 +139,42 @@ arena.
 - `src/core/handoff.c` carries commands and events across fixed rings. A server
   stop and a cancel have dedicated slots and are never lost to a full command
   ring; progress is a coalesced seqlock latch, so a terminal state cannot be
-  overwritten; each pane has three listing generations; the site book uses the
-  bulk lane; the server state is latched.
+  overwritten; each pane has three listing generations; the site book uses a
+  16 KiB bulk lane (D49); the server state and a worker confirmation are
+  latched; the query result is a fixed record.
+
+## Screens and runtime (U10-U13)
+
+- `src/ui/` is a pure presentation layer. `render.c` dispatches the current
+  screen, draws the shared header, and never includes a platform header.
+  `workspace.c` and `dock.c` own the two panes and the five dock states; the
+  other five files own SITES, SITE EDITOR, ACTIONS, SERVER, CONFIRM, and the
+  text-entry notice. `parts.c` holds the shared frame, keycap, wash, and slab
+  primitives.
+- `font_set_trace` is a host-only trace hook: the render suites assert the
+  string, position, and colour, because glyph rectangles alone cannot name a
+  label. The app leaves the hook NULL.
+- `src/app/app.c` owns the frame loop and `UiState`; `src/app/worker.c` owns the
+  client, server, queue, local executor, site book, settings, and log. The app
+  polls input, decodes repeat, feeds the reducer, pushes commands, drains
+  events, acquires one listing generation per pane per frame, draws, and
+  releases. It never opens a socket or touches a file.
+- In the product the worker runs on a POSIX thread. The host integration test
+  passes `worker_thread = 0` and calls `worker_step` inline through `app_tick`;
+  the same worker code runs either way (D49).
+- The worker marks the server external-busy while an app-side transfer or queue
+  owns the one slot, so a PC data command answers 450 (D51). A local action
+  refuses while a transfer or server data command is active, and refuses a plan
+  whose facts overflow the scan cap rather than planning a subset.
+- The app treats a failed site save as `SAVE UNAVAILABLE`, keeps the book in
+  memory, and sends the save result and the bulk view on separate events. The
+  editor receives a full site (including the password) through the edit-site
+  event, never through the site list.
+- A high-risk local write is checked twice: the reducer checks the destination
+  and every marked source, and the worker checks the built plan and asks for the
+  high-risk confirmation if the reducer could not know the final name (D51).
+- The server transfer start is its own event and its own start timestamp; a
+  server upload with an unknown total still shows direction, name, and progress.
 
 ## Threading and handoff
 
@@ -168,11 +203,33 @@ on its own):
   worker reserves a slot the reader does not hold, fills it, and publishes it
   with a release store. The UI keeps one generation until it releases it at a
   frame boundary, so a draw cannot see rows change under it.
-- **The site book** is larger than one record and crosses on a bulk lane carrying
-  a generation number, so a stale read is detectable.
+- **The site book** is larger than one record and crosses on a 16 KiB bulk lane
+  carrying a generation number, so a stale read is detectable. The payload is a
+  view without passwords (D49).
 
 Nothing is read by one thread while the other writes it. A second writer is a
 defect, not a shortcut.
+
+### Adapter claims (U12)
+
+Every unverified Vita behaviour is a `[C]` comment in the adapter that owns it:
+
+- `psp2_net.c`: `sceNetCtlInit` may already be up; `fcntl(O_NONBLOCK)` maps to
+  the net non-blocking option; `select` over sceNet sockets; the resolver
+  timeout unit and retry count; `SceNetCtlInfo.ip_address` is a dotted quad.
+- `psp2_fs.c`: the `0x3001` devctl free-space call is proven only on `ux0:`;
+  `ur0:`/`uma0:` are unverified; `mtime` is reported unknown; `sceIoRename`
+  replace-on-existing is unverified, so `rename_replaces()` returns 0 and the
+  aside fallback is always used (D48).
+- `psp2_input.c`: the plain peek reports shoulders as L1/R1; the wide analog
+  mode reports 0..255 centred at 128.
+- `psp2_ime.c`: the common-dialog config must precede the IME dialog; the
+  init order is an open decision; password masking and the first status frame
+  are unverified.
+- `psp2_log.c`: an append handle plus `SCE_SEEK_END` reports the existing size;
+  if it fails, writes are refused rather than bypassing the cap.
+
+These are hardware items for U14; none may move into policy.
 
 ## Data phase
 
@@ -314,10 +371,12 @@ so a rendered state is the shipped composition, not a copy.
 - Artifact `vitaftpshell-v<version>-b<build>.vpk`; `build/` keeps exactly one.
 - The unstripped ELF is kept.
 - Host tests are a separate script and never enter the VPK.
-- `src/main.c` is a stub until U13: it includes no platform header, because the
-  renderer owns `vita2d` and each adapter owns its SDK calls. The libvita2d link
-  and the SDK stubs join when U13 adds the gfx and adapter sources to the app
-  target; linking an uncalled library is an unused link.
+- `src/main.c` is the composition root: it constructs each adapter once, calls
+  `draw_init`, starts the app, and owns shutdown. It includes no platform
+  header; the six `psp2_*.c` adapters own the SDK calls and `draw.c` owns
+  `vita2d`.
+- The app target compiles the real core, gfx, ui, app, and adapter sources and
+  links `vita2d`, the SDK stubs the adapters call, `m`, and `pthread` (D48).
 - `tools/test/run.sh` scans every `.c` and `.h` under `src/` against the
   seven-file allowlist and fails on a `psp2/`, `psp2common/`, `psp2kern/`, or
   `vita2d.h` include elsewhere. `tools/` is host-only and outside the guard:
@@ -354,7 +413,11 @@ asserts:
   necessary rather than assumed;
 - the reducer's transitions, marks, dock focus, confirm scrolling, and the
   high-risk confirmation;
-- the recorded draw calls for each screen state.
+- the recorded draw calls and strings for every render state:
+  WORKSPACE, SITES, SITE EDITOR, SERVER, ACTIONS, CONFIRM, and TEXT ENTRY;
+- the app/worker integration: connect, list, mark, download, cancel, a failed
+  site save, shutdown with an active transfer, and quit with the server on;
+- `tools/test/tsan.sh` also remains a required negative ordering check.
 
 A test that only proves a constant is not a test. A hardware run is the only
 evidence that promotes the project to `verified`.

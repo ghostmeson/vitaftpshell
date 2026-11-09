@@ -3,8 +3,8 @@
 
 set -euo pipefail
 
-# Host preview: renders the shipped gfx layer through a software vita2d shim and
-# writes a PNG. Not part of the app build.
+# Host preview: renders the shipped screens through a software vita2d shim and
+# writes one PNG per settled state. Not part of the app build.
 #
 #   tools/preview/run.sh [output-dir]
 
@@ -21,7 +21,8 @@ CC="${CC:-cc}"
   -I"$ROOT/src" \
   "$ROOT/tools/preview/preview.c" \
   "$ROOT/tools/preview/vita2d_soft.c" \
-  "$ROOT"/src/gfx/*.c \
+  "$ROOT"/src/gfx/*.c "$ROOT"/src/ui/*.c \
+  "$ROOT"/src/core/*.c "$ROOT"/src/core/ftp/*.c \
   -lz -lm \
   -o "$OUT/preview"
 

@@ -91,6 +91,9 @@ int xfer_cancel_active(XferQueue *queue, OpCause cause, OpStage stage,
 int xfer_set_conflict(XferQueue *queue, XferConflict decision);
 XferConflict xfer_conflict(const XferQueue *queue);
 
+/* R40: clear every queued item, keeping an active transfer. */
+void xfer_clear_queued(XferQueue *queue);
+
 /* A slow reader sees a terminal outcome exactly once. */
 int xfer_take_terminal(XferQueue *queue, XferItem *out, OpCause *cause,
                        OpStage *stage);

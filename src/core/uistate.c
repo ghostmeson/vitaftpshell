@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core/fmt.h"
 #include "core/path.h"
 
 static char lower_ascii(char c)
@@ -69,8 +70,7 @@ static void set_focus(UiState *state, UiFocus focus)
 
 static void set_status(UiState *state, const char *text)
 {
-    snprintf(state->status, sizeof(state->status), "%s",
-             text != NULL ? text : "");
+    fmt_copy(state->status, sizeof(state->status), text != NULL ? text : "");
 }
 
 static void enter_screen(UiState *state, UiScreen screen)
@@ -106,9 +106,13 @@ static int join_path(UiPane pane, const UiPaneState *pane_state,
         return n > 0 && (size_t)n < cap;
     }
 
+    size_t len = strlen(pane_state->path);
+    int slash = len > 0 && pane_state->path[len - 1] == '/';
     int n;
     if (strcmp(pane_state->path, "/") == 0)
         n = snprintf(out, cap, "/%s", name);
+    else if (slash)
+        n = snprintf(out, cap, "%s%s", pane_state->path, name);
     else
         n = snprintf(out, cap, "%s/%s", pane_state->path, name);
     return n > 0 && (size_t)n < cap;
@@ -148,6 +152,8 @@ static int volume_changed(UiPane pane, const char *old_path,
     char new_token[16];
     remote_volume(old_path, old_token, sizeof(old_token));
     remote_volume(new_path, new_token, sizeof(new_token));
+    if (old_token[0] == '\0' || new_token[0] == '\0')
+        return 0;
     return !ci_equal(old_token, new_token);
 }
 
@@ -195,7 +201,7 @@ static int toggle_mark(UiPaneState *pane, const UiRow *row, const char *path)
 
     UiMark *mark = &pane->marks[pane->mark_count++];
     memset(mark, 0, sizeof(*mark));
-    snprintf(mark->path.text, sizeof(mark->path.text), "%s", path);
+    fmt_copy(mark->path.text, sizeof(mark->path.text), path);
     mark->size = row->size;
     mark->size_known = row->size_known;
     recompute_marks(pane);
@@ -261,8 +267,7 @@ static void set_transfer_dock(UiState *state, const UiStateEvent *event,
 {
     state->dock.state = dock_state;
     if (event->text[0] != '\0')
-        snprintf(state->dock.message, sizeof(state->dock.message), "%s",
-                 event->text);
+        fmt_copy(state->dock.message, sizeof(state->dock.message), event->text);
     state->dock.done = event->bytes;
     state->dock.total = event->total;
     state->dock.total_known = event->total_known;
@@ -294,13 +299,13 @@ static void open_confirm(UiState *state, UiConfirmKind kind)
         c->choice_count = 3;
         snprintf(c->title, sizeof(c->title), "DESTINATIONS EXIST");
         snprintf(c->warning, sizeof(c->warning),
-                 "EXISTING FILES WILL BE REPLACED.");
+                 "THE REPLACED FILES CANNOT BE RESTORED.");
         break;
     case UI_CONFIRM_CANCEL_XFER:
         c->choices[0] = UI_CHOICE_KEEP;
         c->choices[1] = UI_CHOICE_CANCEL;
         c->choice_count = 2;
-        snprintf(c->title, sizeof(c->title), "CANCEL TRANSFER");
+        snprintf(c->title, sizeof(c->title), "CANCEL THE TRANSFER");
         snprintf(c->warning, sizeof(c->warning),
                  "THE PARTIAL FILE IS REMOVED.");
         break;
@@ -308,9 +313,9 @@ static void open_confirm(UiState *state, UiConfirmKind kind)
         c->choices[0] = UI_CHOICE_KEEP;
         c->choices[1] = UI_CHOICE_STOP;
         c->choice_count = 2;
-        snprintf(c->title, sizeof(c->title), "STOP SERVER");
+        snprintf(c->title, sizeof(c->title), "STOP THE SERVER");
         snprintf(c->warning, sizeof(c->warning),
-                 "THE IN-FLIGHT WRITE IS CLOSED.");
+                 "THE PARTIAL FILE IS REMOVED.");
         break;
     case UI_CONFIRM_DISCARD:
         c->choices[0] = UI_CHOICE_KEEP;
@@ -359,6 +364,111 @@ static void close_confirm(UiState *state, int return_to_editor)
     set_focus(state, focus_for_screen(state->screen));
     if (state->screen == UI_SCREEN_WORKSPACE)
         set_focus(state, UI_FOCUS_LIST);
+}
+
+static int action_for_pane(UiPane pane, UiAction action)
+{
+    if (pane == UI_PANE_LOCAL)
+        return action != UI_ACTION_DOWNLOAD;
+    return action == UI_ACTION_DOWNLOAD || action == UI_ACTION_NEW_FOLDER ||
+           action == UI_ACTION_RENAME || action == UI_ACTION_DELETE;
+}
+
+static void prepare_visible(UiActions *actions, UiPane pane)
+{
+    actions->pane = (int)pane;
+    actions->visible_count = 0;
+    for (int i = 0; i < UI_ACTION_COUNT; ++i) {
+        if (action_for_pane(pane, (UiAction)i))
+            actions->visible[actions->visible_count++] = i;
+    }
+    if (actions->visible_count == 0)
+        return;
+    actions->selected = actions->visible[0];
+}
+
+static void disable(UiActions *actions, UiAction action, const char *reason)
+{
+    actions->enabled[action] = 0;
+    fmt_copy(actions->reason[action], sizeof(actions->reason[action]), reason);
+}
+
+void ui_actions_prepare(UiState *state)
+{
+    if (state == NULL)
+        return;
+
+    UiActions *actions = &state->actions;
+    UiPane pane_index = state->active_pane;
+    UiPaneState *pane = &state->panes[pane_index];
+    const UiRow *row = selected_row(state, pane_index);
+
+    for (int i = 0; i < UI_ACTION_COUNT; ++i) {
+        actions->enabled[i] = 1;
+        actions->reason[i][0] = '\0';
+    }
+    prepare_visible(actions, pane_index);
+
+    char source[PATH_MAX_LEN];
+    source[0] = '\0';
+    if (pane->mark_count > 0)
+        fmt_copy(source, sizeof(source), pane->marks[0].path.text);
+    else if (row != NULL && row->type != UI_ROW_UP)
+        join_path(pane_index, pane, row->name, source, sizeof(source));
+    else
+        fmt_copy(source, sizeof(source), pane->path);
+
+    actions->marked = pane->mark_count;
+    fmt_copy(actions->path, sizeof(actions->path), source);
+    fmt_copy(actions->dest, sizeof(actions->dest), pane->path);
+    fmt_copy(actions->other, sizeof(actions->other), state->panes[other_pane(pane_index)].path);
+
+    int at_root = pane_index == UI_PANE_LOCAL ? path_is_volume_root(pane->path)
+                                              : strcmp(pane->path, "/") == 0;
+    int protected_source = 0;
+    PathRisk risk = PATH_RISK_NORMAL;
+    if (pane_index == UI_PANE_LOCAL && source[0] != '\0') {
+        PathResult check = path_check_delete(source, 0, &risk);
+        if (check == PATH_PROTECTED || check == PATH_DENIED)
+            protected_source = 1;
+    }
+
+    if (pane_index == UI_PANE_LOCAL) {
+        if (pane->mark_count == 0) {
+            disable(actions, UI_ACTION_COPY, "MARK TO COPY");
+            disable(actions, UI_ACTION_MOVE, "MARK TO MOVE");
+        }
+        if (at_root || protected_source) {
+            const char *why = at_root ? "VOLUME ROOT" : "PROTECTED PATH";
+            disable(actions, UI_ACTION_COPY, why);
+            disable(actions, UI_ACTION_MOVE, why);
+            disable(actions, UI_ACTION_RENAME, why);
+            disable(actions, UI_ACTION_DELETE, why);
+        }
+        if (pane->mark_count > 1)
+            disable(actions, UI_ACTION_RENAME, "ONE ITEM ONLY");
+    } else {
+        if (!pane->connected) {
+            disable(actions, UI_ACTION_DOWNLOAD, "NOT CONNECTED");
+            disable(actions, UI_ACTION_RENAME, "NOT CONNECTED");
+            disable(actions, UI_ACTION_DELETE, "NOT CONNECTED");
+        }
+        if (row == NULL || row->type == UI_ROW_UP)
+            disable(actions, UI_ACTION_DOWNLOAD, "NO SELECTION");
+        if (at_root || strcmp(pane->path, "/") == 0) {
+            disable(actions, UI_ACTION_RENAME, "REMOTE ROOT");
+            disable(actions, UI_ACTION_DELETE, "REMOTE ROOT");
+        }
+    }
+
+    if ((pane_index == UI_PANE_LOCAL && !state->panes[UI_PANE_REMOTE].connected) ||
+        (pane_index == UI_PANE_REMOTE && !pane->connected))
+        disable(actions, UI_ACTION_UPLOAD, "NOT CONNECTED");
+
+    if (row == NULL && pane->mark_count == 0) {
+        disable(actions, UI_ACTION_RENAME, "NO SELECTION");
+        disable(actions, UI_ACTION_DELETE, "NO SELECTION");
+    }
 }
 
 static void handle_workspace_key(UiState *state, const UiStateEvent *event,
@@ -430,13 +540,12 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         }
 
         if (row->type == UI_ROW_DIR) {
-            snprintf(pane->pending_path, sizeof(pane->pending_path), "%s",
-                     full);
+            fmt_copy(pane->pending_path, sizeof(pane->pending_path), full);
             pane->loading = 1;
             UiCommand *c = emit(out, max, count, UI_CMD_OPEN_PATH);
             if (c != NULL) {
                 c->pane = state->active_pane;
-                snprintf(c->path, sizeof(c->path), "%s", full);
+                fmt_copy(c->path, sizeof(c->path), full);
             }
             return;
         }
@@ -454,10 +563,8 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
                 if (c == NULL)
                     break;
                 c->pane = state->active_pane;
-                snprintf(c->path, sizeof(c->path), "%s",
-                         pane->marks[i].path.text);
-                snprintf(c->path2, sizeof(c->path2), "%s",
-                         state->panes[other].path);
+                fmt_copy(c->path, sizeof(c->path), pane->marks[i].path.text);
+                fmt_copy(c->path2, sizeof(c->path2), state->panes[other].path);
                 c->value = pane->mark_count;
             }
             return;
@@ -466,9 +573,8 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         UiCommand *c = emit(out, max, count, UI_CMD_TRANSFER);
         if (c != NULL) {
             c->pane = state->active_pane;
-            snprintf(c->path, sizeof(c->path), "%s", full);
-            snprintf(c->path2, sizeof(c->path2), "%s",
-                     state->panes[other].path);
+            fmt_copy(c->path, sizeof(c->path), full);
+            fmt_copy(c->path2, sizeof(c->path2), state->panes[other].path);
             c->value = 0;
         }
         return;
@@ -510,27 +616,10 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
     case UI_KEY_START:
         enter_screen(state, UI_SCREEN_SERVER);
         return;
-    case UI_KEY_SELECT: {
+    case UI_KEY_SELECT:
         enter_screen(state, UI_SCREEN_ACTIONS);
-        state->actions.selected = 0;
-        state->actions.marked = pane->mark_count;
-
-        const UiRow *row = selected_row(state, state->active_pane);
-        char source[PATH_MAX_LEN];
-        source[0] = '\0';
-        if (row != NULL && row->type != UI_ROW_UP)
-            join_path(state->active_pane, pane, row->name, source,
-                      sizeof(source));
-        if (source[0] == '\0')
-            snprintf(source, sizeof(source), "%s", pane->path);
-        snprintf(state->actions.path, sizeof(state->actions.path), "%s",
-                 source);
-        snprintf(state->actions.dest, sizeof(state->actions.dest), "%s",
-                 pane->path);
-        snprintf(state->actions.other, sizeof(state->actions.other), "%s",
-                 state->panes[other].path);
+        ui_actions_prepare(state);
         return;
-    }
     default:
         return;
     }
@@ -543,10 +632,14 @@ static void handle_sites_key(UiState *state, const UiStateEvent *event,
     case UI_KEY_UP:
         if (state->sites.selected > 0)
             state->sites.selected--;
+        if (state->sites.selected < state->sites.first)
+            state->sites.first = state->sites.selected;
         return;
     case UI_KEY_DOWN:
         if (state->sites.selected + 1 < state->sites.count)
             state->sites.selected++;
+        if (state->sites.selected >= state->sites.first + 6)
+            state->sites.first = state->sites.selected - 5;
         return;
     case UI_KEY_CROSS: {
         UiCommand *c = emit(out, max, count, UI_CMD_CONNECT_SITE);
@@ -560,6 +653,7 @@ static void handle_sites_key(UiState *state, const UiStateEvent *event,
             c->index = state->sites.selected;
         state->editor_return = UI_SCREEN_SITES;
         state->editor.dirty = 0;
+        state->editor.new_site = 0;
         state->editor.error[0] = '\0';
         enter_screen(state, UI_SCREEN_SITE_EDITOR);
         return;
@@ -573,13 +667,16 @@ static void handle_sites_key(UiState *state, const UiStateEvent *event,
         state->editor.anonymous = 1;
         state->editor.field = UI_FIELD_NAME;
         state->editor.dirty = 0;
+        state->editor.new_site = 1;
+        state->editor.password_set = 0;
         enter_screen(state, UI_SCREEN_SITE_EDITOR);
         return;
     }
     case UI_KEY_SELECT:
         open_confirm(state, UI_CONFIRM_DELETE_SITE);
-        snprintf(state->confirm.context, sizeof(state->confirm.context),
-                 "SITE %d", state->sites.selected + 1);
+        if (state->sites.selected < state->sites.count)
+            fmt_copy(state->confirm.context, sizeof(state->confirm.context),
+                     state->sites.rows[state->sites.selected].name);
         return;
     case UI_KEY_CIRCLE:
         leave_screen(state);
@@ -693,18 +790,15 @@ static void handle_editor_key(UiState *state, const UiStateEvent *event,
                 c->field = (UiField)editor->field;
                 c->index = editor->field == UI_FIELD_PASSWORD;
                 c->value = field_max((UiField)editor->field);
-                snprintf(c->title, sizeof(c->title), "%s",
-                         field_title((UiField)editor->field));
-                snprintf(c->text, sizeof(c->text), "%s", value);
+                fmt_copy(c->title, sizeof(c->title), field_title((UiField)editor->field));
+                fmt_copy(c->text, sizeof(c->text), value);
             }
             state->text.open = 1;
             state->text.field = (UiField)editor->field;
             state->text.masked = editor->field == UI_FIELD_PASSWORD;
             state->text.max = field_max((UiField)editor->field);
-            snprintf(state->text.title, sizeof(state->text.title), "%s",
-                     field_title((UiField)editor->field));
-            snprintf(state->text.value, sizeof(state->text.value), "%s",
-                     value);
+            fmt_copy(state->text.title, sizeof(state->text.title), field_title((UiField)editor->field));
+            fmt_copy(state->text.value, sizeof(state->text.value), value);
         }
         return;
     case UI_KEY_SQUARE:
@@ -727,7 +821,15 @@ static void handle_editor_key(UiState *state, const UiStateEvent *event,
         editor->error[0] = '\0';
         {
             UiCommand *c = emit(out, max, count, UI_CMD_SAVE_SITE);
-            (void)c;
+            if (c != NULL) {
+                c->index = editor->new_site ? -1 : state->sites.selected;
+                fmt_copy(c->site.name, sizeof(c->site.name), editor->name);
+                fmt_copy(c->site.host, sizeof(c->site.host), editor->host);
+                c->site.port = (uint16_t)editor->port;
+                c->site.anonymous = editor->anonymous;
+                fmt_copy(c->site.username, sizeof(c->site.username), editor->username);
+                fmt_copy(c->site.password, sizeof(c->site.password), editor->password);
+            }
         }
         return;
     case UI_KEY_CIRCLE:
@@ -758,6 +860,18 @@ static void handle_server_key(UiState *state, const UiStateEvent *event,
         }
         if (state->server.run == UI_SERVER_OFF) {
             emit(out, max, count, UI_CMD_START_SERVER);
+        } else if (state->dock.active &&
+                   (state->dock.direction == XFER_DIR_SERVER_UPLOAD ||
+                    state->dock.direction == XFER_DIR_SERVER_DOWNLOAD)) {
+            open_confirm(state, UI_CONFIRM_STOP_SERVER);
+            char context[320];
+            snprintf(context, sizeof(context), "%s %s",
+                     state->dock.direction == XFER_DIR_SERVER_UPLOAD
+                         ? "UPLOAD"
+                         : "DOWNLOAD",
+                     state->dock.name);
+            fmt_copy(state->confirm.context,
+                     sizeof(state->confirm.context), context);
         } else {
             emit(out, max, count, UI_CMD_STOP_SERVER);
         }
@@ -779,70 +893,182 @@ static const char *protection_reason(PathResult result, const char *path)
     return "INVALID PATH";
 }
 
+static const char *last_segment(const char *path)
+{
+    const char *name = path;
+    for (const char *p = path; *p != '\0'; ++p) {
+        if (*p == '/' || *p == ':')
+            name = p + 1;
+    }
+    return name;
+}
+
 static void handle_actions_key(UiState *state, const UiStateEvent *event,
                                UiCommand *out, int max, int *count)
 {
     switch (event->key) {
-    case UI_KEY_UP:
-        if (state->actions.selected > 0)
-            state->actions.selected--;
+    case UI_KEY_UP: {
+        for (int i = 0; i < state->actions.visible_count; ++i) {
+            if (state->actions.visible[i] == state->actions.selected) {
+                if (i > 0)
+                    state->actions.selected = state->actions.visible[i - 1];
+                return;
+            }
+        }
         return;
-    case UI_KEY_DOWN:
-        if (state->actions.selected + 1 < UI_ACTION_COUNT)
-            state->actions.selected++;
+    }
+    case UI_KEY_DOWN: {
+        for (int i = 0; i < state->actions.visible_count; ++i) {
+            if (state->actions.visible[i] == state->actions.selected) {
+                if (i + 1 < state->actions.visible_count)
+                    state->actions.selected = state->actions.visible[i + 1];
+                return;
+            }
+        }
         return;
+    }
     case UI_KEY_CROSS: {
         UiAction action = (UiAction)state->actions.selected;
         if (!state->actions.enabled[action]) {
             set_status(state, "ACTION UNAVAILABLE");
             return;
         }
+
         const UiPaneState *pane = &state->panes[state->active_pane];
-        const char *first_source = state->actions.path;
-        if ((action == UI_ACTION_COPY || action == UI_ACTION_MOVE ||
-             action == UI_ACTION_DELETE) &&
-            pane->mark_count > 0)
-            first_source = pane->marks[0].path.text;
-
-        if (action == UI_ACTION_DELETE) {
-            PathRisk risk = PATH_RISK_NORMAL;
-            PathResult result = path_check_delete(first_source, 0, &risk);
-            if (result != PATH_OK) {
-                set_status(state, protection_reason(result, first_source));
-                return;
-            }
-            if (risk == PATH_RISK_HIGH) {
-                state->confirm_from_worker = 0;
-                state->pending_action = action;
-                state->pending_pane = state->active_pane;
-                snprintf(state->pending_path.text,
-                         sizeof(state->pending_path.text), "%s",
-                         first_source);
-                snprintf(state->pending_dest.text,
-                         sizeof(state->pending_dest.text), "%s",
-                         state->actions.dest);
-                open_confirm(state, UI_CONFIRM_HIGH_RISK);
-                snprintf(state->confirm.risk_path,
-                         sizeof(state->confirm.risk_path), "%s",
-                         first_source);
-                state->confirm.high_risk = 1;
-                return;
-            }
-        }
-
+        const char *sources[UI_CONFIRM_MAX];
+        int source_count = 0;
         if ((action == UI_ACTION_COPY || action == UI_ACTION_MOVE ||
              action == UI_ACTION_DELETE) &&
             pane->mark_count > 0) {
-            for (int i = 0; i < pane->mark_count; ++i) {
+            for (int i = 0; i < pane->mark_count && i < UI_CONFIRM_MAX; ++i)
+                sources[source_count++] = pane->marks[i].path.text;
+        } else {
+            sources[source_count++] = state->actions.path;
+        }
+
+        const char *destination =
+            (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD)
+                ? state->actions.other
+                : state->actions.dest;
+
+        int high_risk = 0;
+        char risk_path[PATH_MAX_LEN];
+        risk_path[0] = '\0';
+
+        if (action == UI_ACTION_DELETE) {
+            for (int i = 0; i < source_count; ++i) {
+                PathRisk risk = PATH_RISK_NORMAL;
+                PathResult result =
+                    path_check_delete(sources[i], 0, &risk);
+                if (result != PATH_OK) {
+                    set_status(state, protection_reason(result, sources[i]));
+                    return;
+                }
+                if (risk == PATH_RISK_HIGH && !high_risk) {
+                    high_risk = 1;
+                    fmt_copy(risk_path, sizeof(risk_path), sources[i]);
+                }
+            }
+        } else if (action == UI_ACTION_COPY || action == UI_ACTION_MOVE ||
+                   action == UI_ACTION_DOWNLOAD) {
+            for (int i = 0; i < source_count; ++i) {
+                Path target;
+                if (path_join(destination, last_segment(sources[i]),
+                              &target) != PATH_OK) {
+                    set_status(state, "PATH TOO LONG");
+                    return;
+                }
+                PathRisk risk = PATH_RISK_NORMAL;
+                PathResult result = path_check_write(target.text, 0, &risk);
+                if (result != PATH_OK) {
+                    set_status(state, protection_reason(result, target.text));
+                    return;
+                }
+                if (risk == PATH_RISK_HIGH && !high_risk) {
+                    high_risk = 1;
+                    fmt_copy(risk_path, sizeof(risk_path), target.text);
+                }
+            }
+        }
+
+        state->pending_action = action;
+        state->pending_pane = state->active_pane;
+        fmt_copy(state->pending_path.text, sizeof(state->pending_path.text),
+                 sources[0]);
+        fmt_copy(state->pending_dest.text, sizeof(state->pending_dest.text),
+                 destination);
+        state->confirm_from_worker = 0;
+
+        if (action == UI_ACTION_NEW_FOLDER || action == UI_ACTION_RENAME) {
+            state->pending_action_valid = 1;
+            state->text.open = 1;
+            UiCommand *c = emit(out, max, count, UI_CMD_OPEN_IME);
+            if (c != NULL) {
+                c->field = UI_FIELD_NAME;
+                c->value = 255;
+                c->index = 0;
+                fmt_copy(c->title, sizeof(c->title),
+                         action == UI_ACTION_RENAME ? "RENAME"
+                                                    : "NEW FOLDER NAME");
+                if (action == UI_ACTION_RENAME)
+                    fmt_copy(c->text, sizeof(c->text),
+                             last_segment(state->actions.path));
+            }
+            return;
+        }
+
+        if (high_risk) {
+            open_confirm(state, UI_CONFIRM_HIGH_RISK);
+            fmt_copy(state->confirm.risk_path,
+                     sizeof(state->confirm.risk_path), risk_path);
+            state->confirm.high_risk = 1;
+            return;
+        }
+
+        if (action == UI_ACTION_DELETE) {
+            open_confirm(state, UI_CONFIRM_DELETE);
+            UiConfirm *confirm = &state->confirm;
+            confirm->items = confirm->local_items;
+            confirm->item_count = source_count;
+            snprintf(confirm->title, sizeof(confirm->title), "DELETE %d ITEM%s",
+                     source_count, source_count == 1 ? "" : "S");
+            fmt_copy(confirm->context, sizeof(confirm->context),
+                     state->actions.dest);
+            for (int i = 0; i < source_count; ++i) {
+                fmt_copy(confirm->local_names[i],
+                         sizeof(confirm->local_names[i]),
+                         last_segment(sources[i]));
+                confirm->local_items[i].name = confirm->local_names[i];
+                confirm->local_items[i].size = 0;
+                confirm->local_items[i].size_known = 0;
+                if (pane->mark_count > 0 && i < pane->mark_count) {
+                    confirm->local_items[i].size = pane->marks[i].size;
+                    confirm->local_items[i].size_known =
+                        pane->marks[i].size_known;
+                } else {
+                    const UiRow *row = selected_row(state,
+                                                    state->active_pane);
+                    if (row != NULL) {
+                        confirm->local_items[i].size = row->size;
+                        confirm->local_items[i].size_known = row->size_known;
+                    }
+                }
+            }
+            return;
+        }
+
+        if (action == UI_ACTION_COPY || action == UI_ACTION_MOVE ||
+            action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD) {
+            for (int i = 0; i < source_count; ++i) {
                 UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
-                if (c == NULL)
+                if (c == NULL) {
+                    set_status(state, "COMMAND LIMIT");
                     break;
+                }
                 c->action = action;
                 c->pane = state->active_pane;
-                snprintf(c->path, sizeof(c->path), "%s",
-                         pane->marks[i].path.text);
-                snprintf(c->path2, sizeof(c->path2), "%s",
-                         state->actions.dest);
+                fmt_copy(c->path, sizeof(c->path), sources[i]);
+                fmt_copy(c->path2, sizeof(c->path2), destination);
             }
             return;
         }
@@ -851,9 +1077,8 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
         if (c != NULL) {
             c->action = action;
             c->pane = state->active_pane;
-            snprintf(c->path, sizeof(c->path), "%s", state->actions.path);
-            snprintf(c->path2, sizeof(c->path2), "%s",
-                     state->actions.dest);
+            fmt_copy(c->path, sizeof(c->path), sources[0]);
+            fmt_copy(c->path2, sizeof(c->path2), destination);
         }
         return;
     }
@@ -894,17 +1119,41 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
     case UI_KEY_CROSS: {
         UiChoice choice = c->choices[c->choice_focus];
         int from_worker = state->confirm_from_worker;
-        if (c->kind == UI_CONFIRM_HIGH_RISK && !from_worker) {
-            if (choice == UI_CHOICE_CONTINUE) {
-                UiCommand *run = emit(out, max, count, UI_CMD_RUN_ACTION);
-                if (run != NULL) {
-                    run->action = state->pending_action;
-                    run->pane = state->pending_pane;
-                    run->value = 1; /* risk approved */
-                    snprintf(run->path, sizeof(run->path), "%s",
-                             state->pending_path.text);
-                    snprintf(run->path2, sizeof(run->path2), "%s",
-                             state->pending_dest.text);
+        if (!from_worker && (c->kind == UI_CONFIRM_HIGH_RISK ||
+                             c->kind == UI_CONFIRM_DELETE)) {
+            int approved = c->kind == UI_CONFIRM_HIGH_RISK
+                               ? choice == UI_CHOICE_CONTINUE
+                               : choice == UI_CHOICE_DELETE;
+            if (approved) {
+                UiPaneState *pending =
+                    &state->panes[state->pending_pane];
+                if ((state->pending_action == UI_ACTION_DELETE ||
+                     state->pending_action == UI_ACTION_COPY ||
+                     state->pending_action == UI_ACTION_MOVE ||
+                     state->pending_action == UI_ACTION_UPLOAD ||
+                     state->pending_action == UI_ACTION_DOWNLOAD) &&
+                    pending->mark_count > 0) {
+                    for (int i = 0; i < pending->mark_count; ++i) {
+                        UiCommand *run = emit(out, max, count,
+                                              UI_CMD_RUN_ACTION);
+                        if (run == NULL)
+                            break;
+                        run->action = state->pending_action;
+                        run->pane = state->pending_pane;
+                        run->value = c->kind == UI_CONFIRM_HIGH_RISK ? 1 : 0;
+                        fmt_copy(run->path, sizeof(run->path), pending->marks[i].path.text);
+                        fmt_copy(run->path2, sizeof(run->path2), state->pending_dest.text);
+                    }
+                } else {
+                    UiCommand *run = emit(out, max, count,
+                                          UI_CMD_RUN_ACTION);
+                    if (run != NULL) {
+                        run->action = state->pending_action;
+                        run->pane = state->pending_pane;
+                        run->value = c->kind == UI_CONFIRM_HIGH_RISK ? 1 : 0;
+                        fmt_copy(run->path, sizeof(run->path), state->pending_path.text);
+                        fmt_copy(run->path2, sizeof(run->path2), state->pending_dest.text);
+                    }
                 }
             }
             close_confirm(state, 0);
@@ -927,7 +1176,8 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
         return;
     }
     case UI_KEY_CIRCLE: {
-        if (c->kind == UI_CONFIRM_HIGH_RISK &&
+        if ((c->kind == UI_CONFIRM_HIGH_RISK ||
+             c->kind == UI_CONFIRM_DELETE) &&
             !state->confirm_from_worker) {
             close_confirm(state, 0);
             return;
@@ -957,6 +1207,10 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
 static void handle_key(UiState *state, const UiStateEvent *event,
                        UiCommand *out, int max, int *count)
 {
+    if (state->text.unavailable && event->key == UI_KEY_CIRCLE) {
+        state->text.unavailable = 0;
+        return;
+    }
     switch (state->screen) {
     case UI_SCREEN_WORKSPACE:
         handle_workspace_key(state, event, out, max, count);
@@ -1016,7 +1270,10 @@ void ui_state_init(UiState *state, UiMark *local_marks, int local_cap,
     state->server.run = UI_SERVER_OFF;
     state->server.port = 1337;
     state->server.focus_start = 1;
+    state->server.address[0] = '\0';
+    state->site_port = 21;
     state->actions.selected = 0;
+    state->actions.visible_count = 0;
     for (int i = 0; i < UI_ACTION_COUNT; ++i)
         state->actions.enabled[i] = 1;
 }
@@ -1024,7 +1281,7 @@ void ui_state_init(UiState *state, UiMark *local_marks, int local_cap,
 void ui_state_set_rows(UiState *state, UiPane pane, const UiRow *rows,
                        int count, int truncated)
 {
-    if (state == NULL || pane < 0 || pane >= UI_PANE_COUNT)
+    if (state == NULL || pane >= UI_PANE_COUNT)
         return;
     UiPaneState *p = &state->panes[pane];
     p->rows = rows;
@@ -1037,21 +1294,21 @@ void ui_state_set_rows(UiState *state, UiPane pane, const UiRow *rows,
 
 int ui_state_mark_count(const UiState *state, UiPane pane)
 {
-    if (state == NULL || pane < 0 || pane >= UI_PANE_COUNT)
+    if (state == NULL || pane >= UI_PANE_COUNT)
         return 0;
     return state->panes[pane].mark_count;
 }
 
 int ui_state_is_marked(const UiState *state, UiPane pane, const char *path)
 {
-    if (state == NULL || pane < 0 || pane >= UI_PANE_COUNT || path == NULL)
+    if (state == NULL || pane >= UI_PANE_COUNT || path == NULL)
         return 0;
     return mark_index(&state->panes[pane], path) >= 0;
 }
 
 const UiRow *ui_state_selected_row(const UiState *state, UiPane pane)
 {
-    if (state == NULL || pane < 0 || pane >= UI_PANE_COUNT)
+    if (state == NULL || pane >= UI_PANE_COUNT)
         return NULL;
     return selected_row(state, pane);
 }
@@ -1074,7 +1331,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         }
         break;
     case UI_EVT_LISTING_BEGIN: {
-        if (event->pane < 0 || event->pane >= UI_PANE_COUNT)
+        if (event->pane >= UI_PANE_COUNT)
             break;
         UiPaneState *pane = &state->panes[event->pane];
         const char *next = event->path[0] != '\0'
@@ -1085,7 +1342,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (volume_changed(event->pane, pane->path, next))
             clear_marks(pane);
         int path_changed = strcmp(pane->path, next) != 0;
-        snprintf(pane->path, sizeof(pane->path), "%s", next);
+        fmt_copy(pane->path, sizeof(pane->path), next);
         pane->pending_path[0] = '\0';
         pane->loading = 1;
         pane->empty = 0;
@@ -1104,63 +1361,98 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
                           event->truncated);
         break;
     case UI_EVT_LISTING_END:
-        if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
+        if (event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
             pane->loading = 0;
             pane->empty = pane->row_count == 0;
             if (!event->ok)
-                snprintf(pane->error, sizeof(pane->error), "%s",
-                         event->text);
+                fmt_copy(pane->error, sizeof(pane->error), event->text);
         }
         break;
     case UI_EVT_SESSION_LOST:
-        if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
+        if (event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
             pane->connected = 0;
             pane->session_lost = 1;
             pane->loading = 0;
-            snprintf(pane->error, sizeof(pane->error), "%s", event->text);
+            fmt_copy(pane->error, sizeof(pane->error), event->text);
             clear_marks(pane);
         }
         break;
     case UI_EVT_SESSION_OK:
-        if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
+        if (event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
             pane->connected = 1;
             pane->session_lost = 0;
             pane->error[0] = '\0';
         }
+        if (event->site[0] != '\0' || event->host[0] != '\0') {
+            fmt_copy(state->site_name, sizeof(state->site_name), event->site);
+            fmt_copy(state->site_host, sizeof(state->site_host), event->host);
+            state->site_port = event->port > 0 ? event->port : 21;
+            state->site_known = 1;
+            state->sites.login_failed = 0;
+            snprintf(state->panes[UI_PANE_REMOTE].site,
+                     sizeof(state->panes[UI_PANE_REMOTE].site), "%s",
+                     event->site);
+        }
         break;
     case UI_EVT_ERROR:
         set_status(state, event->text);
-        if (event->pane >= 0 && event->pane < UI_PANE_COUNT)
-            snprintf(state->panes[event->pane].error,
-                     sizeof(state->panes[event->pane].error), "%s",
-                     event->text);
+        if (event->pane < UI_PANE_COUNT)
+            fmt_copy(state->panes[event->pane].error,
+                     sizeof(state->panes[event->pane].error), event->text);
         break;
     case UI_EVT_TRANSFER_STARTED:
         state->dock.active = 1;
         if (state->dock.focused)
             set_focus(state, UI_FOCUS_LIST);
-        state->dock.direction = event->pane == UI_PANE_LOCAL
-                                    ? XFER_DIR_UPLOAD
-                                    : XFER_DIR_DOWNLOAD;
-        snprintf(state->dock.name, sizeof(state->dock.name), "%s",
-                 event->text);
+        if (event->direction_known)
+            state->dock.direction = (XferDirection)event->direction;
+        else
+            state->dock.direction = event->pane == UI_PANE_LOCAL
+                                        ? XFER_DIR_UPLOAD
+                                        : XFER_DIR_DOWNLOAD;
+        fmt_copy(state->dock.name, sizeof(state->dock.name), event->text);
         set_transfer_dock(state, event, UI_DOCK_ACTIVE);
         state->dock.done = 0;
+        state->dock.item_index = event->item_index;
+        state->dock.item_total = event->item_total;
+        state->dock.elapsed_ms = 0;
+        state->dock.elapsed_known = 0;
+        state->dock.rate_known = 0;
         break;
     case UI_EVT_TRANSFER_PROGRESS:
         if (!state->dock.active && (state->dock.state == UI_DOCK_DONE ||
                                     state->dock.state == UI_DOCK_FAILED))
             break;
         set_transfer_dock(state, event, UI_DOCK_ACTIVE);
+        state->dock.rate = event->rate;
+        state->dock.rate_known = event->rate_known;
+        state->dock.elapsed_ms = event->elapsed_ms;
+        state->dock.elapsed_known = event->elapsed_known;
+        if (event->item_index > 0)
+            state->dock.item_index = event->item_index;
+        if (event->item_total > 0)
+            state->dock.item_total = event->item_total;
         break;
     case UI_EVT_TRANSFER_DONE:
         state->dock.active = 0;
         if (state->dock.focused)
             set_focus(state, UI_FOCUS_LIST);
         set_transfer_dock(state, event, UI_DOCK_DONE);
+        state->dock.rate = event->rate;
+        state->dock.rate_known = event->rate_known;
+        state->dock.elapsed_ms = event->elapsed_ms;
+        state->dock.elapsed_known = event->elapsed_known;
+        break;
+    case UI_EVT_TRANSFER_CANCELLED:
+        state->dock.active = 0;
+        if (state->dock.focused)
+            set_focus(state, UI_FOCUS_LIST);
+        state->dock.state = UI_DOCK_IDLE;
+        state->dock.message[0] = '\0';
+        set_status(state, "CANCELLED");
         break;
     case UI_EVT_TRANSFER_FAILED:
         state->dock.active = 0;
@@ -1178,6 +1470,29 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
     case UI_EVT_SERVER_STATE:
         state->server.run = (UiServerRun)event->value;
         state->server.clients = event->clients;
+        if (event->port > 0)
+            state->server.port = event->port;
+        if (event->address_known) {
+            fmt_copy(state->server.address, sizeof(state->server.address), event->address);
+            state->server.address_known = 1;
+        } else if (event->address[0] == '\0') {
+            state->server.address_known = 0;
+            state->server.address[0] = '\0';
+        }
+        if (state->server.run == UI_SERVER_OFF)
+            state->server.client_active = 0;
+        break;
+    case UI_EVT_SERVER_CLIENT:
+        state->server.client_active = event->ok;
+        state->server.clients = event->clients;
+        snprintf(state->server.client_addr,
+                 sizeof(state->server.client_addr), "%s", event->address);
+        fmt_copy(state->server.client_op, sizeof(state->server.client_op), event->op);
+        snprintf(state->server.client_path,
+                 sizeof(state->server.client_path), "%s", event->path);
+        state->server.client_bytes = event->bytes;
+        state->server.client_total = event->total;
+        state->server.client_total_known = event->total_known;
         break;
     case UI_EVT_CONFIRM_REQUEST:
         if (state->screen == UI_SCREEN_CONFIRM) {
@@ -1188,6 +1503,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         open_confirm(state, event->confirm);
         state->confirm.items = event->items;
         state->confirm.item_count = event->item_count;
+        state->confirm.existing_count = event->existing_count;
         if (event->high_risk) {
             state->confirm.high_risk = 1;
             snprintf(state->confirm.risk_path,
@@ -1196,6 +1512,23 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         }
         break;
     case UI_EVT_IME_RESULT:
+        if (state->pending_action_valid) {
+            state->pending_action_valid = 0;
+            if (event->ok) {
+                UiCommand *c = emit(out, max, &count, UI_CMD_RUN_ACTION);
+                if (c != NULL) {
+                    c->action = state->pending_action;
+                    c->pane = state->pending_pane;
+                    fmt_copy(c->path, sizeof(c->path),
+                             state->pending_path.text);
+                    fmt_copy(c->path2, sizeof(c->path2),
+                             state->pending_dest.text);
+                    fmt_copy(c->text, sizeof(c->text), event->text);
+                }
+            }
+            state->text.open = 0;
+            break;
+        }
         if (!state->text.open)
             break;
         state->text.open = 0;
@@ -1204,10 +1537,10 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             const char *value = event->text;
             switch (state->text.field) {
             case UI_FIELD_NAME:
-                snprintf(editor->name, sizeof(editor->name), "%s", value);
+                fmt_copy(editor->name, sizeof(editor->name), value);
                 break;
             case UI_FIELD_HOST:
-                snprintf(editor->host, sizeof(editor->host), "%s", value);
+                fmt_copy(editor->host, sizeof(editor->host), value);
                 break;
             case UI_FIELD_PORT: {
                 int port = 0;
@@ -1216,12 +1549,10 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
                 break;
             }
             case UI_FIELD_USERNAME:
-                snprintf(editor->username, sizeof(editor->username), "%s",
-                         value);
+                fmt_copy(editor->username, sizeof(editor->username), value);
                 break;
             case UI_FIELD_PASSWORD:
-                snprintf(editor->password, sizeof(editor->password), "%s",
-                         value);
+                fmt_copy(editor->password, sizeof(editor->password), value);
                 editor->password_set = value[0] != '\0';
                 break;
             default:
@@ -1231,21 +1562,73 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             editor->field = state->text.field;
         }
         break;
+    case UI_EVT_PANE_INFO:
+        if (event->pane < UI_PANE_COUNT) {
+            UiPaneState *pane = &state->panes[event->pane];
+            pane->free_known = event->total_known;
+            fmt_size(pane->free_text, sizeof(pane->free_text), event->bytes,
+                     event->total_known);
+        }
+        break;
+    case UI_EVT_EDIT_SITE:
+        snprintf(state->editor.name, sizeof(state->editor.name), "%s",
+                 event->edit_site.name);
+        snprintf(state->editor.host, sizeof(state->editor.host), "%s",
+                 event->edit_site.host);
+        state->editor.port = event->edit_site.port;
+        state->editor.anonymous = event->edit_site.anonymous;
+        snprintf(state->editor.username, sizeof(state->editor.username), "%s",
+                 event->edit_site.username);
+        snprintf(state->editor.password, sizeof(state->editor.password), "%s",
+                 event->edit_site.password);
+        state->editor.password_set = event->edit_site.password[0] != '\0';
+        state->editor.new_site = 0;
+        state->editor.dirty = 0;
+        state->editor.error[0] = '\0';
+        state->editor.field = UI_FIELD_NAME;
+        break;
+    case UI_EVT_IME_UNAVAILABLE:
+        state->text.open = 0;
+        state->text.unavailable = 1;
+        state->pending_action_valid = 0;
+        break;
     case UI_EVT_SITE_SAVED:
         if (event->ok) {
             state->editor.dirty = 0;
             state->editor.error[0] = '\0';
         } else {
-            snprintf(state->editor.error, sizeof(state->editor.error), "%s",
-                     event->text);
+            fmt_copy(state->editor.error, sizeof(state->editor.error), event->text);
         }
         break;
     case UI_EVT_SITES:
-        state->sites.count = event->value;
+        state->sites.save_unavailable = event->save_unavailable;
+        if (event->ok) {
+            state->sites.login_failed = 0;
+        } else {
+            state->sites.login_failed = 1;
+            fmt_copy(state->sites.reply, sizeof(state->sites.reply), event->text);
+        }
+        if (event->site_rows != NULL) {
+            int count = event->site_count;
+            if (count < 0)
+                count = 0;
+            if (count > UI_SITES_MAX)
+                count = UI_SITES_MAX;
+            state->sites.count = count;
+            for (int i = 0; i < count; ++i)
+                state->sites.rows[i] = event->site_rows[i];
+        } else if (event->value > 0) {
+            state->sites.count = event->value;
+        }
         if (state->sites.selected >= state->sites.count)
             state->sites.selected = state->sites.count > 0
                                         ? state->sites.count - 1
                                         : 0;
+        if (state->sites.first > state->sites.selected)
+            state->sites.first = state->sites.selected;
+        if (state->sites.count > 6 && state->sites.selected >=
+                                          state->sites.first + 6)
+            state->sites.first = state->sites.selected - 5;
         break;
     default:
         break;

@@ -397,19 +397,31 @@ static void test_server_actions(void)
     send_key(UI_KEY_SELECT);
     CHECK(s_state.screen == UI_SCREEN_ACTIONS);
     CHECK(strcmp(s_state.actions.path, "ux0:data") == 0);
+    /* The cursor is on ".." in ux0:data, which the protection table treats
+     * as protected. Re-enable the action for this direct path check. */
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
     s_state.actions.selected = UI_ACTION_DELETE;
+    s_state.actions.enabled[UI_ACTION_DELETE] = 1;
     snprintf(s_state.actions.path, sizeof(s_state.actions.path), "ux0:");
     send_key(UI_KEY_CROSS);
     CHECK(command(UI_CMD_RUN_ACTION) == NULL);
     CHECK(strcmp(s_state.status, "VOLUME ROOT") == 0);
 
+    s_state.actions.enabled[UI_ACTION_DELETE] = 1;
     snprintf(s_state.actions.path, sizeof(s_state.actions.path),
              "ux0:data/A.TXT");
     send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
+    CHECK(s_command_count == 0);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_CROSS);
     UiCommand *run = command(UI_CMD_RUN_ACTION);
     CHECK(run != NULL);
-    CHECK(run->action == UI_ACTION_DELETE);
-    CHECK(strcmp(run->path, "ux0:data/A.TXT") == 0);
+    if (run != NULL) {
+        CHECK(run->action == UI_ACTION_DELETE);
+        CHECK(strcmp(run->path, "ux0:data/A.TXT") == 0);
+    }
 
     s_state.actions.selected = UI_ACTION_COPY;
     s_state.actions.enabled[UI_ACTION_COPY] = 0;
@@ -426,7 +438,7 @@ static void test_server_actions(void)
     send_key(UI_KEY_SQUARE);
     send_key(UI_KEY_SELECT);
     CHECK(s_state.actions.marked == 2);
-    CHECK(strcmp(s_state.actions.path, "ux0:data/A.TXT") == 0);
+    CHECK(strcmp(s_state.actions.path, "ux0:data/folder") == 0);
     s_state.actions.selected = UI_ACTION_COPY;
     send_key(UI_KEY_CROSS);
     CHECK(s_command_count == 2);
@@ -505,6 +517,7 @@ static void test_high_risk_action(void)
     reset();
     send_key(UI_KEY_SELECT);
     s_state.actions.selected = UI_ACTION_DELETE;
+    s_state.actions.enabled[UI_ACTION_DELETE] = 1;
     snprintf(s_state.actions.path, sizeof(s_state.actions.path),
              "ur0:tai/x.suprx");
     send_key(UI_KEY_CROSS);
@@ -517,10 +530,102 @@ static void test_high_risk_action(void)
     send_key(UI_KEY_CROSS);
     UiCommand *run = command(UI_CMD_RUN_ACTION);
     CHECK(run != NULL);
-    CHECK(run->action == UI_ACTION_DELETE);
-    CHECK(run->value == 1);
-    CHECK(strcmp(run->path, "ur0:tai/x.suprx") == 0);
+    if (run != NULL) {
+        CHECK(run->action == UI_ACTION_DELETE);
+        CHECK(run->value == 1);
+        CHECK(strcmp(run->path, "ur0:tai/x.suprx") == 0);
+    }
     CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+}
+
+static void test_action_ime_and_risk(void)
+{
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 1;
+    send_key(UI_KEY_SELECT);
+    s_state.actions.selected = UI_ACTION_RENAME;
+    s_state.actions.enabled[UI_ACTION_RENAME] = 1;
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_OPEN_IME) != NULL);
+    CHECK(strcmp(command(UI_CMD_OPEN_IME)->title, "RENAME") == 0);
+    CHECK(strcmp(command(UI_CMD_OPEN_IME)->text, "folder") == 0);
+    CHECK(s_state.pending_action_valid == 1);
+
+    UiStateEvent ime;
+    memset(&ime, 0, sizeof(ime));
+    ime.kind = UI_EVT_IME_RESULT;
+    ime.ok = 1;
+    snprintf(ime.text, sizeof(ime.text), "RENAMED");
+    send_event(&ime);
+    UiCommand *run = command(UI_CMD_RUN_ACTION);
+    CHECK(run != NULL);
+    if (run != NULL) {
+        CHECK(run->action == UI_ACTION_RENAME);
+        CHECK(strcmp(run->path, "ux0:data/folder") == 0);
+        CHECK(strcmp(run->path2, "ux0:data") == 0);
+        CHECK(strcmp(run->text, "RENAMED") == 0);
+    }
+    CHECK(s_state.pending_action_valid == 0);
+
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 1;
+    send_key(UI_KEY_SQUARE);
+    send_key(UI_KEY_DOWN);
+    send_key(UI_KEY_SQUARE);
+    send_key(UI_KEY_SELECT);
+    s_state.actions.selected = UI_ACTION_COPY;
+    snprintf(s_state.actions.dest, sizeof(s_state.actions.dest), "ur0:tai");
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_HIGH_RISK);
+    CHECK(strstr(s_state.confirm.risk_path, "ur0:tai") != NULL);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 2);
+    for (int i = 0; i < s_command_count; ++i) {
+        CHECK(s_commands[i].type == UI_CMD_RUN_ACTION);
+        CHECK(s_commands[i].action == UI_ACTION_COPY);
+        CHECK(s_commands[i].value == 1);
+        CHECK(strcmp(s_commands[i].path2, "ur0:tai") == 0);
+    }
+}
+
+static void test_delete_confirm_items(void)
+{
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 1;
+    send_key(UI_KEY_SQUARE);
+    send_key(UI_KEY_DOWN);
+    send_key(UI_KEY_SQUARE);
+    send_key(UI_KEY_SELECT);
+    s_state.actions.selected = UI_ACTION_DELETE;
+    s_state.actions.enabled[UI_ACTION_DELETE] = 1;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
+    CHECK(s_state.confirm.item_count == 2);
+    CHECK(strcmp(s_state.confirm.title, "DELETE 2 ITEMS") == 0);
+    CHECK(s_state.confirm.items != NULL);
+    CHECK(strcmp(s_state.confirm.items[0].name, "folder") == 0);
+    CHECK(strcmp(s_state.confirm.items[1].name, "A.TXT") == 0);
+}
+
+static void test_sites_scroll(void)
+{
+    reset();
+    s_state.sites.count = 7;
+    for (int i = 0; i < 7; ++i) {
+        snprintf(s_state.sites.rows[i].name,
+                 sizeof(s_state.sites.rows[i].name), "SITE%d", i);
+    }
+    send_key(UI_KEY_TRIANGLE);
+    for (int i = 0; i < 7; ++i)
+        send_key(UI_KEY_DOWN);
+    CHECK(s_state.sites.selected == 6);
+    CHECK(s_state.sites.first == 1);
+    send_key(UI_KEY_UP);
+    CHECK(s_state.sites.selected == 5);
+    CHECK(s_state.sites.first == 1);
 }
 
 static void test_confirm_busy_guard(void)
@@ -700,6 +805,20 @@ static void test_remote_volume_marks(void)
     snprintf(event.path, sizeof(event.path), "/UR0:/DATA");
     send_event(&event);
     CHECK(mark_count(UI_PANE_REMOTE) == 0);
+
+    reset();
+    send_key(UI_KEY_L1);
+    snprintf(s_state.panes[UI_PANE_REMOTE].path,
+             sizeof(s_state.panes[UI_PANE_REMOTE].path), "/");
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_BEGIN;
+    event.pane = UI_PANE_REMOTE;
+    snprintf(event.path, sizeof(event.path), "/GNU/");
+    send_event(&event);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
 }
 
 int main(void)
@@ -712,6 +831,9 @@ int main(void)
     test_server_actions();
     test_confirm();
     test_high_risk_action();
+    test_action_ime_and_risk();
+    test_delete_confirm_items();
+    test_sites_scroll();
     test_confirm_busy_guard();
     test_dock_cancel_and_site_delete();
     test_listing_and_dock();

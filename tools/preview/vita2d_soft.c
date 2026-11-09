@@ -26,6 +26,42 @@ static int s_draw_calls;
 static int s_clip_on;
 static int s_clip_x0, s_clip_y0, s_clip_x1, s_clip_y1;
 
+#define TRACE_MAX 65536
+static PreviewTrace s_trace[TRACE_MAX];
+static int s_trace_count;
+
+static void trace_push(PreviewTraceKind kind, float x, float y, float w,
+                       float h, unsigned int color)
+{
+    if (s_trace_count >= TRACE_MAX)
+        return;
+    PreviewTrace *t = &s_trace[s_trace_count++];
+    t->kind = kind;
+    t->x = x;
+    t->y = y;
+    t->w = w;
+    t->h = h;
+    t->color = color;
+}
+
+void preview_trace_reset(void)
+{
+    s_trace_count = 0;
+}
+
+int preview_trace_count(void)
+{
+    return s_trace_count;
+}
+
+int preview_trace_get(int index, PreviewTrace *out)
+{
+    if (index < 0 || index >= s_trace_count || out == NULL)
+        return 0;
+    *out = s_trace[index];
+    return 1;
+}
+
 static uint8_t clamp_u8(int v)
 {
     if (v < 0)
@@ -69,6 +105,7 @@ void vita2d_draw_rectangle(float x, float y, float w, float h,
                            unsigned int color)
 {
     ++s_draw_calls;
+    trace_push(PREVIEW_TRACE_RECT, x, y, w, h, color);
     int x0 = (int)lroundf(x);
     int y0 = (int)lroundf(y);
     int x1 = (int)lroundf(x + w);
@@ -83,6 +120,7 @@ void vita2d_draw_line(float x0f, float y0f, float x1f, float y1f,
                       unsigned int color)
 {
     ++s_draw_calls;
+    trace_push(PREVIEW_TRACE_LINE, x0f, y0f, x1f, y1f, color);
     int x0 = (int)lroundf(x0f);
     int y0 = (int)lroundf(y0f);
     int x1 = (int)lroundf(x1f);
@@ -131,6 +169,38 @@ void vita2d_set_clip_rectangle(int x_min, int y_min, int x_max, int y_max)
     s_clip_y0 = y_min;
     s_clip_x1 = x_max;
     s_clip_y1 = y_max;
+}
+
+/* Frame lifetime. The preview rasterises into its own buffer; these exist so
+ * gfx/draw.c links unchanged. */
+void vita2d_init(void)
+{
+}
+
+void vita2d_fini(void)
+{
+}
+
+void vita2d_set_clear_color(unsigned int color)
+{
+    (void)color;
+}
+
+void vita2d_start_drawing(void)
+{
+}
+
+void vita2d_clear_screen(void)
+{
+    preview_clear();
+}
+
+void vita2d_end_drawing(void)
+{
+}
+
+void vita2d_swap_buffers(void)
+{
 }
 
 void preview_clear(void)

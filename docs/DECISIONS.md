@@ -870,3 +870,118 @@ into `UiState`.
 **Consequences:** A marked batch uses one command per item and is bounded by the
 command ring and the queue. The worker never infers a source from the current
 folder. The reducer remains the only writer of `UiState`.
+
+## D48. Adapters are constructed once; the net address is host-order bits
+
+**Date:** 2026-11-10
+**Status:** accepted; implementation shape for U12 and U13.
+
+**Context:** The composition root must construct each platform adapter once and
+the policy must not learn a Sce type. The NetPort contract said "network byte
+order", which is ambiguous for a uint32 on a little-endian ARM: the fake and the
+socket adapter could disagree on how to print the same address.
+
+**Decision:** Each adapter exposes one plain-C constructor (`psp2_net_port`,
+`psp2_fs_port`, `psp2_input_port`, `psp2_ime_port`, `psp2_clock_port`,
+`psp2_log_port`). `main` calls each once and passes the ports to `app_create`.
+`NetAddress.addr` holds host-order bits (octet 1 in bits 31..24); the net adapter
+converts with `htonl`/`ntohl` at the socket boundary. The FS adapter reports
+`mtime` unknown, uses the `0x3001` devctl free-space call and the
+`sceAppMgrGetDevInfo` fallback only for `ux0:`, and returns
+`rename_replaces() == 0` so KTD12 always uses the aside fallback. The app target
+compiles the real core/gfx/ui/app/adapter sources and links `vita2d`, the SDK
+stubs the adapters call, `m`, and `pthread`.
+
+**Consequences:** A new adapter is a new constructor plus a new file on the
+allowlist; it never changes `main`'s policy. Printing a peer is now exact on
+hardware and on the fake. The aside fallback costs one extra rename on every
+overwrite until a hardware session proves `sceIoRename` replaces.
+
+## D49. One worker thread; inline worker stepping for the host test
+
+**Date:** 2026-11-10
+**Status:** accepted; implementation shape for U13.
+
+**Context:** The product needs a worker that never blocks the frame loop, while
+the integration gate needs deterministic, single-threaded observation of the
+same code. Two implementations would let the tested one drift.
+
+**Decision:** `worker_step` is the only unit of work. In the product, `app_start`
+runs it on a POSIX thread with an 8 ms sleep; `app_create(..., 0)` leaves the
+thread off and `app_tick` calls the same `worker_step` inline. Commands, events,
+the confirm latch, listings, and the site snapshot all use `src/core/handoff.c`.
+The site book snapshot is 16 KiB, carries no passwords, and is read with a
+generation number; the save result is a separate event; the worker emits a full
+site only for the editor. `worker->done` is atomic and `worker_step` returns
+before ticking when it is set.
+
+**Consequences:** A host test exercises the real worker and reducer without a
+thread. The product's only concurrency is the handoff and the atomic done flag.
+The 16 KiB bulk lane is part of D46's cap; raising it needs a memory measurement
+and a new decision.
+
+## D50. The renderer reads state; 36 preview states are the evidence
+
+**Date:** 2026-11-10
+**Status:** accepted; implementation shape for U10/U11.
+
+**Context:** U10/U11 require every settled state to render from state alone and
+the geometry to be asserted without a golden image. Glyph rectangles cannot name
+the string that was drawn, so the draw-call trace alone cannot prove the copy.
+
+**Decision:** `src/ui/render.c` dispatches the current screen and draws the
+shared header; every screen reads `const UiState` and returns nothing. A
+`font_set_trace` hook records each string, position, size, and colour for the
+host suites; the app leaves the hook NULL. `tools/preview` builds 36 fixtures
+from `UiState` and writes one PNG per settled state. Two settled-composition
+amendments are recorded here: the SERVER warning uses ten micro lines so the
+D41 upload-overwrite disclosure fits without shrinking the panel, and the
+TEXT ENTRY unavailable notice sits on a black scrim, never the selection wash.
+The sites table has a `first` row so the selected row stays visible past six.
+
+**Consequences:** The render suites assert the DESIGN geometry and copy, and the
+preview is evidence rather than a golden image. A new screen state needs a
+fixture, a draw-call assertion, and a preview file.
+
+## D51. High-risk writes and the one slot are enforced in the worker too
+
+**Date:** 2026-11-10
+**Status:** accepted; implementation shape for U10/U13.
+
+**Context:** A reducer-only risk check cannot see the final name of a new folder
+or rename, and a marked batch can contain a high-risk item that is not the
+cursor. A reducer-only slot check cannot see a PC's server transfer.
+
+**Decision:** The reducer checks the destination and every marked source before
+it emits a local write, and opens `UI_CONFIRM_HIGH_RISK` when any result is
+`PATH_RISK_HIGH`. The worker re-checks the built plan, asks for the same
+confirmation when the final path is high risk, and refuses a plan whose fact
+scan overflowed `WORKER_FACTS_MAX` or `WORKER_REMOTE_DEPTH` with `PLAN TOO
+LARGE` instead of copying a prefix. The worker gates the client pump on
+`ftp_server_busy`, and sets `ftp_server_set_external_busy` while an app
+transfer or queued item owns the slot, so a server data command answers 450.
+A local action refuses while a transfer or server data command is active.
+Same-folder copy candidates are statted before planning so a second copy does
+not silently overwrite the first.
+
+**Consequences:** Safety no longer depends on the screen that emitted the
+command. A local batch waits for the slot instead of running beside a transfer.
+A batch larger than the fact cap is refused, not partially executed.
+
+## D52. IME initialization stays an adapter-owned hardware claim
+
+**Date:** 2026-11-10
+**Status:** accepted; implementation shape for U12.
+
+**Context:** The IME init order is an open decision. The app needs UTF-8 in and
+UTF-8 or cancellation out, and the password must never reach a log.
+
+**Decision:** `psp2_ime.c` configures the common dialog once before the first
+dialog, initializes the IME dialog per open, and converts bounded UTF-8 to
+UTF-16 and back inside the adapter. Every step that has not run on hardware
+carries a `[C]` comment naming the claim. The reducer keeps the previous value
+and focus on cancellation; the app draws no keyboard. If `begin` fails, the
+app reports `TEXT ENTRY UNAVAILABLE` and the field is unchanged.
+
+**Consequences:** U14 may need to change the init order or load the IME module;
+that change stays in the adapter and never reaches policy.

@@ -7,9 +7,8 @@ set -euo pipefail
 #
 #   tools/test/run.sh
 #
-# Phase 1 runs the layering guard. Later units add host tests under
-# tools/test/test_*.c; the loop below compiles each against the fakes and the
-# policy core.
+# The run starts with the layering guard, then compiles each tools/test/test_*.c
+# against the fakes and the real core, screens, and runtime.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="$ROOT/build/test"
@@ -80,7 +79,29 @@ for test_src in "${tests[@]}"; do
   name="$(basename "$test_src" .c)"
 
   # The graphics test links the renderer against the software vita2d shim, not
-  # the policy core. It is the one test with its own link line.
+  # the policy core. The render suites link the real ui and core as well.
+  if [[ "$name" == "test_integration" ]]; then
+    "$CC" -std=c99 -O1 -g -Wall -Wextra -pthread \
+      -I"$ROOT/src" -I"$ROOT/tools/fake" -I"$ROOT/tools/preview" \
+      "$test_src" "$ROOT"/tools/fake/*.c "$ROOT"/src/core/*.c \
+      "$ROOT"/src/core/ftp/*.c "$ROOT"/src/gfx/*.c "$ROOT"/src/ui/*.c \
+      "$ROOT"/src/app/*.c "$ROOT/tools/preview/vita2d_soft.c" \
+      -lz -lm -o "$OUT/$name"
+    "$OUT/$name"
+    continue
+  fi
+
+  if [[ "$name" == "test_render_workspace" || "$name" == "test_render_screens" ]]; then
+    "$CC" -std=c99 -O1 -g -Wall -Wextra \
+      -I"$ROOT/src" -I"$ROOT/tools/preview" -I"$ROOT/tools/test" \
+      "$test_src" "$ROOT"/src/gfx/*.c "$ROOT"/src/ui/*.c \
+      "$ROOT"/src/core/*.c "$ROOT"/src/core/ftp/*.c \
+      "$ROOT/tools/preview/vita2d_soft.c" \
+      -lz -lm -o "$OUT/$name"
+    "$OUT/$name"
+    continue
+  fi
+
   if [[ "$name" == "test_gfx" ]]; then
     "$CC" -std=c99 -O1 -g -Wall -Wextra \
       -I"$ROOT/src" -I"$ROOT/tools/preview" \

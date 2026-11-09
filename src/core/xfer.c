@@ -142,6 +142,18 @@ XferConflict xfer_conflict(const XferQueue *queue)
     return queue != NULL ? queue->conflict : XFER_CONFLICT_NONE;
 }
 
+void xfer_clear_queued(XferQueue *queue)
+{
+    if (queue == NULL)
+        return;
+    if (queue->active && queue->count > 0)
+        queue->count = 1;
+    else {
+        queue->count = 0;
+        queue->active = 0;
+    }
+}
+
 int xfer_take_terminal(XferQueue *queue, XferItem *out, OpCause *cause,
                        OpStage *stage)
 {

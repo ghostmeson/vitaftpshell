@@ -3,6 +3,7 @@
 #include "core/fmt.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static const char *const UNITS[] = {"KB", "MB", "GB", "TB"};
 
@@ -22,8 +23,14 @@ static void format_scaled(char *buf, size_t n, uint64_t value)
 
     uint64_t whole = value / unit;
     uint64_t frac = (value % unit) * 10 / unit;
-    snprintf(buf, n, "%llu.%llu %s", (unsigned long long)whole,
+    char text[64];
+    snprintf(text, sizeof(text), "%llu.%llu %s", (unsigned long long)whole,
              (unsigned long long)frac, UNITS[u]);
+    size_t len = strlen(text);
+    if (len >= n)
+        len = n - 1;
+    memcpy(buf, text, len);
+    buf[len] = '\0';
 }
 
 void fmt_size(char *buf, size_t n, uint64_t bytes, int known)
@@ -67,6 +74,19 @@ void fmt_percent(char *buf, size_t n, uint64_t done, uint64_t total,
     }
 
     snprintf(buf, n, "%llu%%", (unsigned long long)(done * 100 / total));
+}
+
+void fmt_copy(char *dst, size_t n, const char *src)
+{
+    if (dst == NULL || n == 0)
+        return;
+    if (src == NULL)
+        src = "";
+    size_t len = strlen(src);
+    if (len >= n)
+        len = n - 1;
+    memcpy(dst, src, len);
+    dst[len] = '\0';
 }
 
 void fmt_count(char *buf, size_t n, unsigned count, const char *singular,

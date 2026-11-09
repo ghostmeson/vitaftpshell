@@ -2,6 +2,8 @@
 
 #include "core/store.h"
 
+#include "core/fmt.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -158,10 +160,35 @@ static int decode_field(char *out, size_t cap, const char *value)
     return 1;
 }
 
-static void build_path(char *out, size_t cap, const char *dir,
-                       const char *name)
+static int build_path(char *out, size_t cap, const char *dir,
+                      const char *name)
 {
-    snprintf(out, cap, "%s/%s", dir, name);
+    size_t d = strlen(dir);
+    size_t n = strlen(name);
+    if (d + 1 + n + 1 > cap) {
+        if (cap > 0)
+            out[0] = '\0';
+        return 0;
+    }
+    memcpy(out, dir, d);
+    out[d] = '/';
+    memcpy(out + d + 1, name, n + 1);
+    return 1;
+}
+
+static int build_sidecar(char *out, size_t cap, const char *path,
+                         const char *suffix)
+{
+    size_t p = strlen(path);
+    size_t s = strlen(suffix);
+    if (p + s + 1 > cap) {
+        if (cap > 0)
+            out[0] = '\0';
+        return 0;
+    }
+    memcpy(out, path, p);
+    memcpy(out + p, suffix, s + 1);
+    return 1;
 }
 
 /*
@@ -225,8 +252,9 @@ StoreResult store_load_sites(FsPort *fs, const char *dir, SiteBook *book)
 
     char path[PATH_MAX_LEN];
     char aside[PATH_MAX_LEN];
-    build_path(path, sizeof(path), dir, STORE_SITES_NAME);
-    snprintf(aside, sizeof(aside), "%s.old", path);
+    (void)build_path(path, sizeof(path), dir, STORE_SITES_NAME);
+    if (!build_sidecar(aside, sizeof(aside), path, ".old"))
+        return STORE_IO;
     recover_file(fs, path, aside);
 
     FsFile *file = NULL;
@@ -345,8 +373,9 @@ StoreResult store_save_sites(FsPort *fs, const char *dir,
 
     char target[PATH_MAX_LEN];
     char temp[PATH_MAX_LEN];
-    build_path(target, sizeof(target), dir, STORE_SITES_NAME);
-    snprintf(temp, sizeof(temp), "%s.tmp", target);
+    (void)build_path(target, sizeof(target), dir, STORE_SITES_NAME);
+    if (!build_sidecar(temp, sizeof(temp), target, ".tmp"))
+        return STORE_IO;
 
     fs->remove(fs->ctx, temp);
 
@@ -420,8 +449,9 @@ StoreResult store_load_settings(FsPort *fs, const char *dir,
 
     char path[PATH_MAX_LEN];
     char aside[PATH_MAX_LEN];
-    build_path(path, sizeof(path), dir, STORE_SETTINGS_NAME);
-    snprintf(aside, sizeof(aside), "%s.old", path);
+    (void)build_path(path, sizeof(path), dir, STORE_SETTINGS_NAME);
+    if (!build_sidecar(aside, sizeof(aside), path, ".old"))
+        return STORE_IO;
     recover_file(fs, path, aside);
 
     FsFile *file = NULL;
@@ -463,13 +493,13 @@ StoreResult store_load_settings(FsPort *fs, const char *dir,
         if (strcmp(key, "last_local") == 0) {
             char decoded[SETTINGS_LAST_LOCAL_MAX];
             if (decode_field(decoded, sizeof(decoded), value))
-                strncpy(settings->last_local, decoded,
-                        sizeof(settings->last_local) - 1);
+                fmt_copy(settings->last_local,
+                         sizeof(settings->last_local), decoded);
         } else if (strcmp(key, "last_site") == 0) {
             char decoded[SETTINGS_LAST_SITE_MAX];
             if (decode_field(decoded, sizeof(decoded), value))
-                strncpy(settings->last_site, decoded,
-                        sizeof(settings->last_site) - 1);
+                fmt_copy(settings->last_site, sizeof(settings->last_site),
+                         decoded);
         } else if (strcmp(key, "server_port") == 0) {
             char *end = NULL;
             long port = strtol(value, &end, 10);
@@ -490,8 +520,9 @@ StoreResult store_save_settings(FsPort *fs, const char *dir,
 
     char target[PATH_MAX_LEN];
     char temp[PATH_MAX_LEN];
-    build_path(target, sizeof(target), dir, STORE_SETTINGS_NAME);
-    snprintf(temp, sizeof(temp), "%s.tmp", target);
+    (void)build_path(target, sizeof(target), dir, STORE_SETTINGS_NAME);
+    if (!build_sidecar(temp, sizeof(temp), target, ".tmp"))
+        return STORE_IO;
 
     fs->remove(fs->ctx, temp);
 

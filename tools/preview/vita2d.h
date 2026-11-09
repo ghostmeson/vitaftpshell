@@ -18,6 +18,31 @@ void vita2d_enable_clipping(void);
 void vita2d_disable_clipping(void);
 void vita2d_set_clip_rectangle(int x_min, int y_min, int x_max, int y_max);
 
+void vita2d_init(void);
+void vita2d_fini(void);
+void vita2d_set_clear_color(unsigned int color);
+void vita2d_start_drawing(void);
+void vita2d_clear_screen(void);
+void vita2d_end_drawing(void);
+void vita2d_swap_buffers(void);
+
+/* Draw-call trace for geometry assertions. A rectangle records x,y,w,h; a
+ * line records x,y as the start and w,h as the end. */
+typedef enum {
+    PREVIEW_TRACE_RECT = 0,
+    PREVIEW_TRACE_LINE
+} PreviewTraceKind;
+
+typedef struct {
+    PreviewTraceKind kind;
+    float x, y, w, h;
+    unsigned int color;
+} PreviewTrace;
+
+void preview_trace_reset(void);
+int preview_trace_count(void);
+int preview_trace_get(int index, PreviewTrace *out);
+
 /* Preview-only accessors. */
 void preview_clear(void);
 const unsigned int *preview_pixels(void);
