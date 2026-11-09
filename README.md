@@ -9,7 +9,7 @@ moving a file is one action.
 the architecture plan are complete. Phases 1 and 2 are done: the build shape,
 six ports and host fakes, the gfx base and layout table, the reply/listing/path/
 format policy, and the site/settings/store/log policy exist. `tools/test/run.sh`
-passes nine host suites and `tools/preview/run.sh` renders a 960x544 preview.
+passes eight host suites and `tools/preview/run.sh` renders a 960x544 preview.
 The VPK is still a stub (`vitaftpshell-v01.00-b5.vpk`): no protocol engine,
 screen, or adapter exists yet, so the app has not run on hardware.
 
@@ -50,7 +50,7 @@ export VITASDK="$PWD/../vitasdk"
 export PATH="$VITASDK/bin:$PATH"
 
 ./build.sh                 # one UNSAFE eboot, one vitaftpshell-v01.00-b<n>.vpk
-./tools/test/run.sh        # layering guard + nine host suites
+./tools/test/run.sh        # layering guard + eight host suites
 ./tools/preview/run.sh     # renders the gfx layer to build/preview/workspace.png
 ./send.sh <vita-ip>        # uploads build/ to VitaShell's FTP server
 ```

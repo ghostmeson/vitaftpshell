@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-09 — Phase 2 (U2–U5): six ports and fakes, gfx base and layout table, reply/listing/path/format policy, and site/settings/store/log policy; 9 host suites and a host preview pass | Start Phase 3: U6 and U7 (FTP client and server state machines against scripted peers) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b5.vpk` is still a stub; no protocol engine, screen, or adapter yet. `tools/test/run.sh` and `tools/preview/run.sh` are the Phase 2 evidence. No hardware run, so not `verified`. |
+| `vitaFTPShell` | `building` | 2026-11-09 — Phase 2 (U2–U5): six ports and fakes, gfx base and layout table, reply/listing/path/format policy, and site/settings/store/log policy; 8 host suites and a host preview pass | Start Phase 3: U6 and U7 (FTP client and server state machines against scripted peers) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b5.vpk` is still a stub; no protocol engine, screen, or adapter yet. `tools/test/run.sh` and `tools/preview/run.sh` are the Phase 2 evidence. No hardware run, so not `verified`. |
 
 ## Phases
 
@@ -40,7 +40,7 @@ target console with evidence. Host tests alone cannot promote it.
 - **Build:** Phases 1 and 2 are done. `./build.sh` emits one
   `vitaftpshell-v01.00-b<build>.vpk` and keeps the unstripped ELF.
   `./tools/test/run.sh` runs the layering guard over every `.c`/`.h` under
-  `src/` plus the nine host suites; `./tools/preview/run.sh` renders the gfx
+  `src/` plus the eight host suites; `./tools/preview/run.sh` renders the gfx
   layer to a PNG. `./send.sh <vita-ip>` refuses an artifact whose build number
   does not match `BUILD_NUMBER`.
 - **Next:** Phase 3 — U6 (FTP client state machine) and U7 (FTP server state
