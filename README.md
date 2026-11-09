@@ -184,6 +184,20 @@ sce_sys/         placeholder LiveArea art
 | [`AGENTS.md`](AGENTS.md) | The project contract for agents and contributors |
 | [`docs/README.md`](docs/README.md) | The documentation map |
 
+## Contributing
+
+vitaFTPShell is pre-alpha, and the screen layout and protocol behavior are
+settled. Read [`AGENTS.md`](AGENTS.md) before changing code, open an issue for a
+large change, and run the host checks before sending a pull request:
+
+```sh
+./tools/test/run.sh
+./tools/preview/run.sh
+```
+
+A change that alters behavior must update the plan or add a numbered decision.
+Never weaken the path denials or the server's OFF-at-launch rule.
+
 ## License
 
 vitaFTPShell is free software under the **GNU General Public License, version
