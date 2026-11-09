@@ -7,6 +7,7 @@
 
 #include "core/input.h"
 #include "core/path.h"
+#include "core/site.h"
 #include "core/uiact.h"
 #include "core/xfer.h"
 
@@ -22,6 +23,7 @@
 
 #define UI_ROWS_VISIBLE 10
 #define UI_CONFIRM_VIEW 5
+#define UI_CONFIRM_MAX 64
 
 typedef enum {
     UI_ROW_FILE = 0,
@@ -52,6 +54,9 @@ typedef struct {
     int session_lost;
     int truncated;
     char error[128];
+    char site[SITE_NAME_MAX];
+    char free_text[32];
+    int free_known;
 
     const UiRow *rows;
     int row_count;
@@ -83,6 +88,12 @@ typedef struct {
     uint64_t total;
     int total_known;
     char message[128];
+    int item_index; /* 1-based, 0 when unknown */
+    int item_total;
+    uint64_t elapsed_ms;
+    int elapsed_known;
+    uint64_t rate;
+    int rate_known;
 } UiDock;
 
 typedef struct {
@@ -100,17 +111,45 @@ typedef struct {
     int choice_count;
     int choice_focus;
     int high_risk;
+    int existing_count;
     char risk_path[PATH_MAX_LEN];
     char title[64];
     char context[128];
     char warning[160];
+    /* Reducer-owned item storage, so a local confirmation never points at a
+     * caller buffer that has gone out of scope. */
+    UiConfirmItem local_items[UI_CONFIRM_MAX];
+    char local_names[UI_CONFIRM_MAX][PATH_NAME_MAX];
 } UiConfirm;
+
+#define UI_SITES_MAX SITE_BOOK_MAX
+
+typedef struct {
+    char name[SITE_NAME_MAX];
+    char host[SITE_HOST_MAX];
+    uint16_t port;
+    int anonymous;
+    int password_set;
+    char username[SITE_USER_MAX];
+} UiSiteRow;
 
 typedef struct {
     int count;
     int selected;
+    int first;
     int save_unavailable;
+    int login_failed;
+    char reply[160];
+    UiSiteRow rows[UI_SITES_MAX];
 } UiSiteList;
+
+/* The worker's site-book view for the UI. Small enough for the handoff bulk
+ * lane, and deliberately without passwords. */
+typedef struct {
+    int count;
+    int save_unavailable;
+    UiSiteRow rows[UI_SITES_MAX];
+} UiSiteSnapshot;
 
 typedef struct {
     int field;
@@ -123,6 +162,7 @@ typedef struct {
     char password[128];
     char error[128];
     int password_set;
+    int new_site;
 } UiEditor;
 
 typedef enum {
@@ -137,15 +177,29 @@ typedef struct {
     int port;
     int focus_start;
     char error[128];
+    char address[32];
+    int address_known;
+    int port_focus;
+    int client_active;
+    char client_addr[32];
+    char client_op[32];
+    char client_path[PATH_MAX_LEN];
+    uint64_t client_bytes;
+    uint64_t client_total;
+    int client_total_known;
 } UiServer;
 
 typedef struct {
     int selected;
     int marked;
     int enabled[UI_ACTION_COUNT];
+    char reason[UI_ACTION_COUNT][40];
     char path[PATH_MAX_LEN];
     char dest[PATH_MAX_LEN];
     char other[PATH_MAX_LEN];
+    int pane;
+    int visible[UI_ACTION_COUNT];
+    int visible_count;
 } UiActions;
 
 typedef struct {
@@ -155,6 +209,7 @@ typedef struct {
     char value[256];
     int masked;
     int max;
+    int unavailable;
 } UiTextEntry;
 
 typedef enum {
@@ -187,7 +242,13 @@ typedef struct {
     char status[128];
     int quit;
 
+    char site_name[SITE_NAME_MAX];
+    char site_host[SITE_HOST_MAX];
+    int site_port;
+    int site_known;
+
     int confirm_from_worker;
+    int pending_action_valid;
     UiAction pending_action;
     UiPane pending_pane;
     Path pending_path;
@@ -212,7 +273,12 @@ typedef enum {
     UI_EVT_CONFIRM_REQUEST,
     UI_EVT_IME_RESULT,
     UI_EVT_SITE_SAVED,
-    UI_EVT_SITES
+    UI_EVT_SITES,
+    UI_EVT_IME_UNAVAILABLE,
+    UI_EVT_SERVER_CLIENT,
+    UI_EVT_TRANSFER_CANCELLED,
+    UI_EVT_PANE_INFO,
+    UI_EVT_EDIT_SITE
 } UiStateEventKind;
 
 typedef struct {
@@ -237,6 +303,25 @@ typedef struct {
     uint64_t bytes;
     uint64_t total;
     int total_known;
+    const UiSiteRow *site_rows;
+    int site_count;
+    int save_unavailable;
+    char site[SITE_NAME_MAX];
+    char host[SITE_HOST_MAX];
+    int port;
+    char address[32];
+    int address_known;
+    char op[32];
+    int item_index;
+    int item_total;
+    uint64_t elapsed_ms;
+    int elapsed_known;
+    uint64_t rate;
+    int rate_known;
+    int direction;
+    int direction_known;
+    int existing_count;
+    Site edit_site;
 } UiStateEvent;
 
 void ui_state_init(UiState *state, UiMark *local_marks, int local_cap,
@@ -250,5 +335,10 @@ void ui_state_set_rows(UiState *state, UiPane pane, const UiRow *rows,
 int ui_state_mark_count(const UiState *state, UiPane pane);
 int ui_state_is_marked(const UiState *state, UiPane pane, const char *path);
 const UiRow *ui_state_selected_row(const UiState *state, UiPane pane);
+
+/* Recompute which actions apply to the active pane and why a disabled one is
+ * disabled. The reducer calls this when ACTIONS opens; tests may call it
+ * directly against a constructed state. */
+void ui_actions_prepare(UiState *state);
 
 #endif

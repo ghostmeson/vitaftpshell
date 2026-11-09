@@ -17,6 +17,30 @@
  * See docs/THIRD_PARTY.md.
  */
 
+int draw_init(void)
+{
+    vita2d_init();
+    vita2d_set_clear_color(0xFF000000u); /* C_FIELD; theme.h includes us. */
+    return 1;
+}
+
+void draw_shutdown(void)
+{
+    vita2d_fini();
+}
+
+void draw_begin_frame(void)
+{
+    vita2d_start_drawing();
+    vita2d_clear_screen();
+}
+
+void draw_present(void)
+{
+    vita2d_end_drawing();
+    vita2d_swap_buffers();
+}
+
 uint32_t draw_dim(uint32_t c, float f)
 {
     if (f <= 0.0f)

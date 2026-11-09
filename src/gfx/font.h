@@ -37,6 +37,15 @@ float font_width(const char *s, float px);
 int font_rects(const char *s, float x, float y, float px, Rect *out, int max);
 
 /*
+ * Host-test trace hook. The render suites assert that a required label was
+ * drawn at the settled position and colour; the glyph rectangles alone cannot
+ * name the string. The app leaves this NULL, so the hook costs one branch.
+ */
+typedef void (*FontTraceFn)(const char *text, float x, float y, float px,
+                            uint32_t color);
+void font_set_trace(FontTraceFn fn);
+
+/*
  * Copy the longest prefix of `s` that fits `max_w` at `px`, appending `..` when
  * it was truncated. The result never exceeds `max_w`; a glyph the face does not
  * have advances without drawing.

@@ -31,7 +31,8 @@ typedef enum {
     NET_ERROR
 } NetResult;
 
-/* IPv4 address in network byte order, port in host byte order. */
+/* IPv4 address as host-order bits (octet 1 in bits 31..24); the adapter
+ * converts at the socket boundary. Port is host order. */
 typedef struct {
     uint32_t addr;
     uint16_t port;

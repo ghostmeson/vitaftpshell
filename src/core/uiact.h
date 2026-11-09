@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "core/path.h"
+#include "core/site.h"
 
 /*
  * The command vocabulary the reducer emits and the worker consumes. A command
@@ -109,6 +110,7 @@ typedef struct {
     char path2[PATH_MAX_LEN];
     char text[256];
     char title[64];
+    Site site; /* SAVE_SITE carries the whole site, never a pointer */
 } UiCommand;
 
 const char *ui_command_name(UiCommandType type);

@@ -2,6 +2,8 @@
 
 #include "core/ftp/server.h"
 
+#include "core/fmt.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,6 +79,8 @@ struct FtpServer {
     uint64_t total;
     int total_known;
 
+    char last_command[16];
+    int external_busy;
     int root_index;
 
     int rnfr_valid;
@@ -541,8 +545,16 @@ static void format_mdtm(uint32_t mtime, char *out, size_t cap)
         snprintf(out, cap, "19700101000000");
         return;
     }
-    snprintf(out, cap, "%04d%02d%02d%02d%02d%02d", tm->tm_year + 1900,
-             tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+    int year = tm->tm_year + 1900;
+    if (year < 0)
+        year = 0;
+    if (year > 9999)
+        year = 9999;
+    char stamp[32];
+    snprintf(stamp, sizeof(stamp), "%04d%02d%02d%02d%02d%02d", year,
+             tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min,
+             tm->tm_sec);
+    fmt_copy(out, cap, stamp);
 }
 
 static void format_unix_when(uint32_t mtime, char *out, size_t cap)
@@ -1433,12 +1445,19 @@ static void server_handle_command(FtpServer *server, const char *line,
     }
     cmd[cmd_len] = '\0';
 
+    snprintf(server->last_command, sizeof(server->last_command), "%s", cmd);
+
     const char *arg = space != NULL ? space + 1 : "";
     while (*arg == ' ')
         arg++;
 
     if (strcmp(cmd, "ABOR") == 0) {
         server_abort_command(server);
+        return;
+    }
+
+    if (server->external_busy && server_busy_command(cmd)) {
+        server_reply(server, 450, "Transfer in progress.");
         return;
     }
 
@@ -1943,6 +1962,29 @@ int ftp_server_busy(const FtpServer *server)
 uint16_t ftp_server_control_port(const FtpServer *server)
 {
     return server != NULL ? server->control_port : 0;
+}
+
+NetAddress ftp_server_peer(const FtpServer *server)
+{
+    NetAddress none = {0, 0};
+    return server != NULL ? server->control_peer : none;
+}
+
+const char *ftp_server_last_command(const FtpServer *server)
+{
+    return server != NULL ? server->last_command : "";
+}
+
+NetAddress ftp_server_lan_address(const FtpServer *server)
+{
+    NetAddress none = {0, 0};
+    return server != NULL ? server->lan_address : none;
+}
+
+void ftp_server_set_external_busy(FtpServer *server, int busy)
+{
+    if (server != NULL)
+        server->external_busy = busy != 0;
 }
 
 uint16_t ftp_server_data_port(const FtpServer *server)

@@ -916,6 +916,33 @@ and confirming it launches; that is M1's precondition, not a separate gate.
   - A quit while the server is ON closes the listener and the session.
 - **Verification:** The integration test passes on the host; the first console launch is U14's M1.
 
+### Phase 5 implementation notes
+
+The units above landed with these recorded additions and shapes:
+
+- U10/U11 also added `src/ui/parts.{c,h}` for the shared frame, keycap, wash,
+  and slab primitives, and `src/ui/render.{c,h}` as the one screen dispatcher.
+  `src/gfx/font.c` gained a host-only `font_set_trace` hook so the render suites
+  can assert the string, position, and colour; the app leaves it NULL.
+- U11's two render suites and the preview build fixtures from `UiState`; the
+  preview writes 36 settled states, not one. See D50.
+- U12 also added one plain-C constructor header per adapter
+  (`src/platform/psp2_*.h`), so `main` never includes a `psp2/` header. See D48.
+- U13 added `tools/test/test_integration.c` and the CMake source/link update,
+  which the unit's file list did not name. The integration suite drives the real
+  reducer and worker with fakes and covers the four U13 scenarios.
+- U13 added `app_create(..., worker_thread)` so the host test can run the same
+  worker inline; the product passes 1. See D49.
+- The site-book view crosses the handoff bulk lane at 16 KiB (D46/D49); the
+  save result and the edit-site payload are separate events.
+- The server gained `ftp_server_set_external_busy` so an app transfer and a PC
+  data command cannot own the one slot at the same time (D51).
+- Local high-risk writes are checked in both the reducer and the worker; a fact
+  scan that overflows refuses the plan instead of copying a prefix (D51).
+- The SERVER warning uses ten micro lines and the TEXT ENTRY unavailable notice
+  uses a black scrim; the sites table has a first-row index. These are
+  composition amendments, recorded in D50.
+
 ### U14. Hardware bring-up and the verification record
 
 - **Goal:** The matrix, measured and written down.
