@@ -41,6 +41,7 @@ int fake_fs_exists(const char *path);
 size_t fake_fs_node_count(void);
 
 void fake_fs_set_free(const char *volume, uint64_t bytes, int known);
+void fake_fs_set_mtime(const char *path, uint32_t mtime);
 void fake_fs_set_rename_replaces(int yes);
 void fake_fs_fail_op(FakeFsOp op, FsResult result);
 /* Make the Nth list_next call (0-based) on every new handle fail. */

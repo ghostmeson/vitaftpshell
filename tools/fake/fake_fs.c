@@ -16,6 +16,8 @@ typedef struct {
     char name[FS_NAME_MAX];
     FsEntryType type;
     uint64_t size;
+    uint32_t mtime;
+    int mtime_known;
     unsigned char content[FAKE_FS_CONTENT_MAX];
 } FakeNode;
 
@@ -54,6 +56,36 @@ static FsResult take_failure(FakeFsOp op)
     FsResult r = s_fail[op];
     s_fail[op] = FS_OK;
     return r;
+}
+
+static char lower_char(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return (char)(c - 'A' + 'a');
+    return c;
+}
+
+/* The exposed volumes are case-insensitive; the fake models that. */
+static int path_equal(const char *a, const char *b)
+{
+    while (*a != '\0' && *b != '\0') {
+        if (lower_char(*a) != lower_char(*b))
+            return 0;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static int path_prefix(const char *text, const char *prefix)
+{
+    while (*prefix != '\0') {
+        if (lower_char(*text) != lower_char(*prefix))
+            return 0;
+        text++;
+        prefix++;
+    }
+    return 1;
 }
 
 static void parent_of(const char *path, char *out, size_t cap)
@@ -108,7 +140,7 @@ static void name_of(const char *path, char *out, size_t cap)
 static FakeNode *find(const char *path)
 {
     for (int i = 0; i < FAKE_FS_NODES; ++i) {
-        if (s_nodes[i].used && strcmp(s_nodes[i].path, path) == 0)
+        if (s_nodes[i].used && path_equal(s_nodes[i].path, path))
             return &s_nodes[i];
     }
     return NULL;
@@ -137,7 +169,7 @@ static FakeNode *create(const char *path, FsEntryType type)
 static int has_children(const char *path)
 {
     for (int i = 0; i < FAKE_FS_NODES; ++i) {
-        if (s_nodes[i].used && strcmp(s_nodes[i].parent, path) == 0)
+        if (s_nodes[i].used && path_equal(s_nodes[i].parent, path))
             return 1;
     }
     return 0;
@@ -150,7 +182,8 @@ static void fill_entry(const FakeNode *node, FsEntry *out)
     out->type = node->type;
     out->size = node->size;
     out->size_known = node->type == FS_ENTRY_FILE;
-    out->mtime_known = 0;
+    out->mtime = node->mtime;
+    out->mtime_known = node->mtime_known;
 }
 
 static FsResult fs_list_open(void *ctx, const char *path, FsDir **out)
@@ -190,7 +223,7 @@ static FsResult fs_list_next(void *ctx, FsDir *dir, FsEntry *out)
     for (int i = dir->next; i < FAKE_FS_NODES; ++i) {
         if (!s_nodes[i].used)
             continue;
-        if (strcmp(s_nodes[i].parent, dir->parent) != 0)
+        if (!path_equal(s_nodes[i].parent, dir->parent))
             continue;
         dir->next = i + 1;
         dir->returned++;
@@ -393,7 +426,7 @@ static FsResult fs_rename(void *ctx, const char *from, const char *to)
         for (int i = 0; i < FAKE_FS_NODES; ++i) {
             if (!s_nodes[i].used)
                 continue;
-            if (strncmp(s_nodes[i].path, old_path, old_len) != 0 ||
+            if (!path_prefix(s_nodes[i].path, old_path) ||
                 s_nodes[i].path[old_len] != '/')
                 continue;
             char suffix[FAKE_FS_PATH_MAX];
@@ -437,7 +470,8 @@ static FsResult fs_free_space(void *ctx, const char *path, FsFreeSpace *out)
         if (!s_volumes[i].known)
             continue;
         size_t n = strlen(s_volumes[i].volume);
-        if (strncmp(path, s_volumes[i].volume, n) == 0) {
+        (void)n;
+        if (path_prefix(path, s_volumes[i].volume)) {
             out->known = 1;
             out->bytes = s_volumes[i].bytes;
             return FS_OK;
@@ -557,6 +591,15 @@ void fake_fs_set_free(const char *volume, uint64_t bytes, int known)
 void fake_fs_set_rename_replaces(int yes)
 {
     s_rename_replaces = yes;
+}
+
+void fake_fs_set_mtime(const char *path, uint32_t mtime)
+{
+    FakeNode *node = find(path);
+    if (node == NULL)
+        return;
+    node->mtime_known = 1;
+    node->mtime = mtime;
 }
 
 void fake_fs_fail_op(FakeFsOp op, FsResult result)

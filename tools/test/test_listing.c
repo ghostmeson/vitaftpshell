@@ -97,12 +97,35 @@ static void test_sort(void)
     CHECK(strcmp(entries[2].name, "z.txt") == 0);
 }
 
+static void test_overlong_name(void)
+{
+    char line[512];
+    ListingEntry e;
+
+    int n = snprintf(line, sizeof(line),
+                     "drwxr-xr-x 2 u g 5 Nov 08 12:00 ");
+    memset(line + n, 'a', 300);
+    line[n + 300] = '\0';
+    CHECK(listing_parse_unix(line, &e) == LISTING_MALFORMED);
+
+    n = snprintf(line, sizeof(line), "type=file;size=5; ");
+    memset(line + n, 'a', 300);
+    line[n + 300] = '\0';
+    CHECK(listing_parse_mlsd(line, &e) == LISTING_MALFORMED);
+
+    n = snprintf(line, sizeof(line), "11-08-26  12:00PM             5 ");
+    memset(line + n, 'a', 300);
+    line[n + 300] = '\0';
+    CHECK(listing_parse_dos(line, &e) == LISTING_MALFORMED);
+}
+
 int main(void)
 {
     test_mlsd();
     test_unix();
     test_dos();
     test_sort();
+    test_overlong_name();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_listing: %d failure(s)\n", s_failures);

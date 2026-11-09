@@ -1,10 +1,11 @@
 # Architecture
 
-**Status:** settled by the v1 plan. Phases 1 and 2 have built the project shape
-and the shared foundation: the build and packaging, the six port contracts and
-host fakes, the gfx base and layout table, the reply/listing/path/format
-policy, and the site/settings/store/log policy. The protocol engines, screens,
-adapters, and runtime remain contracts until their units land. The plan
+**Status:** settled by the v1 plan. Phases 1, 2, and 3 have built the project
+shape, the shared foundation, and the protocol engines: the build and packaging,
+the six port contracts and host fakes, the gfx base and layout table, the
+reply/listing/path/format policy, the site/settings/store/log policy, and the
+passive FTP client and server. The screens, adapters, and runtime remain
+contracts until their units land. The plan
 [`plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md)
 owns sequencing and the unit-level detail; this document owns the shape.
 
@@ -81,6 +82,38 @@ The engine is an event-driven state machine: command sent, reply line received,
 data readable, data writable, deadline expired, cancel, peer closed. Each stage
 carries a deadline. It never blocks on a file body; the worker pumps a bounded
 amount of work per tick.
+
+**Engine shape (U6/U7).** `src/core/ftp/ftp.c` holds the pieces both roles need:
+the incremental control-line reader (4096-byte cap), the remote path normalizer
+(`..` clamps at `/`; no local `path.c` use), the cause and stage names, and the
+templed write (`<target>.vftp.part`, a stale `<target>.vftp.old` recovered or
+cleared, file sync before rename, and the aside fallback when the platform cannot
+replace). The client (`client.c`) and server (`server.c`) own their state
+machines and expose one event callback each; neither owns a UI or a listing
+arena.
+
+- **Client:** `FtpClient` reports `STATE`, `LISTING_BEGIN/ROW/END`, `PROGRESS`,
+  and `OPERATION_DONE`. The machine is `IDLE`, `RESOLVING`, `CONNECTING`,
+  `GREETING`, `LOGGING_IN`, `READY`, `LISTING`, `TRANSFERRING`, `STALLED`,
+  `LOST`, or `FAILED`; the data side is `NONE`, `ARMED`, `ACCEPTED`, `ACTIVE`,
+  or `DRAINING`. The connect budget is 10 s with caps of 3 s resolve, 3 s
+  connect, 2 s greeting/login, and 2 s first listing; a control command has 5 s;
+  a data operation has a 15 s idle deadline. A data-only failure sends `ABOR`,
+  records `cls=network` or `storage`, and keeps the control session; a control
+  drop records `LOST`. The client tolerates either ABOR reply order with a
+  250 ms drain grace, during which a new command is refused rather than allowed
+  to consume a trailing `426`.
+- **Server:** `FtpServer` reports `STATE`, `CLIENT`, `PROGRESS`,
+  `TRANSFER_DONE`, and `ERROR`. The machine is `OFF`, `BINDING`, `ON`,
+  `SESSION`, `REFUSING`, or `STOPPING`; the data side uses the same five
+  sub-states. It binds control and control+1 on the LAN address, accepts one
+  client, refuses a second with 450, drains the data backlog at every PASV,
+  accepts a data peer only when its address equals the control peer's, and
+  disarms on every non-data command and every refusal. A transfer holds the one
+  slot; a data or mutating command during it answers 450. `STOR` writes a temp
+  and renames on close; a reset or timeout aborts the temp and leaves the
+  previous destination byte-identical. Network loss closes both listeners and
+  returns `OFF`.
 
 ## Threading and handoff
 

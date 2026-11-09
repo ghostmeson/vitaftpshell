@@ -739,3 +739,36 @@ and a case variant can no longer reach a denied file. A PC whose data connection
 comes from a translated address (a second NAT) is refused; that is the correct
 trade for not handing the file to a stranger. The slot now covers mutating commands
 as well as data commands, which is a wider 450 than R38 previously stated.
+
+## D43. One shared FTP core, event callbacks, explicit deadlines, and an ABOR grace
+
+**Date:** 2026-11-09
+**Status:** accepted; implementation shape for U6/U7.
+
+**Context:** The plan named `client.c` and `server.c`, but both roles need the
+same control-line cap, the same remote path normalizer, and the same templed
+write. Duplicating them would let a fix to the 4096-byte line cap or the
+`.vftp.part` discipline drift between the client and the server. The client also
+has to tolerate both legal ABOR reply orders (`426` then `226`, or `226` then a
+late `426`) without letting the trailing reply become the next command's answer.
+
+**Decision:** `src/core/ftp/ftp.c` owns the shared line reader, remote path
+normalizer, cause/stage names, and templed write. `client.c` and `server.c` own
+their state machines and report through one event callback each; they own no UI,
+no listing arena, and no queue. The client budget is 10 s total with 3 s resolve,
+3 s connect, 2 s greeting/login, and 2 s first listing caps; a control command has
+5 s and a data operation a 15 s idle deadline. After an abort the client keeps a
+250 ms drain grace: a `225`/`226` starts it, a trailing `426` is consumed, and a
+new command is refused during it rather than allowed to claim the stale reply.
+Recursive folder planning, the conflict gate, and the transfer queue remain
+U8/U16/U17; U6 proves the single-file transfer and the high-risk gate that the
+planner consumes.
+
+**Consequences:** The engine is three files, not two, and the host suite drives
+both roles through scripted peers. A cancel can report the transfer done and
+still refuse the next command for up to 250 ms; that is the cost of not shifting
+the reply stream. A server that answers ABOR with one definitive refusal ends
+the grace immediately and keeps the session. A listing name that does not fit the
+256-byte entry is dropped, not truncated, so a later action cannot target a
+different file. The adapters and the worker still own the sockets, files, rings,
+and listing generations.

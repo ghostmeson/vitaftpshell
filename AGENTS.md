@@ -6,15 +6,16 @@ records what is already settled. Read both before changing anything.
 
 ## Status
 
-`building`. Phases 1 and 2 are complete: the build shape, the six port
+`building`. Phases 1, 2, and 3 are complete: the build shape, the six port
 contracts and host fakes, the COCKPIT gfx base with the seven-surface layout
-table, the reply/listing/path/format policy, and the site book/settings/store/
-log policy all exist. `tools/test/run.sh` passes every host test and
-`tools/preview/run.sh` renders a 960x544 PNG. The VPK is still a stub
-(`vitaftpshell-v01.00-b5.vpk`): no protocol engine, screen, or platform
-adapter exists yet. Do not start coding from this file alone: the plan is the
-source of truth for behavior, sequencing, and verification, and
-`docs/DESIGN.md` is the layout authority.
+table, the reply/listing/path/format policy, the site book/settings/store/log
+policy, and the passive FTP client and server state machines all exist.
+`tools/test/run.sh` passes ten host suites and `tools/preview/run.sh` renders a
+960x544 PNG. The VPK is still a stub (`vitaftpshell-v01.00-b7.vpk`): no screen
+or platform adapter exists yet, and the engine is not linked into the app target
+until U13. Do not start coding from this file alone: the plan is the source of
+truth for behavior, sequencing, and verification, and `docs/DESIGN.md` is the
+layout authority.
 
 ## Read order
 
@@ -249,6 +250,10 @@ judgment call:
 - the reply-line cap, nominally 4096 bytes, against real servers;
 - whether `sceIoRename` replaces an existing target, and which fallback KTD12
   needs as a result;
+- the `FsEntry.mtime` unit (the server assumes Unix seconds) and whether the
+  adapter must convert or report unknown;
+- directory sync after a rename: `FsPort` has no call for it, so power-loss
+  durability needs a port extension or a confirmed platform guarantee;
 - the IME initialization order;
 - the mksfoex flags this SDK build needs;
 - the icon and LiveArea art.
@@ -267,16 +272,18 @@ vitaFTPShell/
   send.sh              uploads the current VPK, refusing a stale number
   src/
     main.c             composition root; a Phase 1 stub until U13
+    core/ftp/          passive FTP client and server state machines
   sce_sys/             placeholder icon and LiveArea art (U14 replaces)
   tools/
     test/run.sh        layering guard and host test runner
+    fake/              NetPort, FsPort, input, IME, clock, log, and FTP peers
   build/               one VPK and the unstripped ELF; ignored
   docs/
     README.md          documentation map
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D42
+    DECISIONS.md       numbered decisions, D1-D43
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification
     features/          future feature documents

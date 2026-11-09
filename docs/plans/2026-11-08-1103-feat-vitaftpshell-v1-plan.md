@@ -649,6 +649,8 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 - The IME initialization order and whether the dialog needs a frame between init and status.
 - The mksfoex flags this SDK build needs for `VERSION` and `CONTENT_ID`.
 - Icon, pic0, and LiveArea art.
+- `FsEntry.mtime` is treated as Unix seconds by the server's MDTM/MLSD formatter; the adapter must convert or report unknown if the platform does not supply that unit.
+- `FsPort` has no directory sync, so the templed write's durability holds against process kill; power-loss durability needs a port extension or a confirmed platform guarantee.
 
 ---
 
@@ -661,8 +663,8 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 | U3 | Graphics base | `vitaFTPShell/src/gfx/*`, `tools/preview/*` | U1 |
 | U4 | Replies, listings, paths, formatting | `vitaFTPShell/src/core/{reply,listing,path,fmt}.c` | U2 |
 | U5 | Site book, settings, store, log events | `vitaFTPShell/src/core/{site,settings,store,logev}.c` | U2, U4 |
-| U6 | FTP client state machine | `vitaFTPShell/src/core/ftp/client.c` | U2, U4 |
-| U7 | FTP server state machine | `vitaFTPShell/src/core/ftp/server.c` | U2, U4 |
+| U6 | FTP client state machine | `vitaFTPShell/src/core/ftp/{ftp,client}.c` | U2, U4 |
+| U7 | FTP server state machine | `vitaFTPShell/src/core/ftp/{ftp,server}.c` | U2, U4 |
 | U8 | Transfer queue and slot arbitration | `vitaFTPShell/src/core/xfer.c` | U4 |
 | U9 | Input reducer and UI state | `vitaFTPShell/src/core/{input,uistate,uiact}.c` | U5, U8, U16 |
 | U10 | Screens I: header, workspace, dock | `vitaFTPShell/src/ui/{header,workspace,dock,render}.c` | U3, U9 |
@@ -771,8 +773,8 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 - **Goal:** Passive connect, login, list, browse, download, upload, and every mapped failure.
 - **Requirements:** R19-R27, R38, R44.
 - **Dependencies:** U2, U4.
-- **Files:** `vitaFTPShell/src/core/ftp/client.c` and header, `vitaFTPShell/tools/test/test_client.c`, `vitaFTPShell/tools/fake/fake_ftpd.c`.
-- **Approach:** The machine advances on events from the port and from the clock. Each stage carries a deadline; the data channel is a separate socket the machine opens after PASV and closes on completion, error, or cancel. The data phase follows KTD5's four sub-states, and every non-data command invalidates an armed connection. Every failure maps to a class and a stage. The machine reports state changes and listing snapshots; it never touches the UI.
+- **Files:** `vitaFTPShell/src/core/ftp/{ftp,client}.c` and headers, `vitaFTPShell/tools/test/test_client.c`, `vitaFTPShell/tools/fake/fake_ftpd.c`.
+- **Approach:** The machine advances on events from the port and from the clock. Each stage carries a deadline; the data channel is a separate socket the machine opens after PASV and closes on completion, error, or cancel. The data phase follows KTD5's four sub-states, and every non-data command invalidates an armed connection. Every failure maps to a class and a stage. The machine reports state changes and listing snapshots; it never touches the UI. `ftp.c` holds the shared line reader, remote path normalizer, and templed write so the client and server cannot drift.
 - **Test scenarios:**
   - A 120 greeting followed by 220 proceeds to login.
   - Anonymous login sends `anonymous` and `anonymous@`; a login site sends its stored pair.
@@ -789,7 +791,7 @@ and confirming it launches; that is M1's precondition, not a separate gate.
   - A 227 advertising a foreign address is refused with a server-class reason.
   - A 450 in reply to RETR leaves no armed data connection, so the next RETR opens a fresh one.
   - A download whose destination folder is inside `ur0:tai` carries the high-risk flag into the plan before the transfer starts.
-  - A recursive download into an existing destination folder merges it and applies the file rule per file.
+  - A recursive download into an existing destination folder merges it and applies the file rule per file; the merge and conflict rules are U16/U17, while U6 proves the single-file transfer and the risk result the planner consumes.
 - **Verification:** The scripted server can drive every state in the machine and every mapped failure to a distinct message.
 
 ### U7. FTP server state machine
@@ -797,8 +799,8 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 - **Goal:** A listener, one client slot, the command table, and the full denial set.
 - **Requirements:** R47-R56, KTD11, KTD14.
 - **Dependencies:** U2, U4.
-- **Files:** `vitaFTPShell/src/core/ftp/server.c` and header, `vitaFTPShell/tools/test/test_server.c`, `vitaFTPShell/tools/fake/fake_ftp_client.c`.
-- **Approach:** Bind the control socket, then the data socket at control plus one. Accept one client; a second accept gets a 450 and is closed. Commands parse against the table; every path resolves through `path` and re-checks the denial table after normalization. The data phase follows KTD5: PASV arms one connection, a non-data command or a refusal disarms it, and an abort drains its own reply pair. A `STOR` overwrites an existing destination through the templed write and never asks the console (D41); the warning panel discloses it.
+- **Files:** `vitaFTPShell/src/core/ftp/{ftp,server}.c` and headers, `vitaFTPShell/tools/test/test_server.c`, `vitaFTPShell/tools/fake/fake_ftp_client.c`.
+- **Approach:** Bind the control socket, then the data socket at control plus one. Accept one client; a second accept gets a 450 and is closed. Commands parse against the table; every path resolves through `path` and re-checks the denial table after normalization. The data phase follows KTD5: PASV arms one connection, a non-data command or a refusal disarms it, and an abort drains its own reply pair. A `STOR` overwrites an existing destination through the templed write and never asks the console (D41); the warning panel discloses it. `ftp.c` holds the shared line reader, remote path normalizer, and templed write so the client and server cannot drift.
 - **Test scenarios:**
   - Greeting is 220; `USER anonymous` is 331 and `PASS anything` is 230; any other user is 530.
   - `PASV` returns the LAN address and control port plus one.
