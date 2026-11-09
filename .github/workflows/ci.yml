@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install zlib
         run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
@@ -30,7 +30,7 @@ jobs:
         run: ./tools/preview/run.sh
 
       - name: Upload preview
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: workspace-preview
           path: build/preview/workspace.png
