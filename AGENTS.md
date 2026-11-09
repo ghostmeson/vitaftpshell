@@ -6,16 +6,17 @@ anything.
 
 ## Status
 
-`building`. Phases 1, 2, and 3 are complete: the build shape, the six port
-contracts and host fakes, the COCKPIT gfx base with the seven-surface layout
-table, the reply/listing/path/format policy, the site book/settings/store/log
-policy, and the passive FTP client and server state machines all exist.
-`tools/test/run.sh` passes ten host suites and `tools/preview/run.sh` renders a
-960x544 PNG. The VPK is still a stub (`vitaftpshell-v01.00-b8.vpk`): no screen
-or platform adapter exists yet, and the engine is not linked into the app target
-until U13. Do not start coding from this file alone: the plan is the source of
-truth for behavior, sequencing, and verification, and `docs/DESIGN.md` is the
-layout authority.
+`building`. Phases 1-4 are complete: the build shape, the six port contracts
+and host fakes, the COCKPIT gfx base with the seven-surface layout table, the
+reply/listing/path/format policy, the site book/settings/store/log policy, the
+passive FTP client and server state machines, the transfer queue and slot
+arbitration, the local operation planner and executor, the input reducer and UI
+state, and the cross-thread handoff all exist. `tools/test/run.sh` passes
+sixteen host suites and `tools/preview/run.sh` renders a 960x544 PNG. The VPK
+is still a stub (`vitaftpshell-v01.00-b10.vpk`): no screen or platform adapter
+exists yet, and the engine is not linked into the app target until U13. Do not
+start coding from this file alone: the plan is the source of truth for behavior,
+sequencing, and verification, and `docs/DESIGN.md` is the layout authority.
 
 ## Read order
 
@@ -137,7 +138,8 @@ Policy and UI state must run on the host against fake `NetPort`, `FsPort`,
 - recursive folder planning and the copy-into-itself refusal;
 - cancellation and partial-file cleanup decisions;
 - server command handling and path denial;
-- the input reducer and screen transitions.
+- the input reducer and screen transitions;
+- the transfer slot, the local plan and rollback, and the handoff rings.
 
 A test that only proves a function returns a constant is not a test. A hardware
 run is the only evidence that promotes the project to `verified`.
@@ -240,7 +242,8 @@ A job is finished when:
 None at the product or architecture level. The planning session resolved authid,
 passive ports, threading, listing caps, the site and log formats, MLSD, the server
 foundation, the local `tai` policy, and the five deferred product choices; the
-answers are D30-D40 and the plan's KTDs.
+answers are D30-D43 and the plan's KTDs; D44-D47 record the standalone
+repository and the Phase 4 implementation shapes.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
@@ -273,6 +276,8 @@ vitaFTPShell/
   .github/workflows/   host-test CI
   src/
     main.c             composition root; a build-shape stub until U13
+    core/              policy: parsers, path, store, log, queue, planner,
+                       executor, input/UI state, handoff
     core/ftp/          passive FTP client and server state machines
   sce_sys/             placeholder icon and LiveArea art (U14 replaces)
   tools/
@@ -285,7 +290,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D43
+    DECISIONS.md       numbered decisions, D1-D47
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification
     features/          future feature documents

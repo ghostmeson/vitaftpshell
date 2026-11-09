@@ -52,6 +52,12 @@ static int s_rename_replaces;
 static FsResult s_fail[FAKE_FS_OP_COUNT];
 static int s_fail_list_after;
 static int s_sync_count;
+static int s_fail_sync_at;
+static int s_rename_count;
+static int s_fail_rename_at;
+static int s_remove_count;
+static int s_fail_remove_at;
+static int s_fail_remove_from;
 
 static FsResult take_failure(FakeFsOp op)
 {
@@ -348,7 +354,11 @@ static FsResult fs_sync(void *ctx, FsFile *file)
         return failure;
     if (file == NULL || !file->used)
         return FS_INVALID;
-    s_sync_count++;
+    int index = s_sync_count++;
+    if (s_fail_sync_at >= 0 && index == s_fail_sync_at) {
+        s_fail_sync_at = -1;
+        return FS_IO;
+    }
     return FS_OK;
 }
 
@@ -400,6 +410,12 @@ static FsResult fs_rename(void *ctx, const char *from, const char *to)
     if (failure != FS_OK)
         return failure;
 
+    int call = s_rename_count++;
+    if (s_fail_rename_at >= 0 && call == s_fail_rename_at) {
+        s_fail_rename_at = -1;
+        return FS_IO;
+    }
+
     FakeNode *src = find(from);
     if (src == NULL)
         return FS_NOT_FOUND;
@@ -450,6 +466,14 @@ static FsResult fs_remove(void *ctx, const char *path)
     if (failure != FS_OK)
         return failure;
 
+    int call = s_remove_count++;
+    if (s_fail_remove_at >= 0 && call == s_fail_remove_at) {
+        s_fail_remove_at = -1;
+        return FS_IO;
+    }
+    if (s_fail_remove_from >= 0 && call >= s_fail_remove_from)
+        return FS_IO;
+
     FakeNode *node = find(path);
     if (node == NULL)
         return FS_NOT_FOUND;
@@ -498,6 +522,12 @@ void fake_fs_reset(void)
     s_rename_replaces = 1;
     s_fail_list_after = -1;
     s_sync_count = 0;
+    s_fail_sync_at = -1;
+    s_rename_count = 0;
+    s_fail_rename_at = -1;
+    s_remove_count = 0;
+    s_fail_remove_at = -1;
+    s_fail_remove_from = -1;
 
     s_port.ctx = NULL;
     s_port.list_open = fs_list_open;
@@ -618,4 +648,24 @@ void fake_fs_fail_list_after(int entries)
 int fake_fs_sync_count(void)
 {
     return s_sync_count;
+}
+
+void fake_fs_fail_sync_at(int index)
+{
+    s_fail_sync_at = index;
+}
+
+void fake_fs_fail_rename_at(int index)
+{
+    s_fail_rename_at = index;
+}
+
+void fake_fs_fail_remove_from(int index)
+{
+    s_fail_remove_from = index;
+}
+
+void fake_fs_fail_remove_at(int index)
+{
+    s_fail_remove_at = index;
 }

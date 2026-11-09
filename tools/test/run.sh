@@ -91,7 +91,7 @@ for test_src in "${tests[@]}"; do
   fi
 
   # Bash 3.2 treats an empty array as unbound under `set -u`.
-  "$CC" -std=c99 -O1 -g -Wall -Wextra \
+  "$CC" -std=c99 -O1 -g -Wall -Wextra -pthread \
     -I"$ROOT/src" -I"$ROOT/tools/fake" \
     "$test_src" ${fake_sources[@]+"${fake_sources[@]}"} \
     ${core_sources[@]+"${core_sources[@]}"} \

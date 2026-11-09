@@ -14,14 +14,15 @@ card to a PC, without making the PC the workspace.
 ## Status
 
 `building`. Strategy, requirements, the screen-by-screen design, and the
-architecture plan are complete. Phases 1, 2, and 3 are done: the build shape,
-six port contracts and fakes, the gfx base and layout table, the reply/listing/
-path/format policy, the site/settings/store/log policy, and the passive FTP
-client and server state machines exist. `tools/test/run.sh` passes ten host
-suites, `tools/preview/run.sh` renders a 960x544 PNG, and `build.sh` emits
-`vitaftpshell-v01.00-b8.vpk` from a stub `src/main.c`. No screen or platform
-adapter exists yet, the engine is not linked into the app target until U13, and
-nothing has run on hardware.
+architecture plan are complete. Phases 1-4 are done: the build shape, six port
+contracts and fakes, the gfx base and layout table, the reply/listing/path/
+format policy, the site/settings/store/log policy, the passive FTP client and
+server, the transfer queue, the local planner and executor, the input reducer
+and UI state, and the cross-thread handoff exist. `tools/test/run.sh` passes
+sixteen host suites, `tools/preview/run.sh` renders a 960x544 PNG, and
+`build.sh` emits `vitaftpshell-v01.00-b10.vpk` from a stub `src/main.c`. No
+screen or platform adapter exists yet, the engine is not linked into the app
+target until U13, and nothing has run on hardware.
 
 ## Users
 
@@ -67,8 +68,8 @@ requirements R1-R70.
 | Phase 1: Build shape | Source tree, `build.sh`, one VPK, the layering guard — done |
 | Phase 2: Contracts, graphics, and shared policy | Ports, fakes, gfx, parsers, path table, store, log — done |
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
-| Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — next |
-| Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test |
+| Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
+| Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — next |
 | Phase 6: Hardware verification | M1–M8 evidence; project becomes `verified` |
 
 ## Failure policy
@@ -105,4 +106,6 @@ sessions, connect-to-first-listing, and server-matrix pass.
 | WiFi path is built but not hardware-verified | First hardware session proves connect, PASV, transfer, and timeouts |
 | Public FTP may decline | Personal servers keep the product useful; no protocol widening in v1 |
 | Controller-only density | Design phase reviews each screen before implementation |
+| Cross-volume batch move is not all-or-nothing | Each file is atomic; a batch failure leaves completed moves and reports `n OF m MOVED`, never deletes a moved file (D45) |
+| Planner and handoff caps are finite | A plan that overflows the arena or step table is refused, never truncated; a lost command is counted (D46) |
 | GPLv3 boundary | Keep the license and third-party notices intact; document provenance |

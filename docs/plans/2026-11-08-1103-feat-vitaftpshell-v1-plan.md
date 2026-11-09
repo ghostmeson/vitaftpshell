@@ -668,7 +668,7 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 | U5 | Site book, settings, store, log events | `vitaFTPShell/src/core/{site,settings,store,logev}.c` | U2, U4 |
 | U6 | FTP client state machine | `vitaFTPShell/src/core/ftp/{ftp,client}.c` | U2, U4 |
 | U7 | FTP server state machine | `vitaFTPShell/src/core/ftp/{ftp,server}.c` | U2, U4 |
-| U8 | Transfer queue and slot arbitration | `vitaFTPShell/src/core/xfer.c` | U4 |
+| U8 | Transfer queue and slot arbitration | `vitaFTPShell/src/core/{xfer,cause}.c` | U4 |
 | U9 | Input reducer and UI state | `vitaFTPShell/src/core/{input,uistate,uiact}.c` | U5, U8, U16 |
 | U10 | Screens I: header, workspace, dock | `vitaFTPShell/src/ui/{header,workspace,dock,render}.c` | U3, U9 |
 | U11 | Screens II: sites, editor, actions, server, confirm, text entry | `vitaFTPShell/src/ui/*.c` | U3, U9, U10 |
@@ -677,7 +677,7 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 | U14 | Hardware bring-up and the verification record | `vitaFTPShell/docs/VERIFICATION.md` | U13 |
 | U15 | Command, event, and listing handoff | `vitaFTPShell/src/core/handoff.c` | U2, U9 |
 | U16 | Local operation planner | `vitaFTPShell/src/core/fsop_plan.c` | U4 |
-| U17 | Operation executor, templed writes, rollback | `vitaFTPShell/src/core/fsop_run.c` | U2, U8, U16 |
+| U17 | Operation executor, templed writes, rollback | `vitaFTPShell/src/core/{cause,fsop_run}.c` | U2, U8, U16 |
 
 ### U1. Build shape, packaging, and the layering guard
 
@@ -941,7 +941,9 @@ and confirming it launches; that is M1's precondition, not a separate gate.
   - Three publishes with no read in between never overwrite the generation the reader is on.
   - The bulk lane carries a book larger than one record and reports a generation, so a stale read is detected.
   - A record copied out of a ring is byte-identical to the one enqueued.
-- **Verification:** The host test fails when release/acquire is removed from the publish index, which is the only way to prove the ordering matters.
+  - A server stop and a cancel reach the consumer even when the command ring is full.
+  - Progress is a seqlock latch: the newest sample wins, a torn sample is retried, and an older sample is dropped when a newer terminal event is delivered.
+- **Verification:** `tools/test/tsan.sh` builds the handoff with plain stores and requires a ThreadSanitizer race, which proves the release/acquire on the publish index is necessary.
 
 ### U16. Local operation planner
 
@@ -977,8 +979,10 @@ and confirming it launches; that is M1's precondition, not a separate gate.
   - Cancel mid-copy removes the temp file and leaves the destination unchanged (Covers AE4).
   - A storage error at write leaves no file and reports `cls=storage`.
   - Cross-volume move with a successful delete leaves only the destination.
-  - Cross-volume move where the delete fails removes the destination and reports `MOVE FAILED - NOTHING CHANGED`.
-  - Cross-volume move where the rollback also fails names both paths and `MOVE INCOMPLETE`.
+  - Cross-volume move where the delete fails removes a new destination and reports `MOVE FAILED - NOTHING CHANGED`.
+  - Cross-volume move where the destination removal also fails names both paths and `MOVE INCOMPLETE`.
+  - Cross-volume move over an existing destination whose source delete fails keeps the new destination and reports `MOVE FAILED - DESTINATION KEPT`; it never leaves neither.
+  - A batch move that fails after some files moved leaves the completed moves and reports `MOVE FAILED - n OF m MOVED`; no rollback deletes a moved file (D45).
   - A destination that exists under SKIP is untouched, byte for byte.
   - An existing destination folder is merged, and no folder is deleted to satisfy OVERWRITE ALL.
   - A write is synced before the rename and the destination is synced after it.

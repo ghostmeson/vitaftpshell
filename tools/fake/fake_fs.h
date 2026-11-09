@@ -50,5 +50,12 @@ void fake_fs_fail_op(FakeFsOp op, FsResult result);
 void fake_fs_fail_list_after(int entries);
 
 int fake_fs_sync_count(void);
+/* Fail one specific sync or rename by its 0-based call index. */
+void fake_fs_fail_sync_at(int index);
+void fake_fs_fail_rename_at(int index);
+/* Fail every remove at or after a 0-based call index. */
+void fake_fs_fail_remove_from(int index);
+/* Fail one specific remove by its 0-based call index. */
+void fake_fs_fail_remove_at(int index);
 
 #endif

@@ -1,11 +1,12 @@
 # Architecture
 
-**Status:** settled by the v1 plan. Phases 1, 2, and 3 have built the project
-shape, the shared foundation, and the protocol engines: the build and packaging,
-the six port contracts and host fakes, the gfx base and layout table, the
-reply/listing/path/format policy, the site/settings/store/log policy, and the
-passive FTP client and server. The screens, adapters, and runtime remain
-contracts until their units land. The plan
+**Status:** settled by the v1 plan. Phases 1-4 have built the project shape,
+the shared foundation, the protocol engines, and the operations and state layer:
+the build and packaging, the six port contracts and host fakes, the gfx base and
+layout table, the reply/listing/path/format policy, the site/settings/store/log
+policy, the passive FTP client and server, the transfer queue, the local planner
+and executor, the input reducer and UI state, and the handoff. The screens,
+adapters, and runtime remain contracts until their units land. The plan
 [`plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md)
 owns sequencing and the unit-level detail; this document owns the shape.
 
@@ -115,6 +116,31 @@ arena.
   previous destination byte-identical. Network loss closes both listeners and
   returns `OFF`.
 
+**Operations and state (U8/U16/U17/U9/U15).**
+
+- `src/core/xfer.c` is the one slot: an ordered queue of descriptors, one active
+  item, one busy fact, the R41 decision recorded once per batch, and a latched
+  terminal outcome. It never touches a file or a peer.
+- `src/core/fsop_plan.c` is pure planning. It takes the action, the sources, the
+  destination, and the directory facts, and returns ordered steps, a rollback
+  list, the conflict gate, and per-step risk. It never calls `FsPort`; a
+  volume-root source, a copy into itself, or a protected delete is refused
+  before any step exists.
+- `src/core/fsop_run.c` walks the plan through `FsPort` with the templed write.
+  A copy rollback removes only a destination the plan created; an overwritten
+  destination that reached commit is left new. A cross-volume move is atomic per
+  file: the source is deleted only after the rename, and a batch that fails
+  after some moves leaves the completed moves and reports `n OF m MOVED` rather
+  than deleting the only copy (D45).
+- `src/core/input.c` turns edges and the stick into semantic events with repeat.
+  `src/core/uistate.c` is the only writer of `UiState`; `src/core/uiact.c` is the
+  command vocabulary. The reducer emits values, never calls the engine.
+- `src/core/handoff.c` carries commands and events across fixed rings. A server
+  stop and a cancel have dedicated slots and are never lost to a full command
+  ring; progress is a coalesced seqlock latch, so a terminal state cannot be
+  overwritten; each pane has three listing generations; the site book uses the
+  bulk lane; the server state is latched.
+
 ## Threading and handoff
 
 Two threads (D38).
@@ -127,19 +153,21 @@ Two threads (D38).
 Handoff (`src/core/handoff.c`, policy with no platform call, so it is host-tested
 on its own):
 
-- **Commands** cross a fixed-capacity ring of plain records: connect, disconnect,
-  list, cwd, mkdir, rename, delete, copy, move, upload, download, cancel, retry,
-  server start, server stop, set port, save sites, save settings. No record holds
-  a pointer into either thread's state.
-- **Events** cross a second fixed ring: session state, listing published, transfer
-  progress, transfer terminal state, server state, operation progress, save
-  result. Indices are release/acquire. Progress coalesces to the newest value;
-  a terminal transfer state, a cancel acknowledgement, and a server state change
-  are latched flags, so none can be dropped by a full ring.
+- **Commands** cross a fixed-capacity ring of plain records: open, parent,
+  transfer, refresh, site connect/edit/new/delete/save, run action, confirm, IME,
+  server start/stop/port, reconnect, dismiss, cancel, clear queue. No record
+  holds a pointer into either thread's state. A server stop and a cancel use
+  dedicated slots, so a full ring cannot drop them.
+- **Events** cross a second fixed ring: session state, listing published,
+  transfer terminal state, server state, operation progress, save result.
+  Indices are release/acquire. Progress is a seqlock latch: the newest sample
+  wins, a torn record is retried, and an older sample is dropped when a newer
+  terminal event is delivered. The server state is latched separately and stays
+  readable after the ring drains.
 - **Listings** do not cross the rings. Each pane has three generations; the
-  worker fills one the UI has released and publishes it with a release store. The
-  UI copies the index once at a frame boundary. The worker never fills the two
-  most recently published generations, so a draw cannot see rows change under it.
+  worker reserves a slot the reader does not hold, fills it, and publishes it
+  with a release store. The UI keeps one generation until it releases it at a
+  frame boundary, so a draw cannot see rows change under it.
 - **The site book** is larger than one record and crosses on a bulk lane carrying
   a generation number, so a stale read is detectable.
 
@@ -235,14 +263,24 @@ executor walks the plan and reports progress; it makes no policy decisions.
 - Recursion creates parents before children.
 - A copy or move into itself or a descendant is refused.
 - Every file is written under a reserved temporary name in the destination
-  directory and renamed into place after a successful close (KTD12). Replace-on-
-  rename is a port capability; when it is absent the core plans the aside
-  fallback, and before a destination is written it restores or clears a stale
-  aside left by an interrupted run.
-- A cross-volume move deletes the source only after the rename, and removes the
-  destination if that delete fails (D36).
+  directory, synced, and renamed into place after a successful close (KTD12).
+  Replace-on-rename is a port capability; when it is absent the core uses the
+  aside fallback, and before a destination is written it restores or clears a
+  stale aside left by an interrupted run. The destination file is synced after
+  the rename; directory sync is the documented deferred gap.
+- A copy rollback removes only a destination the plan created. A destination
+  that existed and reached commit stays new; an old file is never deleted to
+  satisfy a rollback.
+- A cross-volume move is atomic per file: copy, rename, delete source. If the
+  source delete fails, a new destination is removed; an overwritten destination
+  is kept and the failure is named. A batch that fails after some moves leaves
+  the completed moves and reports `n OF m MOVED`, never deleting a moved file
+  (D45).
 - Cancel or failure removes the temp; the previous destination stays
-  byte-identical.
+  byte-identical. A recursive delete cannot be rolled back and reports
+  `DELETED n OF m`.
+- The planner uses a 256 KiB arena, 2048 steps, and 2048 rollbacks; a plan that
+  would overflow is refused, never truncated (D46).
 
 ## Error model
 
@@ -289,8 +327,8 @@ so a rendered state is the shipped composition, not a copy.
 
 ## Host tests
 
-`tools/test/run.sh` compiles the real policy, presentation, and runtime against
-fakes and asserts:
+`tools/test/run.sh` compiles the real core and graphics against fakes and
+asserts:
 
 - every refusal of the dependency rule (a `psp2/` or `vita2d.h` include
   anywhere under `src/` outside the seven-file allowlist fails the run);
@@ -299,10 +337,21 @@ fakes and asserts:
 - site round-trip, corrupt-file handling, atomic save, log formatting, and
   rotation;
 - the client and the server against a scripted peer in each direction;
-- queue order, the conflict decision, recursion, the copy-into-itself refusal,
-  cancellation, rollback, partial cleanup, and the rename-replace capability;
+- queue order, the single slot, the conflict decision, terminal latching, and
+  the fake-job walk;
+- planner order, merge, the conflict gate, the copy-into-itself refusal, the
+  volume-root refusal, protected deletes, risk flags, and the plan caps;
+- executor overwrite with and without replace-on-rename, stale-aside recovery,
+  cancel mid-copy, a kill at each write step, the destination sync, per-file
+  move semantics, rollback, partial delete reporting, and `MOVE INCOMPLETE`;
+- the input repeat decoder, every input-table row, marks across CWD/L/R, volume
+  and connection clearing, dock focus, confirm scrolling, high-risk focus, IME
+  cancel, and the volume-root delete refusal;
 - the handoff: a producer faster than the consumer, a full ring, a coalesced
-  progress stream, a latched terminal state, and three listing generations;
+  progress stream, a latched server state, and three listing generations;
+- `tools/test/tsan.sh` builds the handoff with plain stores and requires a
+  ThreadSanitizer race, so the release/acquire on the publish index is proven
+  necessary rather than assumed;
 - the reducer's transitions, marks, dock focus, confirm scrolling, and the
   high-risk confirmation;
 - the recorded draw calls for each screen state.
