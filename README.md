@@ -6,10 +6,12 @@ a remote endpoint: local files and a saved FTP site are two live panes, and
 moving a file is one action.
 
 **Status:** `building`. Strategy, requirements, the screen-by-screen design, and
-the architecture plan are complete. Phase 1 is done: the build shape, packaging,
-send script, and layering guard exist, and the first stub VPK,
-`vitaftpshell-v01.00-b3.vpk`, builds. No protocol engine, renderer, screen, or
-adapter exists yet, so the app has not run on hardware.
+the architecture plan are complete. Phases 1 and 2 are done: the build shape,
+six ports and host fakes, the gfx base and layout table, the reply/listing/path/
+format policy, and the site/settings/store/log policy exist. `tools/test/run.sh`
+passes nine host suites and `tools/preview/run.sh` renders a 960x544 preview.
+The VPK is still a stub (`vitaftpshell-v01.00-b4.vpk`): no protocol engine,
+screen, or adapter exists yet, so the app has not run on hardware.
 
 ## What v1 is
 
@@ -48,7 +50,8 @@ export VITASDK="$PWD/../vitasdk"
 export PATH="$VITASDK/bin:$PATH"
 
 ./build.sh                 # one UNSAFE eboot, one vitaftpshell-v01.00-b<n>.vpk
-./tools/test/run.sh        # layering guard; host tests from Phase 2
+./tools/test/run.sh        # layering guard + nine host suites
+./tools/preview/run.sh     # renders the gfx layer to build/preview/workspace.png
 ./send.sh <vita-ip>        # uploads build/ to VitaShell's FTP server
 ```
 

@@ -6,12 +6,15 @@ records what is already settled. Read both before changing anything.
 
 ## Status
 
-`building`. Phase 1 (U1) is complete: the source tree, `CMakeLists.txt`,
-`build.sh`, `send.sh`, the layering guard, and one
-`vitaftpshell-v01.00-b3.vpk` exist. The VPK is a stub app; no protocol engine,
-renderer, screen, or adapter exists yet. Do not start coding from this file
-alone: the plan is the source of truth for behavior, sequencing, and
-verification, and `docs/DESIGN.md` is the layout authority.
+`building`. Phases 1 and 2 are complete: the build shape, the six port
+contracts and host fakes, the COCKPIT gfx base with the seven-surface layout
+table, the reply/listing/path/format policy, and the site book/settings/store/
+log policy all exist. `tools/test/run.sh` passes every host test and
+`tools/preview/run.sh` renders a 960x544 PNG. The VPK is still a stub
+(`vitaftpshell-v01.00-b4.vpk`): no protocol engine, screen, or platform
+adapter exists yet. Do not start coding from this file alone: the plan is the
+source of truth for behavior, sequencing, and verification, and
+`docs/DESIGN.md` is the layout authority.
 
 ## Read order
 
@@ -180,9 +183,10 @@ run is the only evidence that promotes the project to `verified`.
 
 - Target: PS Vita 3.65 Enso, VitaSDK 2026.08, libvita2d.
 - `./build.sh` builds one UNSAFE eboot and one VPK; `./tools/test/run.sh` runs
-  the layering guard and (from Phase 2) the host tests; `./send.sh <vita-ip>`
-  uploads the current VPK. The renderer's libvita2d link and the SDK stubs join
-  when U3/U12 add source that calls them.
+  the layering guard and the host tests; `./tools/preview/run.sh` renders the
+  gfx layer on the host; `./send.sh <vita-ip>` uploads the current VPK. The
+  renderer's libvita2d link and the SDK stubs join when U13 adds the gfx and
+  adapter sources to the app target.
 - Every build emits `vitaftpshell-v<version>-b<build>.vpk`.
 - `send.sh` refuses an artifact whose build number does not match
   `BUILD_NUMBER`, so a failed build cannot upload the previous VPK.

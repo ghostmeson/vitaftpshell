@@ -1,9 +1,10 @@
 # Architecture
 
-**Status:** settled by the v1 plan. Phase 1 (U1) has built the project shape:
-`CMakeLists.txt`, `build.sh`, `send.sh`, a stub `src/main.c`, and the
-whole-tree layering guard in `tools/test/run.sh`. Policy, ports, renderer, and
-runtime remain contracts until their units land. The plan
+**Status:** settled by the v1 plan. Phases 1 and 2 have built the project shape
+and the shared foundation: the build and packaging, the six port contracts and
+host fakes, the gfx base and layout table, the reply/listing/path/format
+policy, and the site/settings/store/log policy. The protocol engines, screens,
+adapters, and runtime remain contracts until their units land. The plan
 [`plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md)
 owns sequencing and the unit-level detail; this document owns the shape.
 
@@ -238,12 +239,12 @@ so a rendered state is the shipped composition, not a copy.
 - Host tests are a separate script and never enter the VPK.
 - `src/main.c` is a stub until U13: it includes no platform header, because the
   renderer owns `vita2d` and each adapter owns its SDK calls. The libvita2d link
-  and the SDK stubs join when U3/U12 add source that calls them; linking an
-  uncalled library is an unused link.
-- `tools/test/run.sh` scans every `.c` and `.h` in the project (except `build/`)
-  against the seven-file allowlist and fails on a `psp2/`, `psp2common/`,
-  `psp2kern/`, or `vita2d.h` include elsewhere. It is the executable form of the
-  allowed-includes rule.
+  and the SDK stubs join when U13 adds the gfx and adapter sources to the app
+  target; linking an uncalled library is an unused link.
+- `tools/test/run.sh` scans every `.c` and `.h` under `src/` against the
+  seven-file allowlist and fails on a `psp2/`, `psp2common/`, `psp2kern/`, or
+  `vita2d.h` include elsewhere. `tools/` is host-only and outside the guard:
+  its `vita2d.h` is the software shim, not the SDK.
 - `send.sh` refuses an artifact whose build number does not match
   `BUILD_NUMBER`, so a failed build cannot upload its predecessor.
 
@@ -252,8 +253,8 @@ so a rendered state is the shipped composition, not a copy.
 `tools/test/run.sh` compiles the real policy, presentation, and runtime against
 fakes and asserts:
 
-- every refusal of the dependency rule (a `psp2/` or `vita2d.h` include in
-  `src/core` fails the run);
+- every refusal of the dependency rule (a `psp2/` or `vita2d.h` include
+  anywhere under `src/` outside the seven-file allowlist fails the run);
 - replies, multiline replies, PASV, and the three listing formats;
 - path joining, parent, volume matching, the risk table, and the denial table;
 - site round-trip, corrupt-file handling, atomic save, log formatting, and
