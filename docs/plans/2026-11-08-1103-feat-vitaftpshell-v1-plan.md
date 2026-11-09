@@ -740,6 +740,7 @@ and confirming it launches; that is M1's precondition, not a separate gate.
   - Entries sort directories first, then by name, and `.`/`..` never appear.
   - `ux0:data/../tai` normalizes to `ux0:tai`; `..` at a volume root clamps; `UX0:` and `ux0:` resolve to the same volume.
   - `UX0:/TAI/X.SUPRX`, `UR0:/TAI/./BOOT_CONFIG.TXT`, and `//UR0://TAI//CONFIG.TXT` all canonicalize to a denied path.
+  - A backslash spelling is refused for both roles, and a server read of `ux0:data/vitaFTPShell/sites.cfg` is denied while a server read of `ur0:tai/config.txt` is allowed.
   - A destination name containing `/`, `\`, `:`, or a `..` segment is refused.
   - `ur0:tai/boot_config.txt` is denied; `ur0:tai/config.txt` is high risk; `ux0:data/vitaFTPShell/sites.cfg` is normal; `ux0:` and `ux0:data` are protected.
   - 999 bytes, 1.2 KB, 118.7 MB, and unknown render as `999 B`, `1.2 KB`, `118.7 MB`, and `--`.
@@ -757,6 +758,9 @@ and confirming it launches; that is M1's precondition, not a separate gate.
   - A line with too few fields is dropped; the rest of the book still loads.
   - A file whose header is not the expected version loads nothing and marks the book unparsed, and no save happens until the user acts.
   - A save writes a temp file and renames it; when the rename fails, the original is byte-identical.
+  - A stale `.old` aside is restored when the target is missing and cleared when both exist; one orphan cannot wedge the next save.
+  - A bad settings header leaves the caller with defined defaults, and an overlong settings line reports a partial load rather than success.
+  - A long `last_local` still serializes, and a long log path still fits one record.
   - A populated book with known passwords produces no log line containing any password, across every event type.
   - A 530 whose reply text echoes the supplied password puts the text on the card and never in the log.
   - The log writes a record under the cap, and at the cap renames to `session.old.log` and starts a new file.

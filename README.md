@@ -10,7 +10,7 @@ the architecture plan are complete. Phases 1 and 2 are done: the build shape,
 six ports and host fakes, the gfx base and layout table, the reply/listing/path/
 format policy, and the site/settings/store/log policy exist. `tools/test/run.sh`
 passes nine host suites and `tools/preview/run.sh` renders a 960x544 preview.
-The VPK is still a stub (`vitaftpshell-v01.00-b4.vpk`): no protocol engine,
+The VPK is still a stub (`vitaftpshell-v01.00-b5.vpk`): no protocol engine,
 screen, or adapter exists yet, so the app has not run on hardware.
 
 ## What v1 is

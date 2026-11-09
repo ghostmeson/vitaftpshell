@@ -90,6 +90,23 @@ static void test_rotation(void)
     CHECK(fake_log_count() > 0);
     CHECK(logev_should_rotate(LOGEV_CAP, 1) == 1);
     CHECK(logev_should_rotate(0, 1) == 0);
+
+    /* A deep path must still fit one record. */
+    fake_log_reset();
+    fake_log_set_capacity(LOGEV_CAP);
+    char deep[1000];
+    memset(deep, ' ', sizeof(deep) - 1);
+    deep[sizeof(deep) - 1] = '\0';
+    LogRecord big;
+    logev_init(&big, LOGEV_TRANSFER_DONE);
+    big.path = deep;
+    big.site = "site";
+    big.host = "host";
+    big.bytes = 1;
+    big.total = 2;
+    big.cls = "app";
+    CHECK(logev_emit(log, 5, &big) == LOG_OK);
+    CHECK(fake_log_count() == 1);
 }
 
 int main(void)

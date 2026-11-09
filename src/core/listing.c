@@ -16,15 +16,19 @@ static void set_name(ListingEntry *out, const char *name, size_t len)
     out->name[len] = '\0';
 }
 
-static int parse_u64(const char *text, uint64_t *value)
+static int parse_u64_span(const char *text, size_t len, uint64_t *value)
 {
-    if (text == NULL || !is_digit(*text))
+    if (text == NULL || len == 0)
         return 0;
 
     uint64_t v = 0;
-    while (is_digit(*text)) {
-        v = v * 10 + (uint64_t)(*text - '0');
-        text++;
+    for (size_t i = 0; i < len; ++i) {
+        if (!is_digit(text[i]))
+            return 0;
+        uint64_t digit = (uint64_t)(text[i] - '0');
+        if (v > (UINT64_MAX - digit) / 10)
+            return 0;
+        v = v * 10 + digit;
     }
     *value = v;
     return 1;
@@ -95,13 +99,8 @@ ListingResult listing_parse_mlsd(const char *line, ListingEntry *out)
                     have_type = 1;
                 }
             } else if (key_len == 4 && ci_equal(p, "size", 4)) {
-                char num[32];
-                size_t n = value_len < sizeof(num) - 1 ? value_len
-                                                       : sizeof(num) - 1;
-                memcpy(num, value, n);
-                num[n] = '\0';
                 uint64_t parsed = 0;
-                if (parse_u64(num, &parsed)) {
+                if (parse_u64_span(value, value_len, &parsed)) {
                     out->size = parsed;
                     out->size_known = 1;
                 }
@@ -181,11 +180,15 @@ ListingResult listing_parse_unix(const char *line, ListingEntry *out)
     p = skip_token(p); /* group */
 
     const char *size_start = p;
+    while (is_digit(*p))
+        p++;
+    size_t size_len = (size_t)(p - size_start);
     uint64_t size = 0;
-    if (!parse_u64(size_start, &size))
+    if (!parse_u64_span(size_start, size_len, &size))
         return LISTING_MALFORMED;
     out->size = size;
     out->size_known = 1;
+    p = size_start;
 
     p = skip_token(p); /* size */
     p = skip_token(p); /* month */
@@ -239,12 +242,8 @@ ListingResult listing_parse_dos(const char *line, ListingEntry *out)
         out->type = LISTING_DIR;
         out->size_known = 0;
     } else {
-        char num[32];
-        size_t n = token_len < sizeof(num) - 1 ? token_len : sizeof(num) - 1;
-        memcpy(num, size_token, n);
-        num[n] = '\0';
         uint64_t size = 0;
-        if (!parse_u64(num, &size))
+        if (!parse_u64_span(size_token, token_len, &size))
             return LISTING_MALFORMED;
         out->type = LISTING_FILE;
         out->size = size;

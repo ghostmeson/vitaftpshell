@@ -39,10 +39,13 @@ static void test_multiline(void)
     ReplyReader reader;
     reply_reader_init(&reader);
     CHECK(reply_reader_line(&reader, "211-First", 9, &r) == REPLY_MORE);
+    CHECK(strstr(r.body, "First") != NULL);
     CHECK(reply_reader_line(&reader, " second", 7, &r) == REPLY_MORE);
     CHECK(reply_reader_line(&reader, "211 End", 7, &r) == REPLY_OK);
     CHECK(r.code == 211);
     CHECK(strcmp(r.text, "End") == 0);
+    CHECK(strstr(r.body, "First") != NULL);
+    CHECK(strstr(r.body, "second") != NULL);
 }
 
 static void test_malformed_and_cap(void)
@@ -83,6 +86,10 @@ static void test_pasv(void)
     CHECK(reply_parse_epsv("Entering Extended Passive Mode (|||5004|)", &peer,
                            &out) == REPLY_PASV_OK);
     CHECK(out.addr == peer.addr);
+    CHECK(out.port == 5004);
+
+    CHECK(reply_parse_epsv("Entering Extended Passive Mode (!!!5004!)", &peer,
+                           &out) == REPLY_PASV_OK);
     CHECK(out.port == 5004);
 }
 

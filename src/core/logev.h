@@ -16,7 +16,8 @@
  */
 
 #define LOGEV_CAP 65536
-#define LOGEV_LINE_MAX 512
+/* A path can percent-encode to three bytes per source byte. */
+#define LOGEV_LINE_MAX 4096
 
 typedef enum {
     LOGEV_CONNECT = 0,

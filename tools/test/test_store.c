@@ -163,6 +163,35 @@ static void test_replace_fallback(void)
     CHECK(strcmp(loaded.items[1].name, "two") == 0);
 }
 
+static void test_stale_aside(void)
+{
+    setup_fs();
+    FsPort *fs = fake_fs_port();
+
+    SiteBook book;
+    site_book_init(&book);
+    Site first = make_site("one", "host", "p1");
+    CHECK(site_book_add(&book, &first) == 1);
+    CHECK(store_save_sites(fs, STORE_DIR, &book) == STORE_OK);
+
+    /* Simulate a crash after the target was renamed aside. */
+    CHECK(fs->rename(fs->ctx, "ux0:data/vitaFTPShell/sites.cfg",
+                     "ux0:data/vitaFTPShell/sites.cfg.old") == FS_OK);
+    CHECK(!fake_fs_exists("ux0:data/vitaFTPShell/sites.cfg"));
+
+    SiteBook loaded;
+    site_book_init(&loaded);
+    CHECK(store_load_sites(fs, STORE_DIR, &loaded) == STORE_OK);
+    CHECK(loaded.count == 2);
+    CHECK(fake_fs_exists("ux0:data/vitaFTPShell/sites.cfg"));
+    CHECK(!fake_fs_exists("ux0:data/vitaFTPShell/sites.cfg.old"));
+
+    /* A stale aside beside a live target is cleared by the next save. */
+    fake_fs_seed_file("ux0:data/vitaFTPShell/sites.cfg.old", "stale", 5);
+    CHECK(store_save_sites(fs, STORE_DIR, &book) == STORE_OK);
+    CHECK(!fake_fs_exists("ux0:data/vitaFTPShell/sites.cfg.old"));
+}
+
 static void test_settings(void)
 {
     setup_fs();
@@ -183,6 +212,35 @@ static void test_settings(void)
     CHECK(strcmp(loaded.last_local, "ur0:data") == 0);
     CHECK(strcmp(loaded.last_site, "my site") == 0);
     CHECK(loaded.server_port == 2121);
+
+    /* A bad header leaves a defined default, not the caller's sentinel. */
+    const char *bad = "vitaFTPShell-settings 99\nlast_local=ur0:data\n";
+    fake_fs_seed_file("ux0:data/vitaFTPShell/settings.cfg", bad, strlen(bad));
+    Settings sentinel;
+    memset(&sentinel, 0x41, sizeof(sentinel));
+    CHECK(store_load_settings(fs, STORE_DIR, &sentinel) == STORE_BAD_VERSION);
+    CHECK(strcmp(sentinel.last_local, "ux0:data") == 0);
+    CHECK(sentinel.server_port == 1337);
+
+    /* A deep last_local must still serialize. */
+    Settings deep;
+    settings_init(&deep);
+    memset(deep.last_local, ' ', sizeof(deep.last_local) - 1);
+    deep.last_local[sizeof(deep.last_local) - 1] = '\0';
+    CHECK(store_save_settings(fs, STORE_DIR, &deep) == STORE_OK);
+    CHECK(store_load_settings(fs, STORE_DIR, &loaded) == STORE_OK);
+    CHECK(strcmp(loaded.last_local, deep.last_local) == 0);
+
+    /* An overlong line is a partial load, not a silent success. */
+    char long_file[8192];
+    const char *header = "vitaFTPShell-settings 1\n";
+    size_t at = strlen(header);
+    memcpy(long_file, header, at);
+    memset(long_file + at, 'x', 5000);
+    at += 5000;
+    long_file[at++] = '\n';
+    fake_fs_seed_file("ux0:data/vitaFTPShell/settings.cfg", long_file, at);
+    CHECK(store_load_settings(fs, STORE_DIR, &loaded) == STORE_PARTIAL);
 }
 
 int main(void)
@@ -192,6 +250,7 @@ int main(void)
     test_partial();
     test_rename_failure_keeps_original();
     test_replace_fallback();
+    test_stale_aside();
     test_settings();
 
     if (s_failures != 0) {

@@ -149,13 +149,16 @@ One module owns this and all three roles call it.
 
 - Canonicalization: volume detection, join, parent, removal of `.` and empty
   segments, collapsed separators, `..` clamping at a root, and byte-for-byte
-  segments below a volume. The volume and every segment are compared
-  case-insensitively against the denial and risk tables, while the original bytes
-  go to the filesystem, because the exposed volumes are case-insensitive and a
-  case variant must not slip past a denial.
+  segments below a volume. A backslash is refused for every role, because one
+  spelling that the platform might fold to `/` must not reach a denied file.
+  The volume and every segment are compared case-insensitively against the
+  denial and risk tables, while the original bytes go to the filesystem,
+  because the exposed volumes are case-insensitive and a case variant must not
+  slip past a denial.
 - **Denied:** `ur0:tai/boot_config.txt` for every role, and every write, create,
   rename, or delete under `ur0:tai`, `ux0:tai`, and the app's own data folder for
-  the server. A rename checks both operands.
+  the server. The server also denies reads of `boot_config.txt` and its own data
+  folder; the `tai` folders stay readable. A rename checks both operands.
 - **Protected:** volume roots, `ur0:data`, `ux0:data`, and the `tai` directories
   cannot be renamed, moved, or deleted, by any role.
 - **High risk for the local manager:** the `tai` folders and their contents,
@@ -181,9 +184,12 @@ Under `ux0:data/vitaFTPShell/`:
 | `session.old.log` | The one previous generation | Replaced on rotation |
 
 A server's reply text is never a log field: a hostile server can echo a credential
-back in a 530. A file that fails to parse yields whatever lines are valid and is
-never overwritten until the user saves. When `ux0:` is absent, the book lives in
-memory and the UI says saving is unavailable.
+back in a 530. One log line is bounded at 4096 bytes; an overlong record is
+dropped whole, never split. A file that fails to parse yields whatever lines are
+valid and is never overwritten until the user saves. A stale `.old` aside is
+restored when the target is missing and cleared when both exist, so an
+interrupted fallback cannot wedge the next save. When `ux0:` is absent, the book
+lives in memory and the UI says saving is unavailable.
 
 Passwords appear in `sites.cfg` by design and never in the log.
 

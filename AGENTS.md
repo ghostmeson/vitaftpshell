@@ -11,7 +11,7 @@ contracts and host fakes, the COCKPIT gfx base with the seven-surface layout
 table, the reply/listing/path/format policy, and the site book/settings/store/
 log policy all exist. `tools/test/run.sh` passes every host test and
 `tools/preview/run.sh` renders a 960x544 PNG. The VPK is still a stub
-(`vitaftpshell-v01.00-b4.vpk`): no protocol engine, screen, or platform
+(`vitaftpshell-v01.00-b5.vpk`): no protocol engine, screen, or platform
 adapter exists yet. Do not start coding from this file alone: the plan is the
 source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.

@@ -8,9 +8,11 @@
  *
  * Canonical form: lowercase volume prefix, no leading slash after the colon,
  * no `.` or empty segments, collapsed separators, and `..` clamped at the
- * volume root. Segment bytes are preserved and passed to the filesystem as
- * written; the denial and risk tables compare case-insensitively, because the
- * exposed volumes are case-insensitive and a case variant must not slip past.
+ * volume root. A backslash is refused for every role, so one spelling the
+ * platform might fold cannot bypass a denial. Segment bytes are preserved and
+ * passed to the filesystem as written; the denial and risk tables compare
+ * case-insensitively, because the exposed volumes are case-insensitive and a
+ * case variant must not slip past.
  */
 
 #define PATH_MAX_LEN 1024
@@ -47,6 +49,9 @@ int path_is_volume_root(const char *path);
 int path_volume(const char *path, Volume *out);
 const char *path_volume_name(Volume volume);
 
+/* Server reads deny boot_config.txt and the app data folder; the tai folders
+ * remain readable. The local manager may read boot_config.txt. */
+PathResult path_check_read(const char *path, int server_role, PathRisk *risk);
 /* Write/create at `path` (files and directories). */
 PathResult path_check_write(const char *path, int server_role, PathRisk *risk);
 /* Delete at `path`; protected roots and directories are refused. */

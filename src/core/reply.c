@@ -97,10 +97,14 @@ ReplyResult reply_reader_line(ReplyReader *reader, const char *line, size_t len,
             reader->multiline = 1;
             copy_text(reader->text, sizeof(reader->text), line + 4, len - 4);
             reader->text_len = strlen(reader->text);
+            if (!append_body(reader->body, sizeof(reader->body),
+                             &reader->body_len, line + 4, len - 4))
+                return REPLY_TOO_LONG;
             out->code = code;
             copy_text(out->text, sizeof(out->text), reader->text,
                       reader->text_len);
-            out->body[0] = '\0';
+            copy_text(out->body, sizeof(out->body), reader->body,
+                      reader->body_len);
             out->multiline = 1;
             return REPLY_MORE;
         }
@@ -271,17 +275,14 @@ ReplyPasvResult reply_parse_epsv(const char *text,
     if (p == NULL)
         return REPLY_PASV_MALFORMED;
     p++;
-    if (*p != '|')
-        return REPLY_PASV_MALFORMED;
 
-    int bars = 0;
-    while (*p != '\0' && bars < 3) {
-        if (*p == '|')
-            bars++;
-        p++;
-    }
-    if (bars != 3)
+    /* RFC 2428: (ddd<port>d) where d is any printable ASCII delimiter. */
+    char delimiter = *p;
+    if (delimiter == '\0' || delimiter == ')' || delimiter == ' ')
         return REPLY_PASV_MALFORMED;
+    if (p[1] != delimiter || p[2] != delimiter)
+        return REPLY_PASV_MALFORMED;
+    p += 3;
 
     int port = 0;
     int digits = 0;
@@ -292,7 +293,7 @@ ReplyPasvResult reply_parse_epsv(const char *text,
         p++;
         digits++;
     }
-    if (digits == 0 || *p != '|' || port <= 0)
+    if (digits == 0 || *p != delimiter || port <= 0)
         return REPLY_PASV_MALFORMED;
 
     NetAddress addr = *control_peer;

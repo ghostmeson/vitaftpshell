@@ -32,6 +32,12 @@ static void test_mlsd(void)
     CHECK(listing_parse_mlsd("type=cdir; name .", &e) == LISTING_SKIP);
     CHECK(listing_parse_mlsd("type=pdir; name ..", &e) == LISTING_SKIP);
     CHECK(listing_parse_mlsd("size=1; name", &e) == LISTING_MALFORMED);
+
+    CHECK(listing_parse_mlsd("type=file;size=18446744073709551617; x", &e) ==
+          LISTING_OK);
+    CHECK(e.size_known == 0);
+    CHECK(listing_parse_mlsd("type=file;size=1234L; x", &e) == LISTING_OK);
+    CHECK(e.size_known == 0);
 }
 
 static void test_unix(void)

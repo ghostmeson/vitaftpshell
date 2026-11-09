@@ -8,7 +8,7 @@
 
 #define SITES_HEADER "vitaFTPShell-sites 1"
 #define SETTINGS_HEADER "vitaFTPShell-settings 1"
-#define LINE_BUF 2048
+#define LINE_BUF 4096
 #define READ_BUF 256
 
 typedef struct {
@@ -162,11 +162,30 @@ static void build_path(char *out, size_t cap, const char *dir,
     snprintf(out, cap, "%s/%s", dir, name);
 }
 
+/*
+ * An interrupted fallback can leave the only complete copy under `.old`. Before
+ * a load or save touches the target, restore that copy when the target is
+ * missing; when both exist, the target is at least as new and the aside is
+ * stale. Without this, one orphan wedges every later save.
+ */
+static void recover_file(FsPort *fs, const char *target, const char *aside)
+{
+    FsEntry entry;
+    int target_exists = fs->stat(fs->ctx, target, &entry) == FS_OK;
+    int aside_exists = fs->stat(fs->ctx, aside, &entry) == FS_OK;
+
+    if (!target_exists && aside_exists)
+        fs->rename(fs->ctx, aside, target);
+    else if (target_exists && aside_exists)
+        fs->remove(fs->ctx, aside);
+}
+
 static StoreResult replace_file(FsPort *fs, const char *temp,
                                 const char *target)
 {
     char aside[PATH_MAX_LEN];
     snprintf(aside, sizeof(aside), "%s.old", target);
+    recover_file(fs, target, aside);
 
     if (fs->rename_replaces(fs->ctx)) {
         if (fs->rename(fs->ctx, temp, target) == FS_OK)
@@ -203,7 +222,10 @@ StoreResult store_load_sites(FsPort *fs, const char *dir, SiteBook *book)
         return STORE_IO;
 
     char path[PATH_MAX_LEN];
+    char aside[PATH_MAX_LEN];
     build_path(path, sizeof(path), dir, STORE_SITES_NAME);
+    snprintf(aside, sizeof(aside), "%s.old", path);
+    recover_file(fs, path, aside);
 
     FsFile *file = NULL;
     FsResult r = fs->open(fs->ctx, path, FS_OPEN_READ, &file);
@@ -391,8 +413,14 @@ StoreResult store_load_settings(FsPort *fs, const char *dir,
     if (fs == NULL || dir == NULL || settings == NULL)
         return STORE_IO;
 
+    /* Define the output even when the file is absent or corrupt. */
+    settings_init(settings);
+
     char path[PATH_MAX_LEN];
+    char aside[PATH_MAX_LEN];
     build_path(path, sizeof(path), dir, STORE_SETTINGS_NAME);
+    snprintf(aside, sizeof(aside), "%s.old", path);
+    recover_file(fs, path, aside);
 
     FsFile *file = NULL;
     FsResult r = fs->open(fs->ctx, path, FS_OPEN_READ, &file);
@@ -410,14 +438,16 @@ StoreResult store_load_settings(FsPort *fs, const char *dir,
         return STORE_BAD_VERSION;
     }
 
-    settings_init(settings);
+    int partial = 0;
 
     for (;;) {
         got = reader_line(&reader, line, sizeof(line), &len);
         if (got == 0)
             break;
-        if (got < 0)
+        if (got < 0) {
+            partial = 1;
             break;
+        }
         if (len == 0)
             continue;
 
@@ -447,7 +477,7 @@ StoreResult store_load_settings(FsPort *fs, const char *dir,
     }
 
     fs->close(fs->ctx, file);
-    return STORE_OK;
+    return partial ? STORE_PARTIAL : STORE_OK;
 }
 
 StoreResult store_save_settings(FsPort *fs, const char *dir,
