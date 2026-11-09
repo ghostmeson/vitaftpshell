@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+
 #ifndef VFTP_CORE_FMT_H
 #define VFTP_CORE_FMT_H
 

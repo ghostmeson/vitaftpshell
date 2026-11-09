@@ -27,11 +27,10 @@ settled layout authority.
 
 ## Constraints
 
-The visual authority is
-[`vita-cockpit/docs/DESIGN.md`](../../../vita-cockpit/docs/DESIGN.md). The
-project inherits its palette, type scale, spacing scale, panel chrome, and
-restraint rules. Do not invent a second alert colour, a new type size, or a
-decorative icon.
+The visual language is the COCKPIT design system, restated in
+[`../DESIGN.md`](../DESIGN.md) and `src/gfx/theme.c`. The project inherits its
+palette, type scale, spacing scale, panel chrome, and restraint rules. Do not
+invent a second alert colour, a new type size, or a decorative icon.
 
 ## Index
 

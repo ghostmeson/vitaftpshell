@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+
 #ifndef VFTP_FAKE_INPUT_H
 #define VFTP_FAKE_INPUT_H
 

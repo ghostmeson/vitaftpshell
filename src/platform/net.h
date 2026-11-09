@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+
 #ifndef VFTP_PLATFORM_NET_H
 #define VFTP_PLATFORM_NET_H
 

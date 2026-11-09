@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Host tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Layering guard and host suites
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install zlib
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+
+      - name: Run host suites
+        run: ./tools/test/run.sh
+
+      - name: Render the preview
+        run: ./tools/preview/run.sh
+
+      - name: Upload preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-preview
+          path: build/preview/workspace.png
+          if-no-files-found: error

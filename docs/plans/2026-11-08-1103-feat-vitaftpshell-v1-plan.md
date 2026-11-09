@@ -391,6 +391,9 @@ Arena sizes after a memory measurement, the reply-line cap against real servers,
 
 ### Sources / Research
 
+Paths outside this repository are historical references from the planning
+workspace; they are not part of the public checkout.
+
 - `vitaFTPShell/STRATEGY.md` — product direction, users, boundaries, and metrics.
 - `vitaFTPShell/docs/DESIGN.md` — the settled layout, states, and input.
 - `vita-cockpit/docs/DESIGN.md` — palette, type scale, spacing, panel anatomy, restraint.
@@ -1006,7 +1009,7 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 | Render suite | same script | Draw-call geometry per screen and state |
 | Preview | `(cd vitaFTPShell && ./tools/preview/run.sh)` | Every settled state renders on the host |
 | Build | `(cd vitaFTPShell && ./build.sh)` | One `vitaftpshell-v<version>-b<build>.vpk`, unstripped ELF kept |
-| Docs | the workspace link and code-fence check in `AGENTS.md` | No broken link, no odd fence |
+| Docs | the documentation link and code-fence check in `AGENTS.md` | No broken link, no odd fence |
 | Hardware | M1-M8 in `docs/VERIFICATION.md` | The product works on the console |
 
 A unit is not done because its tests pass; it is done when its scenarios pass, the guard still passes, and the build still produces one artifact. `verified` is a project status granted only by M1-M8.

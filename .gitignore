@@ -2,3 +2,32 @@
 # artifact and must survive a build-directory wipe (KTD17).
 build/
 .source-stamp
+
+# Vita artifacts, in case one is produced outside build/
+*.vpk
+*.self
+*.velf
+*.elf
+
+# CMake litter when configured in-tree
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local logs, patches, and crash dumps
+*.log
+*.orig
+*.rej

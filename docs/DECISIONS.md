@@ -772,3 +772,27 @@ the grace immediately and keeps the session. A listing name that does not fit th
 256-byte entry is dropped, not truncated, so a later action cannot target a
 different file. The adapters and the worker still own the sockets, files, rings,
 and listing generations.
+
+## D44. vitaFTPShell is a standalone public repository
+
+**Date:** 2026-11-09
+**Status:** accepted; supersedes the workspace-boundary language in D6.
+
+**Context:** vitaFTPShell was built inside a multi-project workspace whose other
+projects are MIT-licensed. The project now has its own public repository,
+[`ghostmeson/vitaftpshell`](https://github.com/ghostmeson/vitaftpshell), with its
+own history, issue tracker, and release artifacts. It no longer shares a source
+tree or a repository with those projects.
+
+**Decision:** vitaFTPShell is a standalone GPLv3 project. Its repository contains
+only this app, its tests, and its documentation. The project remains GPLv3 by
+choice (D6, D40) and may still reuse VitaShell code under the same license. The
+COCKPIT-derived graphics files keep their MIT notice in
+[`LICENSES/COCKPIT-MIT.txt`](../LICENSES/COCKPIT-MIT.txt). The "MIT workspace"
+boundary language in D6 is retired; D6's choice of GPLv3 and its reuse allowance
+stand.
+
+**Consequences:** Contributions, issues, and releases happen in one repository.
+No cross-repository copying rule is needed, but every third-party notice stays
+with the code. The COCKPIT-derived files remain identifiable so the MIT notice is
+never lost.

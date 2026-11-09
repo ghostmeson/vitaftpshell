@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+
 #include "fake_ftp_client.h"
 
 #include <stdio.h>

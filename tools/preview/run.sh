@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+
 set -euo pipefail
 
 # Host preview: renders the shipped gfx layer through a software vita2d shim and

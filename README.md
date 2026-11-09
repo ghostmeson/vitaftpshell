@@ -1,87 +1,206 @@
 # vitaFTPShell
 
-An FTP client, local file manager, and anonymous FTP server for the PS Vita,
-drawn in the COCKPIT Cyberpunk HUD. The console is one side of the transfer, not
-a remote endpoint: local files and a saved FTP site are two live panes, and
-moving a file is one action.
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![Host tests](https://github.com/ghostmeson/vitaftpshell/actions/workflows/ci.yml/badge.svg)](https://github.com/ghostmeson/vitaftpshell/actions/workflows/ci.yml)
+![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)
 
-**Status:** `building`. Strategy, requirements, the screen-by-screen design, and
-the architecture plan are complete. Phases 1, 2, and 3 are done: the build shape,
-six ports and host fakes, the gfx base and layout table, the reply/listing/path/
-format policy, the site/settings/store/log policy, and the passive FTP client and
-server state machines exist. `tools/test/run.sh` passes ten host suites and
-`tools/preview/run.sh` renders a 960x544 preview. The VPK is still a stub
-(`vitaftpshell-v01.00-b7.vpk`): no screen or platform adapter exists yet, and the
-engine is not linked into the app target until U13, so the app has not run on
-hardware.
+A twin-pane FTP workspace for the PS Vita. Browse a saved FTP site and the
+console's own storage side by side, then move files between them without leaving
+the console. The same app can serve the mounted `ux0:`, `ur0:`, and `uma0:`
+volumes as an anonymous read-write FTP server while it is open.
 
-## What v1 is
+The interface is a 960x544 Cyberpunk HUD built for the controller: two live
+ledgers, a transfer dock, and no pointer.
 
-- **Client:** saved sites with anonymous or login credentials, passive FTP,
-  remote browsing, download, upload, create, rename, and delete.
-- **File manager:** browse the mounted `ux0:`, `ur0:`, and `uma0:` volumes,
-  multi-select, recursive folder copy, move, and delete, with protected-path
-  rules and explicit confirmations.
-- **Server:** anonymous read-write FTP on the mounted `ux0:`, `ur0:`, and `uma0:`
-  volumes while the app is open. It is OFF at launch, shows its ON state and
-  client count, and accepts one client at a time.
-- **Interface:** 960×544 Cyberpunk HUD, 5×7 bitmap type, controller-first input,
-  and a transfer dock that shows progress without blocking the workspace.
+![WORKSPACE screen design mockup](docs/design/2026-11-08-workspace-a.png)
 
-Not in v1: SFTP, FTPS, HTTP, WebDAV, resume, sync, background transfers,
-multiple active transfers, multiple server clients, or a credential vault.
+*Design mockup of the settled WORKSPACE screen. This is a design render, not a
+hardware screenshot.*
 
-## Read first
+## Status
 
-| Document | Contents |
+**Pre-alpha: the current VPK is a placeholder.** Strategy, requirements, screen
+design, architecture, and the protocol policy are complete. The FTP client and
+server engines, path policy, and host test harness are implemented and tested on
+the host. The on-device UI, platform adapters, and worker runtime are still to
+come, so the app does not transfer files yet and has not run on hardware.
+
+Implemented and covered by host tests today:
+
+- the passive FTP client state machine: resolve, greeting, anonymous or stored
+  login, FEAT, MLSD with LIST fallback, browse, RETR, STOR, MKD, RNFR/RNTO,
+  DELE, RMD, QUIT, cancel, per-stage deadlines, and the five cause classes;
+- the anonymous passive FTP server state machine: control port plus one, one
+  client slot, the command table, MLST/SIZE/MDTM, MLSD/LIST/NLST, templed STOR,
+  MKD/RMD/DELE/RNFR/RNTO, ABOR, the 450 busy reply, and data peer checking;
+- canonical path, protected-path, denial, and risk policy; MLSD, Unix, and DOS
+  listing parsers; reply and passive-mode parsing; the site book, settings,
+  atomic store, and typed session-log events;
+- the COCKPIT-derived graphics base and the settled seven-surface layout table.
+
+Roadmap and the single next action live in [`PROJECTS.md`](PROJECTS.md). The
+behavior contract is
+[`docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md).
+
+## What v1 will do
+
+| Role | Behavior |
 |---|---|
-| [`STRATEGY.md`](STRATEGY.md) | Why the product exists, who it serves, boundaries, metrics |
-| [`docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | The plan: requirements, key decisions, units, verification contract |
-| [`PROJECTS.md`](PROJECTS.md) | Current phase, last job, next action |
-| [`AGENTS.md`](AGENTS.md) | Project contract for agents |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Layers, ports, threading, and module rules |
-| [`docs/README.md`](docs/README.md) | Documentation map |
-| [`docs/DESIGN.md`](docs/DESIGN.md) | The settled layout, states, and input; the design sheets |
+| **FTP client** | Saved sites with anonymous or login credentials, passive FTP only, remote browsing, download, upload, create, rename, and delete. MLSD first, LIST fallback, Unix and DOS listings. |
+| **File manager** | Browse the mounted `ux0:`, `ur0:`, and `uma0:` volumes, multi-select, recursive folder copy, move, and delete, with protected-path rules and explicit confirmations. |
+| **FTP server** | Anonymous read-write FTP on the mounted volumes while the app is open. OFF at launch, one client at a time, with the ON state and client count visible on every screen. |
+| **Transfer dock** | One active transfer, the rest queued. Progress, size, speed, retry, and cancel without blocking the workspace. |
+
+Not in v1: SFTP, FTPS, HTTP, WebDAV, SMB, resume, sync, background transfers,
+multiple simultaneous transfers, multiple server clients, or a credential vault.
 
 ## Build
 
-Targets a PS Vita on 3.65 Enso with VitaSDK 2026.08 and libvita2d.
+### Prerequisites
+
+- A PS Vita on 3.65 with Enso. PSTV is out of scope.
+- [VitaSDK](https://vitasdk.org/) 2026.08, including `libvita2d`.
+- CMake 3.16 or newer.
+- For the host tests only: a POSIX shell, a C99 compiler, and zlib.
 
 ```sh
-export VITASDK="$PWD/../vitasdk"
+export VITASDK=/path/to/vitasdk
 export PATH="$VITASDK/bin:$PATH"
 
-./build.sh                 # one UNSAFE eboot, one vitaftpshell-v01.00-b<n>.vpk
-./tools/test/run.sh        # layering guard + ten host suites
-./tools/preview/run.sh     # renders the gfx layer to build/preview/workspace.png
-./send.sh <vita-ip>        # uploads build/ to VitaShell's FTP server
+./build.sh
 ```
 
-`BUILD_NUMBER` lives in this directory, never in `build/`. A build reuses the
-number when the VPK inputs are unchanged and increments otherwise. `build/`
-keeps exactly one VPK and the unstripped ELF. `send.sh` refuses an artifact whose
-number does not match `BUILD_NUMBER`, so a failed build cannot upload the
-previous one. Installing requires "Enable Unsafe Homebrew" (D32).
+`build.sh` emits exactly one `vitaftpshell-v01.00-b<build>.vpk` in `build/`, plus
+the unstripped ELF. `BUILD_NUMBER` is committed and monotonic: a rebuild with
+unchanged packaged inputs reuses the number, and a changed input increments it.
+`build/` is pruned to one artifact so "which build is on the Vita?" has one
+answer.
 
-## Safety
+### Host checks
 
-- The server is anonymous read-write and exposes the mounted `ux0:`, `ur0:`, and
-  `uma0:` volumes. Start it only on a network you trust.
-- The server denies all access to `ur0:tai/boot_config.txt` and the app's own
-  `ux0:data` folder, and denies every write, create, rename, and delete inside
+The policy and graphics layers run without VitaSDK:
+
+```sh
+./tools/test/run.sh        # layering guard + ten host suites
+./tools/preview/run.sh     # renders build/preview/workspace.png at 960x544
+```
+
+The test runner compiles the real core against fake network, filesystem, input,
+IME, clock, and log ports. The layering guard fails if any file under `src/`
+outside the seven documented adapter files includes a `psp2/` or `vita2d.h`
+header.
+
+### Install
+
+With VitaShell's FTP server running on the console:
+
+```sh
+./send.sh <vita-ip>
+```
+
+`send.sh` uploads the current VPK and refuses an artifact whose build number does
+not match `BUILD_NUMBER`, so a failed build cannot silently send the previous
+file. To install manually, copy the VPK from `build/` to `ux0:data/` and open it
+in VitaShell.
+
+Installing requires **Enable Unsafe Homebrew**. The server and the local file
+manager need unrestricted access to `ur0:` and `uma0:`, which the safe authid
+refuses (D32).
+
+> The current VPK only launches and exits. See [Status](#status).
+
+## Safety model
+
+These are product rules, enforced in the policy layer and the screens as they
+land:
+
+- The server is **OFF at launch**. Starting it is an explicit action, and its ON
+  state and client count stay visible. The warning states that anonymous clients
+  can read and write the exposed volumes and that the app data folder is
+  excluded.
+- The server denies all access to `ur0:tai/boot_config.txt` and to the app's own
+  data folder, and denies every write, create, rename, and delete under
   `ur0:tai` and `ux0:tai`.
-- The local manager may edit files inside `ur0:tai` and `ux0:tai`, but only after
-  a high-risk confirmation; `boot_config.txt` remains denied for every role.
-- Installing requires "Enable Unsafe Homebrew": the app needs the permissions the
-  safe authid refuses in order to serve `ur0:` and `uma0:`.
-- Downloads reject remote names containing a path separator, `:`, NUL, or a
-  `..` segment before a local path is built.
-- No kernel plugin, `*KERNEL` entry, or boot-time component is part of v1.
-- Saved passwords are stored unencrypted. They are never written to the log.
-- Volume roots, `ur0:tai`, and `ux0:tai` cannot be renamed, moved, or deleted.
+- The local manager may write inside `ur0:tai` and `ux0:tai` only behind a
+  high-risk confirmation. Nothing in the app writes, renames, or deletes
+  `boot_config.txt`.
+- Volume roots, `ur0:data`, `ux0:data`, and the `tai` folders cannot be renamed,
+  moved, or deleted. Every check uses the canonical path, and a rename checks
+  both operands.
+- Every destructive action confirms and names its items. Cancel changes
+  nothing.
+- Saved passwords are stored unencrypted on the console and are never written to
+  the session log.
+- One transfer is active at a time; a server-side transfer uses the same slot.
+- No kernel plugin, taiHEN payload, `*KERNEL` entry, or boot-time component.
+- Downloads and uploads write a `.vftp.part` file, sync, and rename into place;
+  a failed transfer never leaves a partial file looking complete.
+
+## Architecture
+
+Source dependencies point inward, toward policy. The core compiles and runs on
+the host without a Vita header.
+
+| Layer | Path | Holds |
+|---|---|---|
+| Policy | `src/core/` | FTP client/server, listing parsing, path and risk rules, site book, settings, store, log events |
+| Platform ports | `src/platform/*.h` | Plain-C contracts for net, filesystem, input, text entry, clock, and log |
+| Platform adapters | `src/platform/psp2_*.c` | SceNet, sceIo, SceCtrl, IME, clock, and log (U12) |
+| Renderer | `src/gfx/` | Theme, font, and draw primitives |
+| Presentation | `src/ui/` | Draws `UiState` and maps input to commands (U10/U11) |
+| Runtime | `src/app/` | Frame loop, worker thread, rings, and snapshot handoff (U13) |
+| Composition | `src/main.c` | Constructs adapters and starts the runtime |
+
+One worker thread will own every long operation; the main thread owns only the
+UI. One writer owns each piece of shared state. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the ports, the data phase, the
+threading handoff, and the path/denial table.
+
+### Repository map
+
+```text
+src/core/        portable policy: protocol engines, parsers, path rules, store
+src/gfx/         theme, font, draw, and the settled layout table
+src/platform/    plain-C port contracts (adapters land in U12)
+src/main.c       composition root; a build-shape stub until U13
+tools/test/      layering guard and host suites
+tools/fake/      controllable NetPort, FsPort, input, IME, clock, log, and FTP peers
+tools/preview/   software vita2d shim and the 960x544 preview
+docs/            architecture, design, decisions, plan, third-party notices
+sce_sys/         placeholder LiveArea art
+```
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [`STRATEGY.md`](STRATEGY.md) | Why the product exists, who it serves, boundaries, and metrics |
+| [`docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | Requirements, key decisions, implementation units, verification contract |
+| [`PROJECTS.md`](PROJECTS.md) | Current phase, last job, next action, and the decision log |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Layers, ports, threading, handoff, and module rules |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | The settled layout, states, and input |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Numbered decisions with context and consequences |
+| [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) | Reused code, licenses, and protocol references |
+| [`AGENTS.md`](AGENTS.md) | The project contract for agents and contributors |
+| [`docs/README.md`](docs/README.md) | The documentation map |
 
 ## License
 
-GPLv3. The local file manager builds on VitaShell, so vitaFTPShell is a GPLv3
-island inside the MIT workspace. Its code must not be copied into the MIT
-projects. See [`LICENSE`](LICENSE).
+vitaFTPShell is free software under the **GNU General Public License, version
+3.0 only**. See [`LICENSE`](LICENSE).
+
+The graphics base under `src/gfx/` is adapted from COCKPIT, Copyright (c) 2026
+Upakul Talukdar, and retains its MIT notice in
+[`LICENSES/COCKPIT-MIT.txt`](LICENSES/COCKPIT-MIT.txt). VitaShell and
+libftpvita are behavioral references only; no code from them is vendored.
+
+## Credits
+
+- [VitaSDK](https://vitasdk.org/) and `libvita2d` for the toolchain and renderer.
+- [VitaShell](https://github.com/TheOfficialFloW/VitaShell) for the file-manager
+  and server behavior this project learned from.
+- [libftpvita](https://github.com/xerpi/libftpvita) for FTP server behavior
+  reference.
+- [RFC 959](https://www.rfc-editor.org/rfc/rfc959),
+  [RFC 3659](https://www.rfc-editor.org/rfc/rfc3659), and
+  [RFC 2428](https://www.rfc-editor.org/rfc/rfc2428) for the protocol.

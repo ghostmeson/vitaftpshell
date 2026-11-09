@@ -19,7 +19,7 @@ six port contracts and fakes, the gfx base and layout table, the reply/listing/
 path/format policy, the site/settings/store/log policy, and the passive FTP
 client and server state machines exist. `tools/test/run.sh` passes ten host
 suites, `tools/preview/run.sh` renders a 960x544 PNG, and `build.sh` emits
-`vitaftpshell-v01.00-b7.vpk` from a stub `src/main.c`. No screen or platform
+`vitaftpshell-v01.00-b8.vpk` from a stub `src/main.c`. No screen or platform
 adapter exists yet, the engine is not linked into the app target until U13, and
 nothing has run on hardware.
 
@@ -105,4 +105,4 @@ sessions, connect-to-first-listing, and server-matrix pass.
 | WiFi path is built but not hardware-verified | First hardware session proves connect, PASV, transfer, and timeouts |
 | Public FTP may decline | Personal servers keep the product useful; no protocol widening in v1 |
 | Controller-only density | Design phase reviews each screen before implementation |
-| GPLv3 boundary | Reused code stays inside this project; do not copy into MIT projects |
+| GPLv3 boundary | Keep the license and third-party notices intact; document provenance |

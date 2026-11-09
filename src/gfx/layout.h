@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+
 #ifndef VFTP_GFX_LAYOUT_H
 #define VFTP_GFX_LAYOUT_H
 

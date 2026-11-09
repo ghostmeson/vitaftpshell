@@ -1,8 +1,8 @@
 # AGENTS.md — vitaFTPShell project contract
 
-This is the entry point for agents working inside `vitaFTPShell/`. The workspace
-contract at `../AGENTS.md` still applies; this file adds project rules and
-records what is already settled. Read both before changing anything.
+This is the entry point for agents and contributors working in this repository.
+It records the project rules and what is already settled. Read it before changing
+anything.
 
 ## Status
 
@@ -11,7 +11,7 @@ contracts and host fakes, the COCKPIT gfx base with the seven-surface layout
 table, the reply/listing/path/format policy, the site book/settings/store/log
 policy, and the passive FTP client and server state machines all exist.
 `tools/test/run.sh` passes ten host suites and `tools/preview/run.sh` renders a
-960x544 PNG. The VPK is still a stub (`vitaftpshell-v01.00-b7.vpk`): no screen
+960x544 PNG. The VPK is still a stub (`vitaftpshell-v01.00-b8.vpk`): no screen
 or platform adapter exists yet, and the engine is not linked into the app target
 until U13. Do not start coding from this file alone: the plan is the source of
 truth for behavior, sequencing, and verification, and `docs/DESIGN.md` is the
@@ -19,16 +19,15 @@ layout authority.
 
 ## Read order
 
-1. `../AGENTS.md` — workspace code rules, documentation duties, hard safety rules.
-2. `STRATEGY.md` — why the product exists, who it serves, boundaries, metrics.
-3. `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — the plan: R1-R73, KTD1-KTD18, U1-U17 in six phases, the verification contract.
-4. `PROJECTS.md` — current phase and the single next action.
-5. `docs/PROJECT.md` — scope, non-goals, roadmap, failure policy.
-6. `docs/ARCHITECTURE.md` — planned layers, ports, and allowed platform files.
-7. `docs/DESIGN.md` — the settled layout, states, and input; the sheets in `docs/design/`.
-8. `docs/DECISIONS.md` — numbered decisions with context and consequences.
-9. `docs/THIRD_PARTY.md` — reused code, licenses, and protocol references.
-10. `docs/README.md` — the documentation map.
+1. `STRATEGY.md` — why the product exists, who it serves, boundaries, metrics.
+2. `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — the plan: R1-R73, KTD1-KTD18, U1-U17 in six phases, the verification contract.
+3. `PROJECTS.md` — current phase and the single next action.
+4. `docs/PROJECT.md` — scope, non-goals, roadmap, failure policy.
+5. `docs/ARCHITECTURE.md` — planned layers, ports, and allowed platform files.
+6. `docs/DESIGN.md` — the settled layout, states, and input; the sheets in `docs/design/`.
+7. `docs/DECISIONS.md` — numbered decisions with context and consequences.
+8. `docs/THIRD_PARTY.md` — reused code, licenses, and protocol references.
+9. `docs/README.md` — the documentation map.
 
 ## What this is
 
@@ -53,7 +52,7 @@ shape; the transfer dock is where work is visible.
 - No PC-first UI and no VitaShell feature-parity race.
 - The visual layout is settled in `docs/DESIGN.md`. Do not invent pane geometry,
   dock height, or screen composition in code.
-- GPLv3. Do not copy this project's code into the MIT projects in the workspace.
+- GPLv3. Keep the license and the third-party notices intact.
 - One `UNSAFE` eboot. The server and the local pane need all three volumes, and
   the safe authid refuses them (D32).
 - The local manager may write inside `ur0:tai` and `ux0:tai` behind the
@@ -68,9 +67,8 @@ If evidence contradicts a settled decision, add a superseding entry to
 
 ## Architecture rules
 
-The workspace dependency rule applies in full: source dependencies point
-inward, toward policy. Policy is compilable and testable on the host without a
-Vita header.
+The dependency rule applies in full: source dependencies point inward, toward
+policy. Policy is compilable and testable on the host without a Vita header.
 
 ### Planned layers
 
@@ -178,7 +176,8 @@ run is the only evidence that promotes the project to `verified`.
 7. **No secrets in logs.** Passwords never enter the session log or an error
    message.
 8. **GPLv3 boundary.** Reused VitaShell code keeps its notices and stays in this
-   project. It must not be copied into the MIT projects.
+   project. The COCKPIT-derived graphics files keep their MIT notice in
+   `LICENSES/COCKPIT-MIT.txt`.
 
 ## Build and release
 
@@ -207,8 +206,8 @@ run is the only evidence that promotes the project to `verified`.
 - Put screen mockups and design notes under `docs/design/`.
 - Add a numbered entry to `docs/DECISIONS.md` for every product or architecture
   decision that would surprise a future reader.
-- Link to the workspace wiki (`../agent-wiki/`) for Vita facts; do not fork them
-  here.
+- Record Vita platform facts with their evidence and the `[V]`/`[C]`/`[L]` tag;
+  do not present community lore as verified.
 - Keep the doc map in `docs/README.md` current.
 
 ## Definition of done
@@ -221,7 +220,7 @@ A job is finished when:
 - `PROJECTS.md` reflects the phase and next action;
 - `docs/` reflects the change, including a decision when one was made;
 - no new `[C]` claim escaped the adapter;
-- the workspace link and code-fence check reports no issues;
+- the documentation link and code-fence check reports no issues;
 - `verified` is not claimed without hardware evidence.
 
 ## What not to do
@@ -232,7 +231,7 @@ A job is finished when:
 - Do not write to `boot_config.txt`, `ur0:tai`, or `ux0:tai`.
 - Do not render a number the platform cannot report.
 - Do not hide the server's ON state or its anonymous access.
-- Do not copy GPLv3 code into the MIT projects.
+- Do not remove the COCKPIT MIT notice from the derived graphics files.
 - Do not promote the project to `verified` without a hardware run.
 - Do not let a new finding live only in chat.
 
@@ -270,13 +269,16 @@ vitaFTPShell/
   BUILD_NUMBER         committed build identifier
   build.sh             hash-stamped build and one-artifact pruning
   send.sh              uploads the current VPK, refusing a stale number
+  LICENSES/            third-party license notices (COCKPIT MIT)
+  .github/workflows/   host-test CI
   src/
-    main.c             composition root; a Phase 1 stub until U13
+    main.c             composition root; a build-shape stub until U13
     core/ftp/          passive FTP client and server state machines
   sce_sys/             placeholder icon and LiveArea art (U14 replaces)
   tools/
     test/run.sh        layering guard and host test runner
     fake/              NetPort, FsPort, input, IME, clock, log, and FTP peers
+    preview/           software vita2d shim and the 960x544 renderer
   build/               one VPK and the unstripped ELF; ignored
   docs/
     README.md          documentation map
