@@ -246,6 +246,21 @@ FsResult ftp_temp_open(FsPort *fs, const char *target, FtpTempWrite *out)
     return FS_OK;
 }
 
+/* The rename makes the new file visible; sync the file itself before the
+ * transfer is reported complete. Directory sync is a separate, deferred gap. */
+static FsResult sync_destination(FsPort *fs, const char *target)
+{
+    FsFile *file = NULL;
+    FsResult r = fs->open(fs->ctx, target, FS_OPEN_READ, &file);
+    if (r != FS_OK)
+        return r;
+    FsResult sync = fs->sync(fs->ctx, file);
+    FsResult close = fs->close(fs->ctx, file);
+    if (sync != FS_OK)
+        return sync;
+    return close;
+}
+
 FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp)
 {
     if (fs == NULL || temp == NULL || !temp->open || temp->file == NULL)
@@ -263,18 +278,22 @@ FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp)
 
     if (fs->rename_replaces(fs->ctx)) {
         r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
-        if (r != FS_OK)
+        if (r != FS_OK) {
             fs->remove(fs->ctx, temp->temp.text);
-        return r;
+            return r;
+        }
+        return sync_destination(fs, temp->target.text);
     }
 
     FsEntry entry;
     int target_exists = fs->stat(fs->ctx, temp->target.text, &entry) == FS_OK;
     if (!target_exists) {
         r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
-        if (r != FS_OK)
+        if (r != FS_OK) {
             fs->remove(fs->ctx, temp->temp.text);
-        return r;
+            return r;
+        }
+        return sync_destination(fs, temp->target.text);
     }
 
     if (fs->rename(fs->ctx, temp->target.text, temp->aside.text) != FS_OK) {
@@ -286,6 +305,15 @@ FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp)
     if (r != FS_OK) {
         fs->rename(fs->ctx, temp->aside.text, temp->target.text);
         fs->remove(fs->ctx, temp->temp.text);
+        return r;
+    }
+
+    r = sync_destination(fs, temp->target.text);
+    if (r != FS_OK) {
+        /* The old file is still in the aside; put it back rather than leave a
+         * new file whose contents may not have reached the card. */
+        fs->remove(fs->ctx, temp->target.text);
+        fs->rename(fs->ctx, temp->aside.text, temp->target.text);
         return r;
     }
 

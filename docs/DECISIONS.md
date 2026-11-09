@@ -796,3 +796,77 @@ stand.
 No cross-repository copying rule is needed, but every third-party notice stays
 with the code. The COCKPIT-derived files remain identifiable so the MIT notice is
 never lost.
+
+## D45. A cross-volume move is atomic per file, not per batch
+
+**Date:** 2026-11-09
+**Status:** accepted; narrows R42's all-or-nothing wording for a multi-file batch.
+
+**Context:** R42 and D36 call a cross-volume move all-or-nothing. U17 showed that
+a whole-plan rollback cannot keep that promise for a folder or batch: once a
+file's source is deleted, removing its destination to "undo" a later failure
+deletes the only surviving copy. The executor reproduced that loss with two
+moves and with a folder move.
+
+**Decision:** Each file move is copy, rename, delete source. If the source delete
+fails, a destination the plan created is removed; if that removal also fails the
+operation reports `MOVE INCOMPLETE: <source> -> <destination>`. A destination
+that already existed is left with the new bytes and reports
+`MOVE FAILED - DESTINATION KEPT`, because its old bytes were replaced at commit
+and removing the new file would leave neither. A batch that fails after some
+moves leaves the completed moves and reports `MOVE FAILED - n OF m MOVED`; no
+rollback removes a moved file. A copy rollback removes only a destination the
+plan created, never one that existed before it.
+
+**Consequences:** R42's guarantee is per file, not per batch. The dock can show a
+partial batch with a moved count; the user can retry the remainder. The local
+manager never deletes the only copy to fake an all-or-nothing batch. The plan's
+U17 scenario is updated to say so.
+
+## D46. Planner and handoff caps are finite and refuse, never truncate
+
+**Date:** 2026-11-09
+**Status:** accepted; implementation shape for U8/U15/U16/U17.
+
+**Context:** A recursive plan and a cross-thread ring both need a bound before
+the Vita memory measurement in U14. A truncated plan or a silently dropped
+record is worse than a refusal: it can leave a folder half-copied or a stop
+command unseen.
+
+**Decision:** The planner uses a 256 KiB path arena, 2048 steps, and 2048
+rollback records. A plan that would exceed any of them is refused with
+`PLAN TOO LARGE`; it is never truncated. The transfer queue holds 64 descriptors.
+The command ring holds 64 records, the event ring 128, and the bulk lane 8 KiB;
+a normal command that overflows is counted in `lost`, while `SERVER STOP` and
+`CANCEL` have dedicated slots and are never dropped. Progress is a one-record
+seqlock latch; the server state is latched separately. Each pane has three
+listing generations.
+
+**Consequences:** A batch larger than 64 transfers or a plan larger than 2048
+steps must be split into runs; the UI reports the refusal rather than silently
+dropping items. The numbers are measured again in U14 and can be raised only with
+a decision and a memory measurement.
+
+## D47. UI commands carry explicit paths; ACTIONS uses the cursor or the marks
+
+**Date:** 2026-11-09
+**Status:** accepted; implementation shape for U9.
+
+**Context:** The first reducer pass stored the active folder in the ACTIONS target
+and emitted one TRANSFER command with a mark count. The worker cannot read
+`UiState`, so it would have transferred the cursor item instead of the marked set
+and could delete the folder the user was standing in instead of the cursor row.
+
+**Decision:** The ACTIONS source is the cursor row for rename, delete, and new
+folder, and the marked set for copy, move, and delete when marks exist. The
+current folder is the copy/move destination; the other pane is the transfer
+destination. Cross on a file with marks emits one `TRANSFER` command per mark;
+without marks it emits one for the cursor. A high-risk action confirmed inside
+the reducer emits `RUN_ACTION` with the approval flag; only a confirm requested by
+the worker returns a `CONFIRM` command. The worker's save result clears the
+editor's dirty flag through its own event. Commands carry paths, never pointers
+into `UiState`.
+
+**Consequences:** A marked batch uses one command per item and is bounded by the
+command ring and the queue. The worker never infers a source from the current
+folder. The reducer remains the only writer of `UiState`.

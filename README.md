@@ -21,9 +21,11 @@ hardware screenshot.*
 
 **Pre-alpha: the current VPK is a placeholder.** Strategy, requirements, screen
 design, architecture, and the protocol policy are complete. The FTP client and
-server engines, path policy, and host test harness are implemented and tested on
-the host. The on-device UI, platform adapters, and worker runtime are still to
-come, so the app does not transfer files yet and has not run on hardware.
+server engines, the transfer queue, the local operation planner and executor,
+the input reducer with its UI state, the cross-thread handoff, the path policy,
+and the host test harness are implemented and tested on the host. The on-device
+UI, platform adapters, and worker runtime are still to come, so the app does not
+transfer files yet and has not run on hardware.
 
 Implemented and covered by host tests today:
 
@@ -33,6 +35,19 @@ Implemented and covered by host tests today:
 - the anonymous passive FTP server state machine: control port plus one, one
   client slot, the command table, MLST/SIZE/MDTM, MLSD/LIST/NLST, templed STOR,
   MKD/RMD/DELE/RNFR/RNTO, ABOR, the 450 busy reply, and data peer checking;
+- one ordered transfer queue with one active slot, a single busy fact, the R41
+  conflict decision recorded once per batch, and a latched terminal outcome;
+- the pure local operation planner: recursive copy, move, delete, mkdir and
+  rename; parent-before-child order; merge; copy-into-itself refusal; protected
+  paths; conflict gate; and per-step risk flags;
+- the executor: templed writes, destination sync, aside recovery, rollback,
+  per-file cross-volume moves, and `DELETED n OF m` on a partial recursive
+  delete;
+- the input repeat decoder, the one-writer UI reducer with every settled screen
+  transition, and the command vocabulary, including the high-risk confirmation;
+- the cross-thread handoff: fixed-record command and event rings, critical
+  stop/cancel slots, a coalesced progress latch, three listing generations per
+  pane, a bulk lane, and a latched server state;
 - canonical path, protected-path, denial, and risk policy; MLSD, Unix, and DOS
   listing parsers; reply and passive-mode parsing; the site book, settings,
   atomic store, and typed session-log events;
@@ -81,7 +96,7 @@ answer.
 The policy and graphics layers run without VitaSDK:
 
 ```sh
-./tools/test/run.sh        # layering guard + ten host suites
+./tools/test/run.sh        # layering guard + sixteen host suites
 ./tools/preview/run.sh     # renders build/preview/workspace.png at 960x544
 ```
 

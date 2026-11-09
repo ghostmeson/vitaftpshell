@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-09 — standalone repository: own git history, public GPLv3 repo, rewritten README and `.gitignore`, COCKPIT MIT notice, host-test CI; b8 | Start Phase 4: U8, U16, U17, U9, U15 (queue, planner, executor, reducer, handoff) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b8.vpk` is still a stub; the engine is host-tested and not linked into the app target until U13. No hardware run, so not `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-09 — Phase 4 (U8, U16, U17, U9, U15): transfer queue, local planner/executor with rollback, input reducer/UI state, and cross-thread handoff; sixteen host suites; b10 | Start Phase 5: U10, U11, U12, U13 (screens, adapters, runtime composition) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b10.vpk` is still a stub; the engine is host-tested and not linked into the app target until U13. No hardware run, so not `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
@@ -25,8 +25,8 @@ target console with evidence. Host tests alone cannot promote it.
 | 1. Build shape | done | Source tree, `build.sh`, one VPK, the layering guard |
 | 2. Contracts, graphics, and shared policy | done | Ports, fakes, gfx, parsers, path table, store, log |
 | 3. Protocol engines | done | Client and server machines against scripted peers |
-| 4. Operations and state | next | Queue, planner, executor, reducer, handoff |
-| 5. Screens and composition | pending | Seven surfaces, adapters, runtime, host integration test |
+| 4. Operations and state | done | Queue, planner, executor, reducer, handoff |
+| 5. Screens and composition | next | Seven surfaces, adapters, runtime, host integration test |
 | 6. Hardware verification | pending | M1–M8 evidence; project becomes `verified` |
 
 ## Current state
@@ -40,7 +40,7 @@ target console with evidence. Host tests alone cannot promote it.
 - **Build:** Phases 1, 2, and 3 are done. `./build.sh` emits one
   `vitaftpshell-v01.00-b<build>.vpk` and keeps the unstripped ELF.
   `./tools/test/run.sh` runs the layering guard over every `.c`/`.h` under
-  `src/` plus the ten host suites; `./tools/preview/run.sh` renders the gfx
+  `src/` plus the sixteen host suites; `./tools/preview/run.sh` renders the gfx
   layer to a PNG. `./send.sh <vita-ip>` refuses an artifact whose build number
   does not match `BUILD_NUMBER`.
 - **Next:** Phase 4 — U8 (transfer queue and slot arbitration), U16 (local
@@ -115,6 +115,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 2026-11-09 | Phase 2 — ports, gfx, and policy (U2–U5) | Added the six port contracts and controllable fakes; adapted COCKPIT's MIT gfx with `font_fit` and the seven-surface layout table; added the software vita2d preview; added reply, listing, path, and format policy; added the site book, settings, atomic store, and typed session-log events. Eight host suites pass, the preview renders 960x544, and the build emits `vitaftpshell-v01.00-b5.vpk` (still a stub). No hardware run. |
 | 2026-11-09 | Phase 3 — protocol engines (U6–U7) | Added the shared FTP line reader, remote-path normalizer, and templed write; the passive client machine (resolve, greeting, login, FEAT/MLSD with LIST fallback, browse, RETR/STOR, mutations, cancel, deadlines, cause classes); the passive server machine (control and control+1 bind, one client slot, the command table, MLST/SIZE/MDTM, data peer check, templed STOR, ABOR, 450 busy, network loss, stop); and the scripted fake server/client. Ten host suites pass under ASan/UBSan; the preview still renders 960x544; the build emits `vitaftpshell-v01.00-b7.vpk` (still a stub). Two independent reviews (client/shared and server) found 13 issues; all were fixed: the final-226 drain deadline, the ABOR grace for either reply order, browse MLSD fallback and the 450-listing guard, malformed-reply ABOR, the rename event path, the pending-accept disarm, control-write teardown, the no-slash virtual path, stronger denial tests, the fake send/overflow hooks, and long-name rejection. No hardware run. |
 | 2026-11-09 | Standalone repository | Detached vitaFTPShell into its own GPLv3 repository with its commit history, a public README and `.gitignore`, the COCKPIT MIT notice under `LICENSES/`, host-test CI, SPDX headers on every source file, and D44. Build b8; no source behavior change. |
+| 2026-11-09 | Phase 4 — operations and state (U8, U16, U17, U9, U15) | Added the ordered transfer queue and single slot; the pure local planner (copy, move, delete, mkdir, rename, merge, conflict gate, risk flags, protected-path refusals); the executor with templed writes, destination sync, aside recovery, rollback, and partial-delete reporting; the input repeat decoder, one-writer UI reducer, and command vocabulary; and the SPSC handoff with critical stop/cancel slots, a coalesced progress seqlock, three listing generations per pane, a bulk lane, and a latched server state. Sixteen host suites pass under ASan/UBSan. Two independent reviews found 16 issues; all were fixed, including the move-batch rollback that could delete the only copy, the overwrite rollback that could leave neither, the volume-root recursion, stale progress after a terminal event, the ACTIONS source, the marked transfer, the high-risk action, the save-dirty state, and the dock focus split. Build `vitaftpshell-v01.00-b10.vpk`. No hardware run. |
 
 ## Links
 
