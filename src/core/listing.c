@@ -8,12 +8,13 @@ static int is_digit(char c)
     return c >= '0' && c <= '9';
 }
 
-static void set_name(ListingEntry *out, const char *name, size_t len)
+static int set_name(ListingEntry *out, const char *name, size_t len)
 {
     if (len >= sizeof(out->name))
-        len = sizeof(out->name) - 1;
+        return 0;
     memcpy(out->name, name, len);
     out->name[len] = '\0';
+    return 1;
 }
 
 static int parse_u64_span(const char *text, size_t len, uint64_t *value)
@@ -136,8 +137,7 @@ ListingResult listing_parse_mlsd(const char *line, ListingEntry *out)
     if (name_is_dot(name))
         return LISTING_SKIP;
 
-    set_name(out, name, strlen(name));
-    if (out->name[0] == '\0')
+    if (!set_name(out, name, strlen(name)) || out->name[0] == '\0')
         return LISTING_MALFORMED;
     return LISTING_OK;
 }
@@ -204,14 +204,15 @@ ListingResult listing_parse_unix(const char *line, ListingEntry *out)
 
     char tmp[LISTING_NAME_MAX];
     if (name_len >= sizeof(tmp))
-        name_len = sizeof(tmp) - 1;
+        return LISTING_MALFORMED;
     memcpy(tmp, name, name_len);
     tmp[name_len] = '\0';
 
     if (name_is_dot(tmp))
         return LISTING_SKIP;
 
-    set_name(out, tmp, name_len);
+    if (!set_name(out, tmp, name_len))
+        return LISTING_MALFORMED;
     return LISTING_OK;
 }
 
@@ -255,7 +256,8 @@ ListingResult listing_parse_dos(const char *line, ListingEntry *out)
     if (*p == '\0' || name_is_dot(p))
         return LISTING_SKIP;
 
-    set_name(out, p, strlen(p));
+    if (!set_name(out, p, strlen(p)))
+        return LISTING_MALFORMED;
     return LISTING_OK;
 }
 
