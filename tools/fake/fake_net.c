@@ -150,7 +150,7 @@ static NetResult fake_listen(void *ctx, const NetAddress *addr,
         return NET_BUSY;
     socket->listening = 1;
     socket->peer = *addr;
-    socket->ready = NET_WAIT_READ; /* a listener is always polled for accept */
+    socket->ready = 0; /* readable only once a peer is queued */
     s_last_listener = socket;
     *out = socket;
     return NET_OK;
@@ -172,6 +172,8 @@ static NetResult fake_accept(void *ctx, NetSocket *listener, NetSocket **out,
     listener->pending_count--;
     memmove(&listener->pending[0], &listener->pending[1],
             listener->pending_count * sizeof(listener->pending[0]));
+    if (listener->pending_count == 0)
+        listener->ready &= ~NET_WAIT_READ;
 
     if (peer != NULL)
         *peer = socket->peer;

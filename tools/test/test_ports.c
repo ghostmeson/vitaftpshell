@@ -166,6 +166,27 @@ static void test_net_lifecycle(void)
     CHECK(net->wait(net->ctx, &set, 1, &ready) == NET_OK);
     CHECK(ready.count == 1);
     CHECK(net->receive(net->ctx, s, &byte, 1, &got) == NET_CLOSED);
+
+    /* A listener is readable only when a peer is queued. */
+    NetAddress bind = {0, 1337};
+    NetSocket *listener = NULL;
+    CHECK(net->listen(net->ctx, &bind, &listener) == NET_OK);
+    set.count = 1;
+    set.items[0].socket = listener;
+    set.items[0].flags = NET_WAIT_READ;
+    CHECK(net->wait(net->ctx, &set, 1, &ready) == NET_OK);
+    CHECK(ready.count == 0);
+
+    fake_net_queue_accept(listener, 0xC0A8012Au, 40000);
+    CHECK(net->wait(net->ctx, &set, 1, &ready) == NET_OK);
+    CHECK(ready.count == 1);
+
+    NetSocket *accepted = NULL;
+    NetAddress from;
+    CHECK(net->accept(net->ctx, listener, &accepted, &from) == NET_OK);
+    CHECK(from.port == 40000);
+    CHECK(net->wait(net->ctx, &set, 1, &ready) == NET_OK);
+    CHECK(ready.count == 0);
 }
 
 static void test_rename_capability(void)
