@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-09 — Phase 1 (U1): build shape, packaging, send script, placeholder LiveArea art, and the whole-tree layering guard | Start Phase 2: U2, U3, U4, U5 (ports and fakes, graphics base, parsers and paths, store and log) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b3.vpk`; it is a stub app, so the project is `building`, and no hardware run means not `verified`. `docs/ARCHITECTURE.md` is the module contract; the plan is the source of truth. |
+| `vitaFTPShell` | `building` | 2026-11-09 — Phase 2 (U2–U5): six ports and fakes, gfx base and layout table, reply/listing/path/format policy, and site/settings/store/log policy; 9 host suites and a host preview pass | Start Phase 3: U6 and U7 (FTP client and server state machines against scripted peers) | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b4.vpk` is still a stub; no protocol engine, screen, or adapter yet. `tools/test/run.sh` and `tools/preview/run.sh` are the Phase 2 evidence. No hardware run, so not `verified`. |
 
 ## Phases
 
@@ -23,8 +23,8 @@ target console with evidence. Host tests alone cannot promote it.
 | Visual design | done | `docs/design/` sheets and `docs/DESIGN.md` |
 | Architecture and implementation plan | done | `docs/ARCHITECTURE.md`, the plan's Planning Contract and U1–U17 |
 | 1. Build shape | done | Source tree, `build.sh`, one VPK, the layering guard |
-| 2. Contracts, graphics, and shared policy | next | Ports, fakes, gfx, parsers, path table, store, log |
-| 3. Protocol engines | pending | Client and server machines against scripted peers |
+| 2. Contracts, graphics, and shared policy | done | Ports, fakes, gfx, parsers, path table, store, log |
+| 3. Protocol engines | next | Client and server machines against scripted peers |
 | 4. Operations and state | pending | Queue, planner, executor, reducer, handoff |
 | 5. Screens and composition | pending | Seven surfaces, adapters, runtime, host integration test |
 | 6. Hardware verification | pending | M1–M8 evidence; project becomes `verified` |
@@ -37,14 +37,15 @@ target console with evidence. Host tests alone cannot promote it.
 - **Architecture:** settled. The plan holds KTD1–KTD18, the thread and handoff
   model, the command table, U1–U17, and the six phases. `docs/ARCHITECTURE.md` is
   the module contract.
-- **Build:** Phase 1 is done. `./build.sh` emits one
+- **Build:** Phases 1 and 2 are done. `./build.sh` emits one
   `vitaftpshell-v01.00-b<build>.vpk` and keeps the unstripped ELF.
-  `./tools/test/run.sh` runs the whole-tree layering guard; host tests arrive
-  with Phase 2. `./send.sh <vita-ip>` refuses an artifact whose build number does
-  not match `BUILD_NUMBER`.
-- **Next:** Phase 2 — U2 (ports and fakes), U3 (graphics base), U4 (replies,
-  listings, paths, formatting), and U5 (site book, settings, store, log). Each
-  phase ends at its gate, then stops with a report and a commit.
+  `./tools/test/run.sh` runs the layering guard over every `.c`/`.h` under
+  `src/` plus the nine host suites; `./tools/preview/run.sh` renders the gfx
+  layer to a PNG. `./send.sh <vita-ip>` refuses an artifact whose build number
+  does not match `BUILD_NUMBER`.
+- **Next:** Phase 3 — U6 (FTP client state machine) and U7 (FTP server state
+  machine), each against a scripted peer. Each phase ends at its gate, then
+  stops with a report and a commit.
 - **Product shape:** two live panes on the Vita — local files and a saved FTP
   site — with a site manager, transfer dock, local file manager, and an
   anonymous FTP server.
@@ -110,6 +111,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 2026-11-08 | Plan review | Architecture, coherence, feasibility, and security review. Split the operation unit into queue, planner, and executor (U8, U16, U17) and added the handoff unit (U15). Fixed the handoff publication protocol, the data-phase sub-states and abort reply alignment, the canonical path form and both rename operands, the protected `data` folders, the data-peer check, templed-write sync and aside recovery, the shared connect budget, the directory-merge conflict rule, the partial-delete report, and the MLST row. Added D41–D42; U7 no longer cites R71. |
 | 2026-11-08 | Plan review — open items | Confirmed D41 (server uploads overwrite, disclosed), the 450 for a PC's listing during a local batch, and the same-peer data connection. No plan change. |
 | 2026-11-09 | Phase 1 — build shape (U1) | Added `CMakeLists.txt` (VFTPSHELL, 01.00, UNSAFE), `build.sh` with a source-hash build number and one-artifact pruning, `send.sh` with a stale-artifact refusal, `src/main.c`, placeholder `sce_sys/` art, `.gitignore`, and `tools/test/run.sh` with the whole-tree layering guard. Built `vitaftpshell-v01.00-b3.vpk`; the guard fails on `psp2/` and `psp2common/` includes outside the seven-file allowlist. Code review applied two fixes and rejected two findings with evidence. No hardware run. |
+| 2026-11-09 | Phase 2 — ports, gfx, and policy (U2–U5) | Added the six port contracts and controllable fakes; adapted COCKPIT's MIT gfx with `font_fit` and the seven-surface layout table; added the software vita2d preview; added reply, listing, path, and format policy; added the site book, settings, atomic store, and typed session-log events. Nine host suites pass, the preview renders 960x544, and the build emits `vitaftpshell-v01.00-b4.vpk` (still a stub). No hardware run. |
 
 ## Links
 

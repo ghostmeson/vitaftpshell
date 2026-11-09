@@ -14,10 +14,12 @@ card to a PC, without making the PC the workspace.
 ## Status
 
 `building`. Strategy, requirements, the screen-by-screen design, and the
-architecture plan are complete. Phase 1 (U1) is done: `build.sh` emits one
-`vitaftpshell-v01.00-b3.vpk` from a minimal stub `src/main.c`, `send.sh` uploads
-it, and `tools/test/run.sh` enforces the whole-tree layering guard. No protocol
-engine, renderer, screen, or platform adapter exists yet, and nothing has run on
+architecture plan are complete. Phases 1 and 2 are done: the build shape, the
+six port contracts and fakes, the gfx base and layout table, the reply/listing/
+path/format policy, and the site/settings/store/log policy exist. `tools/test/
+run.sh` passes nine host suites, `tools/preview/run.sh` renders a 960x544 PNG,
+and `build.sh` emits `vitaftpshell-v01.00-b4.vpk` from a stub `src/main.c`. No
+protocol engine, screen, or platform adapter exists yet, and nothing has run on
 hardware.
 
 ## Users
@@ -62,8 +64,8 @@ requirements R1-R70.
 | Visual design | Screen-by-screen layout, states, and input; `docs/DESIGN.md` — done |
 | Architecture and plan | Modules, ports, threading, authid, build shape; the plan is enriched in place — done |
 | Phase 1: Build shape | Source tree, `build.sh`, one VPK, the layering guard — done |
-| Phase 2: Contracts, graphics, and shared policy | Ports, fakes, gfx, parsers, path table, store, log — next |
-| Phase 3: Protocol engines | Client and server machines against scripted peers |
+| Phase 2: Contracts, graphics, and shared policy | Ports, fakes, gfx, parsers, path table, store, log — done |
+| Phase 3: Protocol engines | Client and server machines against scripted peers — next |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test |
 | Phase 6: Hardware verification | M1–M8 evidence; project becomes `verified` |

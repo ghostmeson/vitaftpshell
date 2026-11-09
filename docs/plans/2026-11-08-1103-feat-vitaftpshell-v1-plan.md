@@ -680,7 +680,7 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 - **Requirements:** R57, KTD17.
 - **Dependencies:** none.
 - **Files:** `vitaFTPShell/CMakeLists.txt`, `vitaFTPShell/build.sh`, `vitaFTPShell/BUILD_NUMBER`, `vitaFTPShell/send.sh`, `vitaFTPShell/sce_sys/` (placeholder icon, pic0, LiveArea), `vitaFTPShell/src/main.c`, `vitaFTPShell/tools/test/run.sh`, `vitaFTPShell/.gitignore`.
-- **Approach:** Mirror `vita-cockpit/CMakeLists.txt` and `vita-cockpit/build.sh`. Title ID `VFTPSHELL`; version `01.00`; `vita_create_self` with `UNSAFE`; artifact `vitaftpshell-v01.00-b<n>.vpk`. `BUILD_NUMBER` lives in the project root and the source hash decides whether it increments. `src/main.c` is the minimum that links and launches; later units fill it. `run.sh` compiles host tests with `cc -std=c99 -Wall -Wextra` and begins with a guard that scans the whole tree against the seven-file allowlist and fails when any other file includes `psp2/` or `vita2d.h`. A guard that only reads `src/core` would miss the same violation in `src/app` or `src/ui`, which is where a `select` or a `vita2d` call is most likely to appear.
+- **Approach:** Mirror `vita-cockpit/CMakeLists.txt` and `vita-cockpit/build.sh`. Title ID `VFTPSHELL`; version `01.00`; `vita_create_self` with `UNSAFE`; artifact `vitaftpshell-v01.00-b<n>.vpk`. `BUILD_NUMBER` lives in the project root and the source hash decides whether it increments. `src/main.c` is the minimum that links and launches; later units fill it. `run.sh` compiles host tests with `cc -std=c99 -Wall -Wextra` and begins with a guard that scans every `.c` and `.h` under `src/` against the seven-file allowlist and fails when any other file includes `psp2/`, `psp2common/`, `psp2kern/`, or `vita2d.h`. A guard that only reads `src/core` would miss the same violation in `src/app` or `src/ui`, which is where a `select` or a `vita2d` call is most likely to appear; `tools/` is host-only and outside the scan.
 - **Patterns to follow:** `vita-cockpit/build.sh` for stamping and pruning; `vita-cockpit/tools/test/run.sh` for the compile-and-run shape.
 - **Test scenarios:**
   - `./build.sh` from clean produces exactly one `vitaftpshell-v01.00-b1.vpk` and leaves the unstripped ELF.
@@ -1010,7 +1010,7 @@ A unit is not done because its tests pass; it is done when its scenarios pass, t
 ## Definition of Done
 
 - Every unit's scenarios exist and pass in `tools/test/run.sh`; no feature-bearing unit has an empty test list.
-- The layering guard passes: only the seven files named in `AGENTS.md` include a `psp2/` or `vita2d.h` header, in any directory.
+- The layering guard passes: only the seven files named in `AGENTS.md` include a `psp2/` or `vita2d.h` header, anywhere under `src/`.
 - `./build.sh` produces exactly one VPK named `vitaftpshell-v<version>-b<build>.vpk`, and `build/` holds no second artifact or stale intermediates.
 - Every screen state in `docs/DESIGN.md` renders from state alone, with no hard-coded row data.
 - The server's denial set is proven by tests that assert nothing was created, not only that a reply code was returned.
