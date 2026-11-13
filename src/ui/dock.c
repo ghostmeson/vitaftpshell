@@ -116,6 +116,8 @@ static const char *direction_word(XferDirection direction)
         return "COPY";
     case XFER_DIR_LOCAL_MOVE:
         return "MOVE";
+    case XFER_DIR_LOCAL_DELETE:
+        return "DELETE";
     case XFER_DIR_SERVER_DOWNLOAD:
         return "DOWNLOAD";
     case XFER_DIR_SERVER_UPLOAD:
@@ -160,7 +162,16 @@ static void idle_dock(const UiState *state, DockPanel *p)
     }
 
     static char left[64];
-    if (no_session) {
+    if (state->status[0] != '\0') {
+        p->left = state->status;
+        p->left_color = C_YELLOW;
+    } else if (state->clip_mode != UI_CLIP_NONE) {
+        snprintf(left, sizeof(left), "%s %d - TRIANGLE TO PASTE",
+                 state->clip_mode == UI_CLIP_MOVE ? "MOVE" : "COPY",
+                 state->clip_count);
+        p->left = left;
+        p->left_color = C_CYAN;
+    } else if (no_session) {
         p->left = "NO SELECTION";
     } else if (pane->mark_count > 0) {
         snprintf(left, sizeof(left), "X TO %s %d ITEM%s",

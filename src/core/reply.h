@@ -56,7 +56,7 @@ typedef enum {
     REPLY_PASV_MALFORMED
 } ReplyPasvResult;
 
-/* 227 parsing; a host different from the control peer is refused. */
+/* 227 parsing; the data host is the control peer, only the port is taken. */
 ReplyPasvResult reply_parse_pasv(const char *text,
                                  const NetAddress *control_peer,
                                  NetAddress *out);

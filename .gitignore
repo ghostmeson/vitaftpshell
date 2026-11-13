@@ -31,3 +31,5 @@ compile_commands.json
 *.log
 *.orig
 *.rej
+*.psp2dmp
+*.psp2dmp.tmp

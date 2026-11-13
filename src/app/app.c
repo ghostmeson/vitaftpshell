@@ -16,6 +16,14 @@
 #define APP_EVENT_BUDGET 64
 #define APP_COMMAND_MAX 64
 
+/*
+ * The b20 core shows the worker's default pthread stack at 0x4d2c (19,756
+ * bytes) and fsop_run's frame at 0x4c54 (19,540 bytes). A local rename then
+ * faulted on the worker stack. Give the worker real headroom; the copy buffer
+ * is also kept out of fsop_run's frame (src/core/fsop_run.c).
+ */
+#define APP_WORKER_STACK_BYTES (128u * 1024u)
+
 struct App {
     AppPorts ports;
     Handoff handoff;
@@ -31,6 +39,7 @@ struct App {
     int stop;
 
     int ime_active;
+    int last_screen;
 
     int listing_held[UI_PANE_COUNT];
     int listing_truncated[UI_PANE_COUNT];
@@ -41,6 +50,58 @@ struct App {
 };
 
 static void feed(App *app, const UiStateEvent *event);
+
+static void apply_listing(App *app, UiPane pane)
+{
+    if (pane >= UI_PANE_COUNT)
+        return;
+
+    const void *rows = NULL;
+    int count = 0;
+    uint32_t generation = 0;
+    if (!handoff_listing_acquire(&app->handoff, pane, &rows, &count,
+                                 &generation))
+        return;
+
+    app->listing_held[pane] = 1;
+    if (generation != app->listing_generation[pane]) {
+        app->listing_generation[pane] = generation;
+        ui_state_set_rows(&app->state, pane, (const UiRow *)rows, count,
+                          app->listing_truncated[pane]);
+    }
+}
+
+static void push_log(App *app, HandoffLogKind kind, const char *screen,
+                     const char *key, const char *command, const char *path,
+                     const char *detail, int repeat, int masked, int value,
+                     int value_set)
+{
+    HandoffLogRecord record;
+    memset(&record, 0, sizeof(record));
+    record.kind = kind;
+    fmt_copy(record.screen, sizeof(record.screen), screen);
+    fmt_copy(record.key, sizeof(record.key), key);
+    fmt_copy(record.command, sizeof(record.command), command);
+    fmt_copy(record.path, sizeof(record.path), path);
+    fmt_copy(record.detail, sizeof(record.detail), detail);
+    record.repeat = repeat;
+    record.masked = masked;
+    record.value = value;
+    record.value_set = value_set;
+    handoff_log_push(&app->handoff, &record);
+}
+
+static void log_command(App *app, const UiCommand *command)
+{
+    push_log(app, HANDOFF_LOG_COMMAND, ui_screen_name(app->state.screen), NULL,
+             ui_command_name(command->type), command->path,
+             command->type == UI_CMD_TRANSFER ? command->path2
+                                              : command->title,
+             0,
+             command->type == UI_CMD_OPEN_IME ? command->index : 0,
+             command->value,
+             command->type == UI_CMD_OPEN_IME || command->type == UI_CMD_EDIT_PORT);
+}
 
 static void *worker_main(void *arg)
 {
@@ -91,9 +152,18 @@ static void open_ime(App *app, const UiCommand *command)
         app->ports.ime->begin(app->ports.ime->ctx, &request);
     if (result == IME_BEGIN_RUNNING) {
         app->ime_active = 1;
+        push_log(app, HANDOFF_LOG_IME, ui_screen_name(app->state.screen), NULL,
+                 "begin", NULL, request.title, 0, request.password,
+                 (int)request.max_length, 1);
         return;
     }
 
+    int code = app->ports.ime->last_error != NULL
+                   ? app->ports.ime->last_error(app->ports.ime->ctx)
+                   : 0;
+    push_log(app, HANDOFF_LOG_IME, ui_screen_name(app->state.screen), NULL,
+             "begin", NULL, "unavailable", 0, request.password, code,
+             code != 0);
     UiStateEvent event;
     memset(&event, 0, sizeof(event));
     event.kind = UI_EVT_IME_UNAVAILABLE;
@@ -122,8 +192,10 @@ static void feed(App *app, const UiStateEvent *event)
 {
     UiCommand commands[APP_COMMAND_MAX];
     int count = ui_state_handle(&app->state, event, commands, APP_COMMAND_MAX);
-    for (int i = 0; i < count; ++i)
+    for (int i = 0; i < count; ++i) {
+        log_command(app, &commands[i]);
         app_command(app, &commands[i]);
+    }
 }
 
 static void drain_ime(App *app)
@@ -145,6 +217,15 @@ static void drain_ime(App *app)
         snprintf(event.text, sizeof(event.text), "%s", response.text);
     app->ports.ime->end(app->ports.ime->ctx);
     app->ime_active = 0;
+    int code = (result == IME_POLL_ERROR && app->ports.ime->last_error != NULL)
+                   ? app->ports.ime->last_error(app->ports.ime->ctx)
+                   : 0;
+    push_log(app, HANDOFF_LOG_IME, ui_screen_name(app->state.screen), NULL,
+             "result", NULL,
+             result == IME_POLL_DONE
+                 ? "done"
+                 : (result == IME_POLL_CANCELLED ? "cancelled" : "error"),
+             0, app->state.text.masked, code, code != 0);
     feed(app, &event);
 }
 
@@ -155,6 +236,7 @@ static UiPane pane_for_direction(XferDirection direction)
     case XFER_DIR_SERVER_UPLOAD:
     case XFER_DIR_LOCAL_COPY:
     case XFER_DIR_LOCAL_MOVE:
+    case XFER_DIR_LOCAL_DELETE:
         return UI_PANE_LOCAL;
     default:
         return UI_PANE_REMOTE;
@@ -267,14 +349,23 @@ static void drain_events(App *app)
             feed(app, &ui);
             break;
         case HANDOFF_EVT_LISTING_END:
+            /*
+             * Apply the published rows before the end event. The begin event
+             * has already reset the pane, so this is the exact point where the
+             * two channels meet in order. Applying later let the begin reset
+             * arrive after the rows and erase a populated folder.
+             */
+            apply_listing(app, (UiPane)event.pane);
             ui.kind = UI_EVT_LISTING_END;
             ui.pane = event.pane;
             ui.ok = event.ok;
             ui.truncated = event.truncated;
             if (event.pane < UI_PANE_COUNT)
                 app->listing_truncated[event.pane] = event.truncated;
-            snprintf(ui.text, sizeof(ui.text), "%s",
-                     event.ok ? "" : "LISTING FAILED");
+            fmt_copy(ui.text, sizeof(ui.text),
+                     event.ok ? ""
+                              : (event.detail[0] != '\0' ? event.detail
+                                                        : "LISTING FAILED"));
             feed(app, &ui);
 
             ui.kind = UI_EVT_PANE_INFO;
@@ -325,8 +416,14 @@ static void drain_events(App *app)
         }
     }
 
+    /*
+     * Leave a worker confirmation latched while a local dialog owns the
+     * screen. Taking it here and feeding CONFIRM BUSY would drop it while the
+     * worker keeps pending.valid set, which froze every later action.
+     */
     HandoffConfirm confirm;
-    if (handoff_confirm_take(&app->handoff, &confirm)) {
+    if (app->state.screen != UI_SCREEN_CONFIRM && !app->ime_active &&
+        handoff_confirm_take(&app->handoff, &confirm)) {
         app->confirm = confirm;
         for (int i = 0; i < confirm.item_count &&
                         i < HANDOFF_CONFIRM_ITEMS; ++i) {
@@ -346,25 +443,6 @@ static void drain_events(App *app)
         snprintf(request.risk_path, sizeof(request.risk_path), "%s",
                  confirm.risk_path);
         feed(app, &request);
-    }
-}
-
-static void acquire_listings(App *app)
-{
-    for (int pane = 0; pane < UI_PANE_COUNT; ++pane) {
-        const void *rows = NULL;
-        int count = 0;
-        uint32_t generation = 0;
-        if (!handoff_listing_acquire(&app->handoff, (UiPane)pane, &rows,
-                                     &count, &generation))
-            continue;
-        app->listing_held[pane] = 1;
-        if (generation != app->listing_generation[pane]) {
-            app->listing_generation[pane] = generation;
-            ui_state_set_rows(&app->state, (UiPane)pane,
-                              (const UiRow *)rows, count,
-                              app->listing_truncated[pane]);
-        }
     }
 }
 
@@ -389,6 +467,10 @@ static void poll_input(App *app)
             event.kind = UI_EVT_KEY;
             event.key = events[i].key;
             event.repeat = events[i].repeat;
+            if (!events[i].repeat)
+                push_log(app, HANDOFF_LOG_KEY,
+                         ui_screen_name(app->state.screen), ui_key_name(event.key),
+                         NULL, NULL, NULL, 0, 0, 0, 0);
         } else {
             event.kind = UI_EVT_STICK;
             event.stick_y = events[i].stick_y;
@@ -410,6 +492,7 @@ App *app_create(const AppPorts *ports, int worker_thread)
 
     app->ports = *ports;
     app->worker_thread = worker_thread;
+    app->last_screen = -1;
     handoff_init(&app->handoff);
 
     WorkerPorts worker_ports;
@@ -431,13 +514,14 @@ App *app_create(const AppPorts *ports, int worker_thread)
     input_repeat_init(&app->repeat);
 
     const Settings *settings = worker_settings(app->worker);
-    if (settings != NULL) {
-        if (settings->last_local[0] != '\0')
-            snprintf(app->state.panes[UI_PANE_LOCAL].path,
-                     sizeof(app->state.panes[UI_PANE_LOCAL].path), "%s",
-                     settings->last_local);
+    if (settings != NULL)
         app->state.server.port = settings->server_port;
-    }
+
+    /* The local pane always opens at the virtual root that lists the mounted
+     * volumes. The last local path is still saved for a future option, but it
+     * does not decide the startup view. */
+    snprintf(app->state.panes[UI_PANE_LOCAL].path,
+             sizeof(app->state.panes[UI_PANE_LOCAL].path), "*");
     fill_sites(app);
     return app;
 }
@@ -447,7 +531,23 @@ int app_start(App *app)
     if (app == NULL)
         return 0;
     if (app->worker_thread && !app->thread_started) {
-        if (pthread_create(&app->thread, NULL, worker_main, app) == 0)
+        pthread_attr_t attr;
+        pthread_attr_t *attrp = NULL;
+        int attr_ready = pthread_attr_init(&attr) == 0;
+
+        if (attr_ready) {
+            if (pthread_attr_setstacksize(&attr, APP_WORKER_STACK_BYTES) == 0)
+                attrp = &attr;
+            /* A failed stack-size request falls back to the pthread default;
+             * app_start reports no error because the worker still starts. */
+        }
+
+        int created =
+            pthread_create(&app->thread, attrp, worker_main, app) == 0;
+        if (attr_ready)
+            (void)pthread_attr_destroy(&attr);
+
+        if (created)
             app->thread_started = 1;
         else
             app->worker_thread = 0;
@@ -463,10 +563,19 @@ int app_tick(App *app)
     if (!app->worker_thread)
         worker_step(app->worker);
 
-    acquire_listings(app);
     drain_events(app);
     drain_ime(app);
     poll_input(app);
+
+    if ((int)app->state.screen != app->last_screen) {
+        push_log(app, HANDOFF_LOG_SCREEN,
+                 ui_screen_name(app->state.screen), NULL, NULL, NULL,
+                 app->last_screen >= 0
+                     ? ui_screen_name((UiScreen)app->last_screen)
+                     : "NONE",
+                 0, 0, 0, 0);
+        app->last_screen = app->state.screen;
+    }
 
     draw_begin_frame();
     ui_render(&app->state);

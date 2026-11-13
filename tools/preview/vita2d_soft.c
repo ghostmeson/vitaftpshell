@@ -199,6 +199,11 @@ void vita2d_end_drawing(void)
 {
 }
 
+int vita2d_common_dialog_update(void)
+{
+    return 0;
+}
+
 void vita2d_swap_buffers(void)
 {
 }

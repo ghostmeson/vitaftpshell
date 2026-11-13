@@ -56,7 +56,8 @@ handle crosses inward.
 - **`InputPort`** — the pressed-edge set and the stick position.
 - **`TextInputPort`** — open the system IME with a title, initial text, password
   flag, and maximum length; report open, cancelled, unavailable, or a UTF-8
-  result.
+  result. `last_error` carries the raw platform code from a failed begin or
+  poll; policy never interprets it and the app writes it to the session log.
 - **`ClockPort`** — monotonic milliseconds and a sleep.
 - **`LogPort`** — append one bounded record.
 
@@ -98,9 +99,16 @@ arena.
   and `OPERATION_DONE`. The machine is `IDLE`, `RESOLVING`, `CONNECTING`,
   `GREETING`, `LOGGING_IN`, `READY`, `LISTING`, `TRANSFERRING`, `STALLED`,
   `LOST`, or `FAILED`; the data side is `NONE`, `ARMED`, `ACCEPTED`, `ACTIVE`,
-  or `DRAINING`. The connect budget is 10 s with caps of 3 s resolve, 3 s
-  connect, 2 s greeting/login, and 2 s first listing; a control command has 5 s;
-  a data operation has a 15 s idle deadline. A data-only failure sends `ABOR`,
+  or `DRAINING`. The connect budget is 35 s with caps of 3 s resolve, 12 s
+  connect, 5 s greeting/login, and 10 s first listing; a control command has
+  10 s; a data operation has a 20 s idle deadline. `OPERATION_DONE` fires before
+  the operation slot is released, so the caller defers the next command to the
+  following tick. A `READY` client sends `NOOP` after 20 s of inactivity and
+  declares the session `LOST` after 5 s without a reply, which catches a
+  half-open control channel. `ftp_client_mlst` is a command op that reports
+  existence, type, and size (or `unsupported`); the worker uses it to preflight
+  an upload destination before a STOR. `ftp_client_disconnect` closes both
+  sockets immediately without a QUIT round trip. A data-only failure sends `ABOR`,
   records `cls=network` or `storage`, and keeps the control session; a control
   drop records `LOST`. The client tolerates either ABOR reply order with a
   250 ms drain grace, during which a new command is refused rather than allowed
@@ -136,6 +144,14 @@ arena.
 - `src/core/input.c` turns edges and the stick into semantic events with repeat.
   `src/core/uistate.c` is the only writer of `UiState`; `src/core/uiact.c` is the
   command vocabulary. The reducer emits values, never calls the engine.
+- The worker owns one remote action queue for NEW FOLDER, RENAME, DELETE, and
+  RMDIR. It starts one FTP command, waits for `OPERATION_DONE`, then pumps the
+  next; a successful command sets `refresh_remote`, and the listing starts on
+  the following step after the client has released its slot. This is the U9
+  remote-action path from D64, not the local `fsop` planner. REFRESH uses the
+  existing `UI_CMD_REFRESH`; a listing name with a separator or dot segment is
+  marked unsafe and never reaches a transfer; a folder source is refused with
+  `FOLDER NOT SUPPORTED` until R22/R23 are implemented (D65).
 - `src/core/handoff.c` carries commands and events across fixed rings. A server
   stop and a cancel have dedicated slots and are never lost to a full command
   ring; progress is a coalesced seqlock latch, so a terminal state cannot be
@@ -185,6 +201,10 @@ Two threads (D38).
 | Main | `UiState`, input, drawing | Open a socket, touch a file, wait on the worker |
 | Worker | Client session, server state and slot, transfer queue, local batch, all file and network I/O | Draw, read UI state |
 
+The worker is created with a 128 KiB stack (D57). `fsop_run` keeps its 8 KiB
+copy buffer in a separate `noinline` function so a rename does not reserve it;
+a local-action frame is budgeted against that stack.
+
 Handoff (`src/core/handoff.c`, policy with no platform call, so it is host-tested
 on its own):
 
@@ -202,7 +222,10 @@ on its own):
 - **Listings** do not cross the rings. Each pane has three generations; the
   worker reserves a slot the reader does not hold, fills it, and publishes it
   with a release store. The UI keeps one generation until it releases it at a
-  frame boundary, so a draw cannot see rows change under it.
+  frame boundary, so a draw cannot see rows change under it. The app applies a
+  published generation while draining that pane's listing-end event: the begin
+  event has already reset the pane and the end event has not cleared `READING`,
+  so rows and events cannot cross in the wrong order (D55).
 - **The site book** is larger than one record and crosses on a 16 KiB bulk lane
   carrying a generation number, so a stale read is detectable. The payload is a
   view without passwords (D49).
@@ -217,15 +240,22 @@ Every unverified Vita behaviour is a `[C]` comment in the adapter that owns it:
 - `psp2_net.c`: `sceNetCtlInit` may already be up; `fcntl(O_NONBLOCK)` maps to
   the net non-blocking option; `select` over sceNet sockets; the resolver
   timeout unit and retry count; `SceNetCtlInfo.ip_address` is a dotted quad.
+  `inet_pton` yields network order and `NetAddress.addr` is host order, so
+  `net_link` converts with `ntohl` (D59). The 4 MiB pool and 128 backlog match
+  the working ftpvitalib shape.
 - `psp2_fs.c`: the `0x3001` devctl free-space call is proven only on `ux0:`;
-  `ur0:`/`uma0:` are unverified; `mtime` is reported unknown; `sceIoRename`
-  replace-on-existing is unverified, so `rename_replaces()` returns 0 and the
-  aside fallback is always used (D48).
+  `ur0:`/`uma0:` report unknown and the worker caches the value per volume
+  (D59); `mtime` is reported unknown; `sceIoRename` replace-on-existing is
+  unverified, so `rename_replaces()` returns 0 and the aside fallback is always
+  used (D48).
 - `psp2_input.c`: the plain peek reports shoulders as L1/R1; the wide analog
   mode reports 0..255 centred at 128.
-- `psp2_ime.c`: the common-dialog config must precede the IME dialog; the
-  init order is an open decision; password masking and the first status frame
-  are unverified.
+- `psp2_ime.c`: the adapter follows the SDK IME sample — `sceAppUtilInit`, then
+  the common-dialog config with concrete language/CROSS values, then the
+  dialog; `draw.c` supplies the common-dialog update every frame and the
+  adapter allows a short NONE window. The sequence and the grace are `[C]` until
+  hardware proves them; password masking is still unverified. The raw failure
+  code is reported through `TextInputPort.last_error` (D56).
 - `psp2_log.c`: an append handle plus `SCE_SEEK_END` reports the existing size;
   if it fails, writes are refused rather than bypassing the cap.
 
@@ -298,11 +328,17 @@ Under `ux0:data/vitaFTPShell/`:
 |---|---|---|
 | `sites.cfg` | Version header, one site per line, percent-encoded fields | Temp, sync, rename |
 | `settings.cfg` | Last local path, last site, server port | Temp, sync, rename |
-| `session.log` | One tab-separated record per line, monotonic ms plus fields | Append; rotate at 64 KiB |
-| `session.old.log` | The one previous generation | Replaced on rotation |
+| `session.log` | One tab-separated record per line, monotonic ms plus typed fields | Append; rotate at 256 KiB |
+| `session.old.log` | The first previous generation | Renamed to `session.old2.log` on rotation |
+| `session.old2.log` | The second previous generation | Replaced on rotation |
 
 A server's reply text is never a log field: a hostile server can echo a credential
-back in a 530. One log line is bounded at 4096 bytes; an overlong record is
+back in a 530. The log is always on and records app start/stop, screen changes,
+button edges, commands, IME begin/result (never the value), listings, queue
+depth, transfers, server clients, saves, and errors (D54). The app pushes
+fixed log records to the worker through the handoff log ring, so the worker
+remains the one writer. A full ring is counted and written as a `log` event.
+One log line is bounded at 4096 bytes; an overlong record is
 dropped whole, never split. A file that fails to parse yields whatever lines are
 valid and is never overwritten until the user saves. A stale `.old` aside is
 restored when the target is missing and cleared when both exist, so an
@@ -407,7 +443,10 @@ asserts:
   and connection clearing, dock focus, confirm scrolling, high-risk focus, IME
   cancel, and the volume-root delete refusal;
 - the handoff: a producer faster than the consumer, a full ring, a coalesced
-  progress stream, a latched server state, and three listing generations;
+  progress stream, a latched server state, three listing generations, and the
+  UI log ring;
+- the log format: every event family, the three-generation rotation, the
+  percent-encoded fields, and that a password sentinel never appears;
 - `tools/test/tsan.sh` builds the handoff with plain stores and requires a
   ThreadSanitizer race, so the release/acquire on the publish index is proven
   necessary rather than assumed;
@@ -444,11 +483,14 @@ Any Vita behavior that has not run on hardware is tagged `[C]` in the adapter th
 depends on it, naming the claim and the reason. The open ones:
 
 - [C] `select` over `sceNet` sockets for a mixed control, data, and listener set
-  under FTP timing, with `sceNetEpollWait` as the fallback.
+  under FTP timing, with `sceNetEpollWait` or ftpvitalib's blocking accept on a
+  dedicated server thread as the fallback (D59).
 - [C] whether `sceIoRename` replaces an existing target, and the fallback in
   KTD12 if it does not.
-- [C] `sceIoDevctl` free space on `uma0:` under the shipped eboot.
-- [C] IME dialog init order and masked text behavior.
+- [C] IME dialog init sequence, first NONE window, and masked text behavior
+  (D56).
+- [C] `pthread_attr_setstacksize` accepts a 128 KiB worker stack on the Vita
+  (D57); the app falls back to the pthread default if it does not.
 
 ## GPLv3 boundary
 

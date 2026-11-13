@@ -44,6 +44,9 @@ struct TextInputPort {
     ImeBeginResult (*begin)(void *ctx, const ImeRequest *request);
     ImePollResult (*poll)(void *ctx, ImeResponse *out);
     void (*end)(void *ctx);
+    /* Raw platform code from the last failed begin or poll, 0 when none.
+     * Policy never interprets it; the app writes it to the session log. */
+    int (*last_error)(void *ctx);
 };
 
 #endif

@@ -250,8 +250,7 @@ void confirm_draw(const UiState *state)
 
     font_text(confirm->title, CONFIRM_ITEM_X, 140.0f, PX_VALUE, C_YELLOW);
 
-    if (confirm->kind == UI_CONFIRM_HIGH_RISK &&
-        confirm->risk_path[0] != '\0') {
+    if (confirm->high_risk && confirm->risk_path[0] != '\0') {
         font_text(confirm->risk_path, CONFIRM_ITEM_X, 168.0f, PX_MICRO,
                   C_CYAN_DIM);
     } else if (confirm->context[0] != '\0') {

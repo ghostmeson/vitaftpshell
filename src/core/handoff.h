@@ -25,6 +25,7 @@
 #define HANDOFF_LIST_GENS 3
 #define HANDOFF_BULK_BYTES 16384
 #define HANDOFF_CONFIRM_ITEMS 16
+#define HANDOFF_LOG_CAP 96
 
 typedef struct {
     UiCommand command;
@@ -97,6 +98,34 @@ typedef struct {
     HandoffConfirmItem items[HANDOFF_CONFIRM_ITEMS];
 } HandoffConfirm;
 
+typedef enum {
+    HANDOFF_LOG_SCREEN = 0,
+    HANDOFF_LOG_KEY,
+    HANDOFF_LOG_COMMAND,
+    HANDOFF_LOG_IME
+} HandoffLogKind;
+
+typedef struct {
+    HandoffLogKind kind;
+    char screen[24];
+    char key[16];
+    char command[24];
+    char path[PATH_MAX_LEN];
+    char detail[96];
+    int repeat;
+    int masked;
+    int value;
+    int value_set;
+} HandoffLogRecord;
+
+typedef struct {
+    HandoffLogRecord records[HANDOFF_LOG_CAP];
+    uint32_t head;
+    uint32_t tail;
+    unsigned lost;
+    uint32_t seq;
+} HandoffLog;
+
 typedef struct {
     const void *rows;
     int row_count;
@@ -149,6 +178,7 @@ typedef struct {
     HandoffListings listings[UI_PANE_COUNT];
     HandoffBulk bulk;
 
+    HandoffLog log;
     int confirm_valid;
     HandoffConfirm confirm;
 } Handoff;
@@ -175,6 +205,10 @@ int handoff_listing_acquire(Handoff *handoff, UiPane pane, const void **rows,
                             int *row_count, uint32_t *generation);
 void handoff_listing_release(Handoff *handoff, UiPane pane);
 unsigned handoff_listing_lost(const Handoff *handoff, UiPane pane);
+
+int handoff_log_push(Handoff *handoff, const HandoffLogRecord *record);
+int handoff_log_pop(Handoff *handoff, HandoffLogRecord *out);
+unsigned handoff_log_lost(const Handoff *handoff);
 
 void handoff_confirm_request(Handoff *handoff, const HandoffConfirm *confirm);
 int handoff_confirm_take(Handoff *handoff, HandoffConfirm *out);

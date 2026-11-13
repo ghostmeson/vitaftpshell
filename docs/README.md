@@ -15,6 +15,7 @@ discovery.
 | `ARCHITECTURE.md` | Layers, ports, threading, handoff, module rules | Engineering |
 | `DESIGN.md` | The settled layout, states, and input; the sheets | Design |
 | `DECISIONS.md` | Numbered decisions with context and consequences | All |
+| `FIXES.md` | Chronological fix index: build, symptom, cause, fix, evidence, hardware status | Engineering |
 | `THIRD_PARTY.md` | Reused code, licenses, and protocol references | Engineering |
 | `plans/` | The v1 plan: requirements, decisions, units, verification | Planning |
 | `features/` | Future feature documents | Product |
@@ -41,6 +42,8 @@ root file instead.
 - Update `../PROJECTS.md` when a job changes the phase or the next action.
 - Add a numbered entry to `DECISIONS.md` when a choice would surprise a future
   reader.
+- Add a row to `FIXES.md` for every fixed defect, with the build, the evidence,
+  and an honest `HW`/`HOST`/`PENDING` status.
 - A feature document is not a requirements plan. Use `ce-brainstorm` for new
   behavior and link the result here.
 - Do not put a finding only in chat.

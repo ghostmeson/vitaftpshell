@@ -34,6 +34,15 @@ static UiRow s_remote_rows[] = {
     {.name = "B.BIN", .type = UI_ROW_FILE, .size = 5, .size_known = 1},
 };
 
+static UiRow s_volume_rows[] = {
+    {.name = "ux0:", .type = UI_ROW_VOLUME},
+    {.name = "ur0:", .type = UI_ROW_VOLUME},
+};
+
+static UiRow s_empty_rows[] = {
+    {.name = "..", .type = UI_ROW_UP},
+};
+
 static UiRow s_many_rows[15];
 
 static UiConfirmItem s_confirm_items[12];
@@ -47,6 +56,8 @@ static void reset(void)
     s_command_count = 0;
 
     ui_state_init(&s_state, s_local_marks, 16, s_remote_marks, 16);
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:data");
     ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_local_rows, 3, 0);
     ui_state_set_rows(&s_state, UI_PANE_REMOTE, s_remote_rows, 3, 0);
     s_state.panes[UI_PANE_REMOTE].connected = 1;
@@ -156,20 +167,29 @@ static void test_marks(void)
     CHECK(s_state.panes[UI_PANE_LOCAL].marked_bytes == 10);
     CHECK(s_state.panes[UI_PANE_LOCAL].marked_bytes_known == 1);
 
+    /* A folder is refused, never queued as one RETR/STOR (D65). */
     send_key(UI_KEY_CROSS);
-    CHECK(s_command_count == 2);
+    CHECK(s_command_count == 0);
+    CHECK(strcmp(s_state.status, "FOLDER TRANSFER NOT SUPPORTED") == 0);
+
+    /* Drop the folder mark and transfer the file alone. */
+    send_key(UI_KEY_UP);
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
+    send_key(UI_KEY_DOWN);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 1);
     CHECK(s_commands[0].type == UI_CMD_TRANSFER);
-    CHECK(s_commands[1].type == UI_CMD_TRANSFER);
-    CHECK(strcmp(s_commands[0].path, "ux0:data/folder") == 0);
-    CHECK(strcmp(s_commands[1].path, "ux0:data/A.TXT") == 0);
-    CHECK(s_commands[0].value == 2);
+    CHECK(strcmp(s_commands[0].path, "ux0:data/A.TXT") == 0);
+    CHECK(s_commands[0].value == 1);
+    CHECK(s_commands[0].total == 10 && s_commands[0].total_known == 1);
     CHECK(strcmp(s_commands[0].path2, "/") == 0);
 
     send_key(UI_KEY_L1);
     CHECK(s_state.active_pane == UI_PANE_REMOTE);
     CHECK(mark_count(UI_PANE_REMOTE) == 0);
     send_key(UI_KEY_R1);
-    CHECK(mark_count(UI_PANE_LOCAL) == 2);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
 
     UiStateEvent event;
     memset(&event, 0, sizeof(event));
@@ -177,7 +197,7 @@ static void test_marks(void)
     event.pane = UI_PANE_LOCAL;
     snprintf(event.path, sizeof(event.path), "ux0:data/sub");
     send_event(&event);
-    CHECK(mark_count(UI_PANE_LOCAL) == 2);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
 
     memset(&event, 0, sizeof(event));
     event.kind = UI_EVT_LISTING_BEGIN;
@@ -234,6 +254,7 @@ static void test_open_and_parent(void)
     UiCommand *transfer = command(UI_CMD_TRANSFER);
     CHECK(transfer != NULL);
     CHECK(transfer->value == 0);
+    CHECK(transfer->total == 10 && transfer->total_known == 1);
     CHECK(strcmp(transfer->path, "ux0:data/A.TXT") == 0);
     CHECK(strcmp(transfer->path2, "/") == 0);
 
@@ -245,8 +266,14 @@ static void test_open_and_parent(void)
     snprintf(s_state.panes[UI_PANE_LOCAL].path,
              sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:");
     send_key(UI_KEY_CIRCLE);
+    CHECK(command(UI_CMD_GO_PARENT) != NULL);
+
+    reset();
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "*");
+    send_key(UI_KEY_CIRCLE);
     CHECK(command(UI_CMD_GO_PARENT) == NULL);
-    CHECK(strcmp(s_state.status, "AT VOLUME ROOT") == 0);
+    CHECK(strcmp(s_state.status, "AT ROOT") == 0);
 
     reset();
     send_key(UI_KEY_L1);
@@ -274,7 +301,7 @@ static void test_sites_editor(void)
 {
     reset();
     s_state.sites.count = 3;
-    send_key(UI_KEY_TRIANGLE);
+    send_key(UI_KEY_SELECT);
     CHECK(s_state.screen == UI_SCREEN_SITES);
     send_key(UI_KEY_DOWN);
     CHECK(s_state.sites.selected == 1);
@@ -394,7 +421,7 @@ static void test_server_actions(void)
     send_key(UI_KEY_CIRCLE);
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
 
-    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_TRIANGLE);
     CHECK(s_state.screen == UI_SCREEN_ACTIONS);
     CHECK(strcmp(s_state.actions.path, "ux0:data") == 0);
     /* The cursor is on ".." in ux0:data, which the protection table treats
@@ -402,6 +429,7 @@ static void test_server_actions(void)
     CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
     s_state.actions.selected = UI_ACTION_DELETE;
     s_state.actions.enabled[UI_ACTION_DELETE] = 1;
+    s_state.actions.has_selection = 1;
     snprintf(s_state.actions.path, sizeof(s_state.actions.path), "ux0:");
     send_key(UI_KEY_CROSS);
     CHECK(command(UI_CMD_RUN_ACTION) == NULL);
@@ -423,8 +451,10 @@ static void test_server_actions(void)
         CHECK(strcmp(run->path, "ux0:data/A.TXT") == 0);
     }
 
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    send_key(UI_KEY_TRIANGLE);
     s_state.actions.selected = UI_ACTION_COPY;
-    s_state.actions.enabled[UI_ACTION_COPY] = 0;
+    CHECK(s_state.actions.enabled[UI_ACTION_COPY] == 0);
     send_key(UI_KEY_CROSS);
     CHECK(command(UI_CMD_RUN_ACTION) == NULL);
     CHECK(strcmp(s_state.status, "ACTION UNAVAILABLE") == 0);
@@ -436,17 +466,31 @@ static void test_server_actions(void)
     send_key(UI_KEY_SQUARE);
     send_key(UI_KEY_DOWN);
     send_key(UI_KEY_SQUARE);
-    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_TRIANGLE);
     CHECK(s_state.actions.marked == 2);
     CHECK(strcmp(s_state.actions.path, "ux0:data/folder") == 0);
     s_state.actions.selected = UI_ACTION_COPY;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 0);
+    CHECK(s_state.clip_mode == UI_CLIP_COPY);
+    CHECK(s_state.clip_count == 2);
+    CHECK(strcmp(s_state.clip_paths[0].text, "ux0:data/folder") == 0);
+    CHECK(strcmp(s_state.clip_paths[1].text, "ux0:data/A.TXT") == 0);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+
+    /* Navigate to a different folder and paste. */
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:data/sub");
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.selected == UI_ACTION_PASTE);
     send_key(UI_KEY_CROSS);
     CHECK(s_command_count == 2);
     CHECK(s_commands[0].type == UI_CMD_RUN_ACTION);
     CHECK(s_commands[1].type == UI_CMD_RUN_ACTION);
     CHECK(strcmp(s_commands[0].path, "ux0:data/folder") == 0);
     CHECK(strcmp(s_commands[1].path, "ux0:data/A.TXT") == 0);
-    CHECK(strcmp(s_commands[0].path2, "ux0:data") == 0);
+    CHECK(strcmp(s_commands[0].path2, "ux0:data/sub") == 0);
+    CHECK(s_state.clip_mode == UI_CLIP_NONE);
 }
 
 static void test_confirm(void)
@@ -515,14 +559,18 @@ static void test_confirm(void)
 static void test_high_risk_action(void)
 {
     reset();
-    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_TRIANGLE);
     s_state.actions.selected = UI_ACTION_DELETE;
     s_state.actions.enabled[UI_ACTION_DELETE] = 1;
+    s_state.actions.has_selection = 1;
     snprintf(s_state.actions.path, sizeof(s_state.actions.path),
              "ur0:tai/x.suprx");
     send_key(UI_KEY_CROSS);
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
-    CHECK(s_state.confirm.kind == UI_CONFIRM_HIGH_RISK);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
+    CHECK(s_state.confirm.high_risk == 1);
+    CHECK(s_state.confirm.item_count == 1);
+    CHECK(strcmp(s_state.confirm.items[0].name, "ur0:tai/x.suprx") == 0);
     CHECK(s_state.confirm_from_worker == 0);
     CHECK(s_state.confirm.choice_focus == 0);
     send_key(UI_KEY_RIGHT);
@@ -535,14 +583,14 @@ static void test_high_risk_action(void)
         CHECK(run->value == 1);
         CHECK(strcmp(run->path, "ur0:tai/x.suprx") == 0);
     }
-    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
 }
 
 static void test_action_ime_and_risk(void)
 {
     reset();
     s_state.panes[UI_PANE_LOCAL].selected = 1;
-    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_TRIANGLE);
     s_state.actions.selected = UI_ACTION_RENAME;
     s_state.actions.enabled[UI_ACTION_RENAME] = 1;
     send_key(UI_KEY_CROSS);
@@ -566,15 +614,25 @@ static void test_action_ime_and_risk(void)
         CHECK(strcmp(run->text, "RENAMED") == 0);
     }
     CHECK(s_state.pending_action_valid == 0);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
 
     reset();
     s_state.panes[UI_PANE_LOCAL].selected = 1;
     send_key(UI_KEY_SQUARE);
     send_key(UI_KEY_DOWN);
     send_key(UI_KEY_SQUARE);
-    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_TRIANGLE);
     s_state.actions.selected = UI_ACTION_COPY;
-    snprintf(s_state.actions.dest, sizeof(s_state.actions.dest), "ur0:tai");
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(s_state.clip_mode == UI_CLIP_COPY);
+    CHECK(s_state.clip_count == 2);
+
+    /* Navigate into a high-risk destination, then paste. */
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ur0:tai");
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.selected == UI_ACTION_PASTE);
     send_key(UI_KEY_CROSS);
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
     CHECK(s_state.confirm.kind == UI_CONFIRM_HIGH_RISK);
@@ -588,6 +646,127 @@ static void test_action_ime_and_risk(void)
         CHECK(s_commands[i].value == 1);
         CHECK(strcmp(s_commands[i].path2, "ur0:tai") == 0);
     }
+    CHECK(s_state.clip_mode == UI_CLIP_NONE);
+}
+
+static void test_local_actions_inside_volume_root(void)
+{
+    reset();
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:");
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_local_rows, 3, 0);
+    s_state.panes[UI_PANE_LOCAL].selected = 1; /* folder, not ".." */
+    ui_actions_prepare(&s_state);
+
+    CHECK(strcmp(s_state.actions.path, "ux0:folder") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_RENAME] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 1);
+
+    s_state.panes[UI_PANE_LOCAL].selected = 0; /* ".." is no selection */
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.has_selection == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DELETE], "NO SELECTION") == 0);
+
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "*");
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_volume_rows, 2, 0);
+    s_state.panes[UI_PANE_LOCAL].selected = 0;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.has_selection == 1);
+    CHECK(strcmp(s_state.actions.path, "ux0:") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_NEW_FOLDER], "ROOT") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DELETE], "VOLUME ROOT") == 0);
+}
+
+static void test_actions_no_selection(void)
+{
+    reset();
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:data/EMPTY");
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_empty_rows, 1, 0);
+    s_state.panes[UI_PANE_LOCAL].selected = 0;
+    ui_actions_prepare(&s_state);
+
+    CHECK(s_state.actions.has_selection == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_COPY] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_RENAME] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DELETE], "NO SELECTION") ==
+          0);
+
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    s_state.actions.selected = UI_ACTION_DELETE;
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_RUN_ACTION) == NULL);
+    CHECK(strcmp(s_state.status, "ACTION UNAVAILABLE") == 0);
+
+    s_state.actions.selected = UI_ACTION_NEW_FOLDER;
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_OPEN_IME) != NULL);
+}
+
+static void test_marks_pruned_after_delete(void)
+{
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2; /* A.TXT */
+    send_key(UI_KEY_SQUARE);
+    CHECK(ui_state_mark_count(&s_state, UI_PANE_LOCAL) == 1);
+
+    /* The refreshed listing no longer has A.TXT. */
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_local_rows, 2, 0);
+    CHECK(ui_state_mark_count(&s_state, UI_PANE_LOCAL) == 0);
+
+    /* A mark in another folder survives a listing of this folder. */
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    send_key(UI_KEY_SQUARE);
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:data/sub");
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_empty_rows, 1, 0);
+    CHECK(ui_state_mark_count(&s_state, UI_PANE_LOCAL) == 1);
+}
+
+static void test_action_returns_to_workspace(void)
+{
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 1;
+    send_key(UI_KEY_SQUARE);
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    s_state.actions.selected = UI_ACTION_COPY;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(command(UI_CMD_RUN_ACTION) == NULL);
+    CHECK(s_state.clip_mode == UI_CLIP_COPY);
+    CHECK(s_state.clip_count == 1);
+
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:data/sub");
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.selected == UI_ACTION_PASTE);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(command(UI_CMD_RUN_ACTION) != NULL);
+
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 1);
+    s_state.actions.selected = UI_ACTION_DELETE;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(command(UI_CMD_RUN_ACTION) != NULL);
 }
 
 static void test_delete_confirm_items(void)
@@ -597,7 +776,7 @@ static void test_delete_confirm_items(void)
     send_key(UI_KEY_SQUARE);
     send_key(UI_KEY_DOWN);
     send_key(UI_KEY_SQUARE);
-    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_TRIANGLE);
     s_state.actions.selected = UI_ACTION_DELETE;
     s_state.actions.enabled[UI_ACTION_DELETE] = 1;
     send_key(UI_KEY_CROSS);
@@ -606,8 +785,8 @@ static void test_delete_confirm_items(void)
     CHECK(s_state.confirm.item_count == 2);
     CHECK(strcmp(s_state.confirm.title, "DELETE 2 ITEMS") == 0);
     CHECK(s_state.confirm.items != NULL);
-    CHECK(strcmp(s_state.confirm.items[0].name, "folder") == 0);
-    CHECK(strcmp(s_state.confirm.items[1].name, "A.TXT") == 0);
+    CHECK(strcmp(s_state.confirm.items[0].name, "ux0:data/folder") == 0);
+    CHECK(strcmp(s_state.confirm.items[1].name, "ux0:data/A.TXT") == 0);
 }
 
 static void test_sites_scroll(void)
@@ -618,7 +797,7 @@ static void test_sites_scroll(void)
         snprintf(s_state.sites.rows[i].name,
                  sizeof(s_state.sites.rows[i].name), "SITE%d", i);
     }
-    send_key(UI_KEY_TRIANGLE);
+    send_key(UI_KEY_SELECT);
     for (int i = 0; i < 7; ++i)
         send_key(UI_KEY_DOWN);
     CHECK(s_state.sites.selected == 6);
@@ -683,7 +862,7 @@ static void test_dock_cancel_and_site_delete(void)
 
     reset();
     s_state.sites.count = 2;
-    send_key(UI_KEY_TRIANGLE);
+    send_key(UI_KEY_SELECT);
     send_key(UI_KEY_SELECT);
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
     CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE_SITE);
@@ -692,7 +871,7 @@ static void test_dock_cancel_and_site_delete(void)
     CHECK(s_state.screen == UI_SCREEN_SITES);
 
     send_key(UI_KEY_CIRCLE);
-    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_TRIANGLE);
     CHECK(s_state.screen == UI_SCREEN_ACTIONS);
     send_key(UI_KEY_DOWN);
     CHECK(s_state.actions.selected == UI_ACTION_MOVE);
@@ -821,6 +1000,303 @@ static void test_remote_volume_marks(void)
     CHECK(mark_count(UI_PANE_REMOTE) == 1);
 }
 
+static void test_remote_actions_availability(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    CHECK(s_state.active_pane == UI_PANE_REMOTE);
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    CHECK(s_state.actions.pane == UI_PANE_REMOTE);
+    CHECK(s_state.actions.enabled[UI_ACTION_DISCONNECT] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_REFRESH] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DOWNLOAD], "NO SELECTION") ==
+          0);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 1);
+
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].connected = 0;
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_DISCONNECT] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DISCONNECT],
+                 "NOT CONNECTED") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_REFRESH] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_REFRESH], "NOT CONNECTED") ==
+          0);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_NEW_FOLDER],
+                 "NOT CONNECTED") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    s_state.panes[UI_PANE_REMOTE].loading = 1;
+    CHECK(ui_state_selected_row(&s_state, UI_PANE_REMOTE) == NULL);
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DOWNLOAD], "READING") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_REFRESH] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_REFRESH], "READING") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DISCONNECT] == 1);
+
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 1;
+    s_state.panes[UI_PANE_REMOTE].loading = 1;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_UPLOAD], "REMOTE READING") ==
+          0);
+}
+
+static void test_remote_disconnect_action(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    snprintf(s_state.panes[UI_PANE_REMOTE].path,
+             sizeof(s_state.panes[UI_PANE_REMOTE].path), "/SUB");
+    send_key(UI_KEY_TRIANGLE);
+    s_state.actions.selected = UI_ACTION_DISCONNECT;
+    send_key(UI_KEY_CROSS);
+
+    CHECK(command(UI_CMD_RUN_ACTION) != NULL);
+    CHECK(command(UI_CMD_RUN_ACTION)->action == UI_ACTION_DISCONNECT);
+    CHECK(command(UI_CMD_RUN_ACTION)->pane == UI_PANE_REMOTE);
+    CHECK(s_state.panes[UI_PANE_REMOTE].connected == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].row_count == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].rows == NULL);
+    CHECK(s_state.panes[UI_PANE_REMOTE].site[0] == '\0');
+    CHECK(s_state.site_known == 0);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(strcmp(s_state.status, "DISCONNECTED") == 0);
+    CHECK(mark_count(UI_PANE_REMOTE) == 0);
+}
+
+static void test_remote_delete_confirm_and_type(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 1; /* REMOTE, a directory */
+    send_key(UI_KEY_TRIANGLE);
+    s_state.actions.selected = UI_ACTION_DELETE;
+    send_key(UI_KEY_CROSS);
+
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
+    CHECK(s_state.confirm.item_count == 1);
+    if (s_state.confirm.item_count == 1)
+        CHECK(strcmp(s_state.confirm.local_paths[0], "/REMOTE") == 0);
+
+    s_state.confirm.choice_focus = 1; /* DELETE */
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_RUN_ACTION) != NULL);
+    CHECK(command(UI_CMD_RUN_ACTION)->action == UI_ACTION_DELETE);
+    CHECK(command(UI_CMD_RUN_ACTION)->pane == UI_PANE_REMOTE);
+    CHECK(command(UI_CMD_RUN_ACTION)->source_type == UI_ROW_DIR);
+    CHECK(strcmp(command(UI_CMD_RUN_ACTION)->path, "/REMOTE") == 0);
+}
+
+static void test_remote_error_clears_reading(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].loading = 1;
+    snprintf(s_state.panes[UI_PANE_REMOTE].pending_path,
+             sizeof(s_state.panes[UI_PANE_REMOTE].pending_path), "/NEXT");
+
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_ERROR;
+    event.pane = UI_PANE_REMOTE;
+    snprintf(event.text, sizeof(event.text), "CWD FAILED");
+    send_event(&event);
+
+    CHECK(s_state.panes[UI_PANE_REMOTE].loading == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].pending_path[0] == '\0');
+    CHECK(s_state.panes[UI_PANE_REMOTE].connected == 1);
+    CHECK(strcmp(s_state.panes[UI_PANE_REMOTE].error, "CWD FAILED") == 0);
+    CHECK(strcmp(s_state.status, "CWD FAILED") == 0);
+}
+
+static void test_session_lost_clears_identity(void)
+{
+    reset();
+    snprintf(s_state.panes[UI_PANE_REMOTE].site,
+             sizeof(s_state.panes[UI_PANE_REMOTE].site), "OLD");
+    snprintf(s_state.site_host, sizeof(s_state.site_host), "old.example");
+    s_state.site_port = 21;
+    s_state.site_known = 1;
+    s_state.panes[UI_PANE_REMOTE].loading = 1;
+    s_state.screen = UI_SCREEN_ACTIONS;
+    s_state.active_pane = UI_PANE_REMOTE;
+
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_SESSION_LOST;
+    event.pane = UI_PANE_REMOTE;
+    snprintf(event.text, sizeof(event.text), "CONTROL CONNECTION LOST");
+    send_event(&event);
+
+    CHECK(s_state.panes[UI_PANE_REMOTE].connected == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].session_lost == 1);
+    CHECK(s_state.panes[UI_PANE_REMOTE].loading == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].site[0] == '\0');
+    CHECK(s_state.site_known == 0);
+    CHECK(s_state.site_host[0] == '\0');
+    CHECK(s_state.panes[UI_PANE_REMOTE].row_count == 3); /* R3 keeps rows */
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+}
+
+static void test_remote_marks_pruned(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 2; /* B.BIN */
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+
+    /* The same remote folder is listed without B.BIN. */
+    UiRow without[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "REMOTE", .type = UI_ROW_DIR},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_REMOTE, without, 2, 0);
+    CHECK(mark_count(UI_PANE_REMOTE) == 0);
+
+    /* A mark in another remote folder survives a root listing. */
+    s_state.panes[UI_PANE_REMOTE].path[0] = '\0';
+    snprintf(s_state.panes[UI_PANE_REMOTE].path,
+             sizeof(s_state.panes[UI_PANE_REMOTE].path), "/SUB");
+    UiRow sub[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "KEEP.BIN", .type = UI_ROW_FILE},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_REMOTE, sub, 2, 0);
+    s_state.panes[UI_PANE_REMOTE].selected = 1;
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+    snprintf(s_state.panes[UI_PANE_REMOTE].path,
+             sizeof(s_state.panes[UI_PANE_REMOTE].path), "/");
+    ui_state_set_rows(&s_state, UI_PANE_REMOTE, s_remote_rows, 3, 0);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+}
+
+static void test_remote_multi_download(void)
+{
+    reset();
+    UiRow rows[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "ONE.TXT", .type = UI_ROW_FILE, .size = 3, .size_known = 1},
+        {.name = "TWO.TXT", .type = UI_ROW_FILE, .size = 5, .size_known = 1},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_REMOTE, rows, 3, 0);
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 1;
+    send_key(UI_KEY_SQUARE);
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_REMOTE) == 2);
+
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.selected == UI_ACTION_DOWNLOAD);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 2);
+    for (int i = 0; i < s_command_count; ++i) {
+        CHECK(s_commands[i].type == UI_CMD_RUN_ACTION);
+        CHECK(s_commands[i].action == UI_ACTION_DOWNLOAD);
+        CHECK(s_commands[i].pane == UI_PANE_REMOTE);
+    }
+    CHECK(strcmp(s_commands[0].path, "/ONE.TXT") == 0);
+    CHECK(strcmp(s_commands[1].path, "/TWO.TXT") == 0);
+    CHECK(strcmp(s_commands[0].path2, "ux0:data") == 0);
+    CHECK(s_commands[0].total == 3 && s_commands[0].total_known == 1);
+    CHECK(s_commands[1].total == 5 && s_commands[1].total_known == 1);
+}
+
+static void test_remote_marked_dir_delete_type(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 1; /* REMOTE, a directory */
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+
+    send_key(UI_KEY_TRIANGLE);
+    s_state.actions.selected = UI_ACTION_DELETE;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    s_state.confirm.choice_focus = 1;
+    send_key(UI_KEY_CROSS);
+
+    CHECK(command(UI_CMD_RUN_ACTION) != NULL);
+    CHECK(command(UI_CMD_RUN_ACTION)->action == UI_ACTION_DELETE);
+    CHECK(command(UI_CMD_RUN_ACTION)->source_type == UI_ROW_DIR);
+    CHECK(strcmp(command(UI_CMD_RUN_ACTION)->path, "/REMOTE") == 0);
+}
+
+static void test_remote_refresh_action(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_REFRESH] == 1);
+    s_state.actions.selected = UI_ACTION_REFRESH;
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_REFRESH) != NULL);
+    CHECK(command(UI_CMD_REFRESH)->pane == UI_PANE_REMOTE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+}
+
+static void test_remote_unsafe_and_folder(void)
+{
+    reset();
+    UiRow rows[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "A/B", .type = UI_ROW_FILE, .size = 1, .unsafe = 1},
+        {.name = "FOLDER", .type = UI_ROW_DIR},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_REMOTE, rows, 3, 0);
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 1;
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DOWNLOAD], "UNSAFE NAME") ==
+          0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DELETE], "UNSAFE NAME") ==
+          0);
+    send_key(UI_KEY_CIRCLE);
+
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 0);
+    CHECK(strcmp(s_state.status, "UNSAFE NAME") == 0);
+
+    /* A folder is refused, never sent as one RETR. */
+    reset();
+    UiRow folder[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "FOLDER", .type = UI_ROW_DIR},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_REMOTE, folder, 2, 0);
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 1;
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DOWNLOAD],
+                 "FOLDER NOT SUPPORTED") == 0);
+
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 1; /* folder */
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_UPLOAD],
+                 "FOLDER NOT SUPPORTED") == 0);
+}
+
 int main(void)
 {
     test_workspace_nav();
@@ -832,12 +1308,26 @@ int main(void)
     test_confirm();
     test_high_risk_action();
     test_action_ime_and_risk();
+    test_local_actions_inside_volume_root();
+    test_actions_no_selection();
+    test_marks_pruned_after_delete();
+    test_action_returns_to_workspace();
     test_delete_confirm_items();
     test_sites_scroll();
     test_confirm_busy_guard();
     test_dock_cancel_and_site_delete();
     test_listing_and_dock();
     test_remote_volume_marks();
+    test_remote_marks_pruned();
+    test_remote_actions_availability();
+    test_remote_disconnect_action();
+    test_remote_refresh_action();
+    test_remote_delete_confirm_and_type();
+    test_remote_marked_dir_delete_type();
+    test_remote_multi_download();
+    test_remote_unsafe_and_folder();
+    test_remote_error_clears_reading();
+    test_session_lost_clears_identity();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_uistate: %d failure(s)\n", s_failures);

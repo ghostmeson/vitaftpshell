@@ -38,6 +38,10 @@ void draw_begin_frame(void)
 void draw_present(void)
 {
     vita2d_end_drawing();
+    /* The system IME is a common-dialog overlay. It only advances while the
+     * app supplies the current framebuffer; the SDK's IME sample calls this
+     * every frame. It is harmless when no dialog is active. */
+    (void)vita2d_common_dialog_update();
     vita2d_swap_buffers();
 }
 

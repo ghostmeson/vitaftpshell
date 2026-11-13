@@ -54,7 +54,9 @@ static void card_draw(const UiState *state, const LayoutRect *r)
                         : (site->password_set ? "STORED" : "NOT SET"),
                     928.0f, 130.0f, PX_LABEL, C_WHITE);
 
-    if (sites->login_failed) {
+    if (sites->connecting) {
+        font_text("CONNECTING...", 32.0f, 160.0f, PX_MICRO, C_CYAN);
+    } else if (sites->login_failed) {
         char footer[192];
         char fitted_footer[192];
         snprintf(footer, sizeof(footer), "LOGIN FAILED  -  %s",

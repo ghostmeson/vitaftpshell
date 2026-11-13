@@ -50,13 +50,17 @@ static void pane_frame(const LayoutRect *r, int active)
 
 static int pane_risk(const UiRow *row)
 {
-    return row->risk != 0;
+    return row->risk != 0 || row->unsafe != 0;
 }
 
 static int row_path(UiPane pane, const UiPaneState *pane_state,
                     const char *name, char *out, size_t cap)
 {
     if (pane == UI_PANE_LOCAL) {
+        if (strcmp(pane_state->path, "*") == 0) {
+            int n = snprintf(out, cap, "%s", name);
+            return n > 0 && (size_t)n < cap;
+        }
         Path joined;
         if (path_join(pane_state->path, name, &joined) != PATH_OK)
             return 0;
@@ -120,7 +124,9 @@ static void band(const UiState *state, UiPane pane, const LayoutRect *r)
     }
 
     if (pane == UI_PANE_LOCAL) {
-        font_text(p->path, (float)r->x + PANE_INSET,
+        const char *path_text = strcmp(p->path, "*") == 0 ? "ALL DRIVES"
+                                                          : p->path;
+        font_text(path_text, (float)r->x + PANE_INSET,
                   (float)r->y + PANE_PATH_Y, PX_MICRO, path_color);
         if (p->free_known) {
             char free_text[32];
@@ -187,6 +193,8 @@ static void row_draw(const UiState *state, UiPane pane, const LayoutRect *r,
         snprintf(value, sizeof(value), "UP");
     } else if (row->type == UI_ROW_DIR) {
         snprintf(value, sizeof(value), "DIR");
+    } else if (row->type == UI_ROW_VOLUME) {
+        snprintf(value, sizeof(value), "DRIVE");
     } else {
         fmt_size(value, sizeof(value), row->size, row->size_known);
         value_color = row->size_known ? C_WHITE : C_DIM;
@@ -200,7 +208,8 @@ static void row_draw(const UiState *state, UiPane pane, const LayoutRect *r,
     char fitted[PATH_NAME_MAX + 4];
     font_fit(row->name, PX_LABEL, name_max, fitted, sizeof(fitted));
 
-    uint32_t name_color = row->type == UI_ROW_UP ? C_DIM : C_WHITE;
+    uint32_t name_color =
+        row->type == UI_ROW_UP ? C_DIM : C_WHITE;
     font_text(fitted, name_x, row_y + 8.0f, PX_LABEL, name_color);
     font_text_right(value, value_right, row_y + 11.5f, PX_MICRO, value_color);
 }
@@ -235,9 +244,10 @@ static void rows_draw(const UiState *state, UiPane pane, const LayoutRect *r)
     }
 }
 
-static void centered_state(UiPane pane, const LayoutRect *r)
+static void centered_state(const UiState *state, UiPane pane,
+                           const LayoutRect *r)
 {
-    (void)pane;
+    const UiPaneState *p = &state->panes[pane];
     float x = (float)r->x;
     float w = (float)r->w;
     float top = (float)r->y + PANE_ROWS_Y;
@@ -245,8 +255,14 @@ static void centered_state(UiPane pane, const LayoutRect *r)
     float y = top + (bottom - top) * 0.5f - 20.0f;
 
     ui_center("SESSION LOST", x, w, y, PX_LABEL, C_YELLOW);
-    ui_center("THE SERVER CLOSED THE CONTROL CHANNEL", x, w, y + 22.0f,
-              PX_MICRO, C_DIM);
+
+    char fitted[128];
+    const char *detail = p->error[0] != '\0'
+                             ? p->error
+                             : "THE SERVER CLOSED THE CONTROL CHANNEL";
+    font_fit(detail, PX_MICRO, w - 2.0f * PANE_INSET, fitted,
+             sizeof(fitted));
+    ui_center(fitted, x, w, y + 22.0f, PX_MICRO, C_DIM);
 
     const char *keys = "X RECONNECT  O DISMISS";
     float kw = font_width(keys, PX_MICRO);
@@ -257,11 +273,16 @@ static void centered_state(UiPane pane, const LayoutRect *r)
               PX_MICRO, C_WHITE);
 }
 
-static void not_connected(const LayoutRect *r)
+static void not_connected(const UiState *state, const LayoutRect *r)
 {
     float x = (float)r->x;
     float w = (float)r->w;
     float y = (float)r->y + 150.0f;
+    if (state->sites.connecting) {
+        ui_center("CONNECTING", x, w, y, PX_LABEL, C_YELLOW);
+        ui_center("PLEASE WAIT", x, w, y + 24.0f, PX_MICRO, C_DIM);
+        return;
+    }
     ui_center("NOT CONNECTED", x, w, y, PX_LABEL, C_DIM);
     ui_center("TRIANGLE SITES TO CONNECT", x, w, y + 24.0f, PX_MICRO,
               C_DIM);
@@ -276,12 +297,17 @@ static void pane_draw(const UiState *state, UiPane pane, const LayoutRect *r)
     band(state, pane, r);
 
     if (p->session_lost) {
-        centered_state(pane, r);
+        centered_state(state, pane, r);
+    } else if (pane == UI_PANE_REMOTE && !p->connected) {
+        not_connected(state, r);
     } else if (p->loading) {
         ui_center("READING", (float)r->x, (float)r->w,
                   (float)r->y + 180.0f, PX_LABEL, C_WHITE);
-    } else if (pane == UI_PANE_REMOTE && !p->connected) {
-        not_connected(r);
+    } else if (p->empty && p->error[0] != '\0') {
+        ui_center("LISTING FAILED", (float)r->x, (float)r->w,
+                  (float)r->y + 170.0f, PX_LABEL, C_YELLOW);
+        font_text(p->error, (float)r->x + PANE_INSET,
+                  (float)r->y + 210.0f, PX_MICRO, C_DIM);
     } else if (p->empty) {
         ui_center("EMPTY FOLDER", (float)r->x, (float)r->w,
                   (float)r->y + 180.0f, PX_LABEL, C_DIM);
@@ -296,7 +322,7 @@ static void legend_standard(void)
     x = ui_keycap("X", "OPEN/SEND", x, 510.0f);
     x = ui_keycap("O", "UP", x, 510.0f);
     x = ui_keycap("SQUARE", "MARK", x, 510.0f);
-    x = ui_keycap("TRIANGLE", "SITES", x, 510.0f);
+    x = ui_keycap("TRIANGLE", "ACTIONS", x, 510.0f);
     font_text("L/R", x, 512.0f, PX_MICRO, C_DIM);
     x += font_width("L/R", PX_MICRO) + 6.0f;
     font_text("PANE", x, 512.0f, PX_MICRO, C_DIM);
@@ -307,7 +333,7 @@ static void legend_standard(void)
     x += font_width("SERVER", PX_MICRO) + 20.0f;
     font_text("SELECT", x, 512.0f, PX_MICRO, C_DIM);
     x += font_width("SELECT", PX_MICRO) + 6.0f;
-    font_text("ACTIONS", x, 512.0f, PX_MICRO, C_DIM);
+    font_text("SITES", x, 512.0f, PX_MICRO, C_DIM);
 }
 
 static void legend_reconnect(void)
@@ -325,7 +351,7 @@ static void legend_reconnect(void)
     x += font_width("SERVER", PX_MICRO) + 20.0f;
     font_text("SELECT", x, 512.0f, PX_MICRO, C_DIM);
     x += font_width("SELECT", PX_MICRO) + 6.0f;
-    font_text("ACTIONS", x, 512.0f, PX_MICRO, C_DIM);
+    font_text("SITES", x, 512.0f, PX_MICRO, C_DIM);
 }
 
 void workspace_draw(const UiState *state)

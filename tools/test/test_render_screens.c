@@ -274,7 +274,11 @@ static void test_actions(void)
     s_state.screen = UI_SCREEN_ACTIONS;
     s_state.active_pane = UI_PANE_LOCAL;
     snprintf(s_state.panes[UI_PANE_LOCAL].path,
-             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:");
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "*");
+    static const UiRow volume_rows[] = {
+        {.name = "ux0:", .type = UI_ROW_VOLUME},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, volume_rows, 1, 0);
     s_state.panes[UI_PANE_LOCAL].selected = 0;
     ui_actions_prepare(&s_state);
     render();
@@ -293,6 +297,8 @@ static void test_actions(void)
     CHECK(trace_text_at("NEW FOLDER", 50.0f, 174.0f));
     CHECK(trace_text_at("RENAME", 50.0f, 218.0f));
     CHECK(trace_text_at("DELETE", 50.0f, 262.0f));
+    CHECK(trace_text_at("REFRESH", 50.0f, 306.0f));
+    CHECK(trace_text_at("DISCONNECT", 50.0f, 350.0f));
 }
 
 static void test_server(void)

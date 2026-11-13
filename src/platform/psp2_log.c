@@ -10,14 +10,16 @@
 
 /*
  * The one adapter that writes the session log. It appends one whole line, or
- * refuses it; at 64 KiB it asks the caller to rotate once. The data folder is
- * created by the worker, so an open failure here is a normal LOG_ERROR and not
- * a reason to mkdir.
+ * refuses it; at 256 KiB it asks the caller to rotate once. Three generations
+ * are kept: session.log, session.old.log, and session.old2.log. The data folder
+ * is created by the worker, so an open failure here is a normal LOG_ERROR and
+ * not a reason to mkdir.
  */
 
 #define PSP2_LOG_PATH "ux0:data/vitaFTPShell/session.log"
 #define PSP2_LOG_OLD_PATH "ux0:data/vitaFTPShell/session.old.log"
-#define PSP2_LOG_CAP 65536u
+#define PSP2_LOG_OLD2_PATH "ux0:data/vitaFTPShell/session.old2.log"
+#define PSP2_LOG_CAP 262144u
 #define PSP2_LOG_FILE_MODE 0666
 #define PSP2_LOG_NEWLINE "\n"
 
@@ -116,9 +118,17 @@ static LogResult log_rotate(void *ctx)
     SceIoStat stat;
     memset(&stat, 0, sizeof(stat));
 
+    int old2_rc = sceIoGetstat(PSP2_LOG_OLD2_PATH, &stat);
+    if (old2_rc >= 0) {
+        if (sceIoRemove(PSP2_LOG_OLD2_PATH) < 0)
+            return LOG_ERROR;
+    } else if (!log_error_is(old2_rc, ENOENT)) {
+        return LOG_ERROR;
+    }
+
     int old_rc = sceIoGetstat(PSP2_LOG_OLD_PATH, &stat);
     if (old_rc >= 0) {
-        if (sceIoRemove(PSP2_LOG_OLD_PATH) < 0)
+        if (sceIoRename(PSP2_LOG_OLD_PATH, PSP2_LOG_OLD2_PATH) < 0)
             return LOG_ERROR;
     } else if (!log_error_is(old_rc, ENOENT)) {
         return LOG_ERROR;

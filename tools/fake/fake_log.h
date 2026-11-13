@@ -7,7 +7,7 @@
 
 #include "platform/log.h"
 
-#define FAKE_LOG_LINES 64
+#define FAKE_LOG_LINES 256
 #define FAKE_LOG_LINE_MAX 4096
 
 void fake_log_reset(void);

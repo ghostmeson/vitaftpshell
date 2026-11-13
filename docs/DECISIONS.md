@@ -985,3 +985,438 @@ app reports `TEXT ENTRY UNAVAILABLE` and the field is unchanged.
 
 **Consequences:** U14 may need to change the init order or load the IME module;
 that change stays in the adapter and never reaches policy.
+
+## D53. The local pane opens at ALL DRIVES; Triangle/Select swap
+
+**Date:** 2026-11-10
+**Status:** accepted; supersedes R2's default local path for the v1 workspace and
+the DESIGN input table's Triangle/Select bindings.
+
+**Context:** The first hardware session showed that starting inside `ux0:data`
+made the console feel like a folder view rather than a file manager, and the
+user asked for VitaShell's all-drives root. The same session found the settled
+Triangle/Select bindings backwards for the user's hands.
+
+**Decision:** The local pane always opens at a virtual root that lists the
+mounted `ux0:`, `ur0:`, and `uma0:` volumes. Entering a volume shows its root;
+Circle from a volume root returns to `ALL DRIVES`. The virtual root disables
+copy, move, rename, delete, and new folder; a volume root keeps new folder as
+its only action. Triangle opens ACTIONS and Select opens SITES in the
+WORKSPACE; the SITES screen's own Triangle (new site) and Select (delete) are
+unchanged. The workspace legend follows the new bindings. A download whose
+local destination is the virtual root lands in `ux0:data` when it exists,
+otherwise the first mounted volume root.
+
+**Consequences:** The last local path is still saved but is not the startup
+view. The local pane shows a `DRIVE` value for a volume row. A transfer from
+the remote pane at the virtual root has a real destination instead of a
+synthetic path. R2's "last local path" startup rule is deferred until a
+settings surface exists.
+
+## D54. The session log is always-on, structured, and diagnostics-first
+
+**Date:** 2026-11-10
+**Status:** accepted; supersedes the 64 KiB, one-generation log in D39.
+
+**Context:** The first hardware session produced a 9-line log that could not
+explain a folder listing, a failed connection, or a server start. The user
+asked for a log that records the app, its actions, button presses, what they
+did, and every error, so a user can upload it for diagnosis.
+
+**Decision:** The log is always on and records structured events for:
+app start/stop with version and build; screen changes; every button edge (not
+repeat ticks); every command emitted and received; IME begin/result/cancel
+with field name and masked flag, never the value; local and remote listing
+begin/open/read/end with path and count; queue enqueue/depth; transfer
+start/done/fail with bytes, total, cause, and stage; connect/login/failure with
+stage and cause; server start/stop/client; site/settings saves; and every
+error with a mapped reason. The log keeps 256 KiB per file and three
+generations: `session.log`, `session.old.log`, `session.old2.log`.
+
+The app never writes the log directly. It pushes fixed `HandoffLogRecord`
+entries to the worker, which is the one writer; a full log ring counts the lost
+entries and writes a `log` event with the count. Passwords, IME values, and raw
+server reply text never enter a record. A server-class error logs
+`server reply withheld` instead of the reply text. Paths, site names, and hosts
+remain, because they are the diagnostic context the user asked for.
+
+**Consequences:** A normal session writes more often to `ux0:data`; the log is
+unencrypted and contains paths and site names. The session log is now three
+files; a user should upload all three. A button sequence that is not in the
+current file may be in `session.old.log` or `session.old2.log`.
+
+## D55. Listings apply inside the begin/end pair; actions report in the workspace
+
+**Date:** 2026-11-10
+**Status:** accepted; governs the listing handoff and the file-manager action
+feedback.
+
+**Context:** The first b18 hardware session showed folders and files, but every
+file action appeared dead. The host integration test found two independent
+causes. First, the action ledger treated the *pane path* as the protected item,
+so at `ux0:` every selected child inherited `VOLUME ROOT` and copy, move,
+rename, and delete were disabled. Second, a run stayed on ACTIONS, which has no
+status line, so a refused plan, a failed delete, and a successful operation all
+looked identical. While reproducing this, the test also exposed a listing race:
+the worker publishes rows on one channel and events on another, so the app
+could apply a new listing before draining its begin event; the later begin then
+cleared the rows and left an EMPTY folder.
+
+**Decision:** The action lock follows the selected item, not the folder, so a
+child of a volume root is actionable while the root itself is not. Running an
+action leaves ACTIONS for WORKSPACE, where the transfer dock shows progress and
+the result; a confirmation returns to WORKSPACE after its run. The idle dock's
+third line shows `state->status` in yellow until the next key, on both
+WORKSPACE and ACTIONS. A published listing is applied when its end event is
+drained, after the begin event that cleared the pane and before the end event
+that clears `READING`; the rows and the event therefore stay in one order.
+
+**Consequences:** The local pane no longer disables every file action at a
+volume root. A disabled action or a worker error is visible without leaving the
+ledger, and an action that runs is visible in the dock. The listing handoff has
+one apply point; a future second apply path would reintroduce the empty-folder
+race and needs a new decision.
+
+## D56. The IME follows the SDK sample, and its failure code is logged
+
+**Date:** 2026-11-11
+**Status:** accepted; closes the IME initialization order left open in AGENTS.md.
+
+**Context:** The b18 session log shows five `command cmd=open_ime` entries each
+followed by `ime cmd=begin detail=unavailable`. New folder and rename cannot
+work without the system text entry. The adapter had four differences from the
+IME sample shipped in `vitasdk/share/gcc-arm-vita-eabi/samples/ime`:
+
+- it did not call `sceAppUtilInit` before `sceCommonDialogSetConfigParam`;
+- it left `SceImeDialogParam.supportedLanguages` at zero and `languagesForced`
+  false;
+- it did not call `sceCommonDialogUpdate` (the sample uses
+  `vita2d_common_dialog_update`) every frame, so the dialog cannot advance;
+- it treated `SCE_COMMON_DIALOG_STATUS_NONE` immediately after init as an error.
+
+**Decision:** The IME adapter follows the sample: apputil init first, a
+common-dialog config with a concrete English/CROSS value instead of the
+`MAX_VALUE` sentinels, `SCE_IME_LANGUAGE_ENGLISH` with `languagesForced`, and a
+short NONE grace. `draw_present` calls `vita2d_common_dialog_update` every
+frame. `TextInputPort` gains `last_error`, a plain integer the app writes to
+the session log; policy never interprets it. The typed value, the password
+flag, and the field title still follow the D54 rules: no value is logged.
+
+**Consequences:** `SceAppUtil_stub` is linked. `src/gfx/draw.c` remains the only
+file that includes `vita2d.h`; the IME adapter does not reach into the renderer.
+The sample sequence and the NONE grace are `[C]` until the b20 run proves them;
+the raw error code makes the next failure classifiable instead of another
+`unavailable`.
+
+## D57. The worker runs on a 128 KiB stack and fsop_run keeps a small frame
+
+**Date:** 2026-11-12
+**Status:** accepted; fixes the b20 rename crash.
+
+**Context:** The complete b20 core shows the app worker thread, named `pthread`,
+stopping with `0x30004` (data abort) at `fsop_run+0x16`, called from `run_plan`.
+The `STACK_INFO` note gives the worker stack `0x4d2c` (19,756 bytes); the b20
+`fsop_run` frame was `0x4c54` (19,540 bytes). The compiler had inlined
+`run_copy_file`'s 8 KiB buffer into `fsop_run`, so a rename that copies nothing
+still reserved most of the worker stack. The host tests ran `fsop_run` on the
+main test thread's large stack, so they could not see it.
+
+**Decision:** The worker is created with a 128 KiB stack through
+`pthread_attr_setstacksize`; if the attribute or the size is refused, the app
+falls back to the pthread default. `run_copy_file` is `noinline`, so its copy
+buffer exists only during an actual copy. The rollback-index array uses
+`uint16_t` because `FSOP_ROLLBACK_MAX` is 2048. The resulting b21 frames are
+about 5,476 bytes for `fsop_run` and 11,324 bytes for `run_copy_file`.
+
+**Consequences:** The worker costs 128 KiB of memory, which is small against the
+listing arena. The stack-size request is a `[C]` platform claim until the b21 run
+shows it; the fallback keeps the app starting if the Vita refuses it. The
+`fsop_run` frame is now a budgeted resource: a future 8 KiB local array in that
+function would reintroduce the bug, and the copy buffer must stay in its own
+function. Host tests still do not reproduce a small worker stack; the core dump
+is the evidence for this class of defect.
+
+## D58. "No selection" is not the current folder
+
+**Date:** 2026-11-12
+**Status:** accepted; supersedes the implicit fallback in D55's action source.
+
+**Context:** The b21 run made rename work, then showed that inside a folder the
+ACTIONS ledger still offered copy, move, upload, rename, and delete with the
+cursor on `..`. `ui_actions_prepare` fell back to `pane->path` when there was no
+row, so those actions targeted the folder the user was standing in. In an empty
+folder this made the folder itself the delete/rename target.
+
+**Decision:** `UiActions` carries `has_selection`, true for any selected row
+other than `..` or for any marked item. With no selection, copy, move, upload,
+download, rename, and delete are disabled with `NO SELECTION`; NEW FOLDER is the
+only live action and still creates in the current folder. The ledger path names
+the current folder for context, but the target panel says `NO SELECTION` and the
+dock shows the selected action's reason. `handle_actions_key` refuses a
+non-new-folder action if `has_selection` is false, even if an enabled flag was
+forced.
+
+**Consequences:** The cursor on `..` no longer makes the current folder a file
+target. Marks remain a selection for copy, move, and delete even when the cursor
+is on `..` (D18/D27). NEW FOLDER keeps the current folder as its destination, so
+it remains available in an empty folder. A future action that needs the current
+folder without a selection must be added to the explicit NEW FOLDER exemption.
+
+## D59. The advertised address is host order; free space is a device query
+
+**Date:** 2026-11-12
+**Status:** accepted; fixes the b22 server-address and card-warning defects.
+
+**Context:** The b22 SERVER panel showed `192.29.168.192` while the console's
+system TTY recorded `192.168.29.192`; the PC `nc` and FileZilla both timed out.
+`psp2_net.c` stored `inet_pton`'s network-order result directly in
+`NetAddress.addr`, but the port's convention is host order everywhere else
+(`net_connect` applies `htonl`). In the same run the Vita warned about the memory
+card after the server started. The worker was calling `sceIoDevctl(0x3001)` for
+free space on every subfolder, including `ur0:` and `uma0:`. VitaShell's FTP
+library uses `INADDR_ANY`, a 128-connection backlog, and a 4 MiB net pool; its
+file browser queries free space on the device entry, not each folder.
+
+**Decision:** `net_link` converts the resolver result with `ntohl` before it
+becomes a `NetAddress`. The net pool is 4 MiB and the listener backlog is 128,
+matching `ftpvitalib`. Free space is a per-volume value: the worker caches it,
+queries at the volume root or on first use, and the adapter queries only `ux0:`
+(devctl `0x3001`, then `sceAppMgrGetDevInfo`); `ur0:` and `uma0:` report unknown
+and the UI renders `--`.
+
+**Consequences:** The SERVER panel shows the address the console actually has,
+so a PC can reach the control port. Other volumes lose a free-space number but
+no longer trigger repeated card-slot devctl calls. The PASV data listener is
+still `control+1`; VitaShell creates an ephemeral PASV socket per command. If
+the control connection works but PASV does not, that is the next server change.
+The control accept still uses the non-blocking `select` on the worker; if it
+does not accept at the corrected address, the fallback is `ftpvitalib`'s
+blocking accept on a dedicated thread.
+
+## D60. Local COPY/MOVE use a clipboard and PASTE
+
+**Date:** 2026-11-12
+**Status:** accepted; supersedes D27's same-folder destination for local
+COPY/MOVE.
+
+**Context:** The b23 run made FTP work and exposed the file-manager actions.
+COPY/MOVE always used the current folder as the destination. A MOVE therefore
+targeted the folder the source was already in, and a COPY offered to overwrite
+its own source. The user could not choose a destination at all. VitaShell's file
+manager solves this with a copy/cut list and a paste action.
+
+**Decision:** COPY and MOVE do not touch the filesystem. They freeze the marked
+paths (maximum 64) into a local clipboard and return to WORKSPACE. The user
+navigates to the destination; ACTIONS then shows PASTE first and CLEAR second
+instead of COPY/MOVE. PASTE runs one COPY or MOVE command per clipboard path
+into the current folder. A same-folder MOVE is disabled with `ALREADY HERE`; a
+same-folder COPY is allowed and uses a free copy name. The clipboard is
+independent of the marks and survives volume changes. CLEAR discards it.
+
+**Consequences:** Local copy/move is a two-step action, as in VitaShell. The
+67th mark cannot be armed; the UI reports `TOO MANY ITEMS`. Cross-pane movement
+remains UPLOAD/DOWNLOAD, not COPY/MOVE. A clipboard source that is deleted before
+PASTE fails safely with `SOURCE NOT FOUND`. The marks remain the visible
+selection; the clipboard is a separate frozen list.
+
+## D61. Destructive confirmations name every full path and are the only gate
+
+**Date:** 2026-11-12
+**Status:** accepted; hardens the DELETE flow.
+
+**Context:** The DELETE confirmation could list already-deleted marks because
+marks survived a completed delete. It showed bare names, so marks from different
+folders were ambiguous. A high-risk delete replaced the item list with a
+path-only high-risk dialog, so the user approved a set they could not see.
+
+**Decision:** Marks are pruned against the listing that replaces them: a mark
+whose parent is the listed folder and whose row is gone is removed; marks in
+other folders survive (D18). DELETE always opens one `UI_CONFIRM_DELETE` with the
+full path of every source, `high_risk` set if any source is high-risk, the risk
+path, and the full list. The choice focus starts on CANCEL; the DELETE choice
+sets `value=1` for the worker so the approved high-risk plan runs without a
+second confirmation. `boot_config.txt` and protected paths are refused before
+the dialog; the worker repeats the check. The dock direction for a delete is
+`DELETE`.
+
+**Consequences:** The next delete cannot silently include a previous one. A
+cross-folder marked set is named by full path. A high-risk delete still requires
+the DELETE choice but shows the items. A delete of a folder shows `DIR` for that
+row and the full path; the worker's recursive plan remains the authority, and
+the warning says the operation cannot be undone.
+
+## D62. The FTP client gets a real connect window and names its failure
+
+**Date:** 2026-11-12
+**Status:** accepted; first FTP-client diagnostic decision.
+
+**Context:** The only seeded site, `ftp.gnu.org:21`, is healthy: from the Mac,
+`nc -vz ftp.gnu.org 21` succeeds and `curl ftp://ftp.gnu.org/` receives
+`220 GNU FTP server ready.` followed by anonymous `230`. The b18 Vita log failed
+at `stage=connect` after about 3.4 s, which is the old 3 s connect deadline. The
+log carried neither the resolved IPv4 address nor the raw `NetResult`, and the
+UI showed `NOT CONNECTED` while the worker was trying, so a network block and a
+client bug looked identical.
+
+**Decision:** The client connect deadline is 12 s, the greeting/login window
+5 s, and the session budget 25 s. On `FTP_CLIENT_CONNECTING` the worker logs
+`connect` with the resolved IPv4, port, and `stage=begin`; on failure it logs
+`connect_fail` with the same address, port, mapped detail, and raw `NetResult`
+value. The resolver result is rejected when it is `0.0.0.0`, falling back to
+`gethostbyname`. SITES and the remote pane show `CONNECTING` until the session
+succeeds or fails. The seeded site is unchanged; it is not the defect.
+
+**Consequences:** A slow Vita WiFi handshake has room to complete. A failure now
+has a location and a class: `value=2` at the correct address means the Vita's
+network path drops port 21; `4` is a refusal; `9` is the socket/select layer.
+If `value=2` appears at `209.51.188.20`, the next test is a LAN FTP server on the
+PC, because no client change can open a blocked external port. The worker may
+block for up to 12 s during the connect; the main thread keeps drawing the
+CONNECTING state.
+
+## D63. PASV uses the control peer's address, not the advertised host
+
+**Date:** 2026-11-12
+**Status:** accepted; supersedes the foreign-PASV refusal rule.
+
+**Context:** The b27 localhost log shows the control connection, greeting, and
+login succeeding, then `connect_fail stage=data cls=server value=0`: the server
+advertised its LAN address in the 227 reply, the client's control peer was
+`127.0.0.1`, and `reply_parse_pasv` refused the different host. The server
+accepted one client and lost it immediately. The older external
+`ftp.gnu.org` run failed at the first listing after the old 2 s window.
+
+**Decision:** A 227 reply contributes only its data port. The client connects
+to the control peer's IP with that port, ignoring the advertised host. This is
+the FTP-bounce-safe choice because the untrusted server cannot redirect the
+data connection to a third host, and it makes localhost, NATed servers, and
+servers with multiple addresses work. The first-listing window is 10 s, command
+10 s, data idle 20 s, and the session 35 s. A data connect failure stores its
+`NetResult`, so `connect_fail ... value=` names the data-layer result too.
+
+**Consequences:** Localhost no longer fails at `PASSIVE REFUSED`. A server whose
+227 host is private while the control host is public now works. The app's own
+server still advertises its LAN address; the client ignores it and connects to
+the control peer, which is correct for both `127.0.0.1` and the LAN IP. If an
+external data connection still times out at the advertised port, the network is
+blocking the passive data port; test a LAN FTP server before changing the
+client again. The server's data listener remains `control+1` (1338), not an
+ephemeral PASV port.
+
+## D64. Remote sessions are explicit, refreshable, and self-healing
+
+**Date:** 2026-11-13
+**Status:** accepted.
+
+**Context:** b27/b28 proved the FTP control/login and PASV data paths, but the
+remote pane still failed in use:
+
+- Opening a remote folder left the pane on `READING` forever. The client's CWD
+  completion fired `OPERATION_DONE` while the operation slot was still held; the
+  worker's immediate `remote_list` saw `BUSY`, emitted `LIST FAILED`, and the UI
+  had no path that cleared the eager `loading` flag.
+- `REMOTE ACTIONS` listed NEW FOLDER, RENAME, and DELETE, but the worker sent
+  them to the local `FsPort` planner. A remote path has no volume token, so the
+  actions failed or were refused as `INVALID PATH`; remote DELETE never reached
+  a confirmation.
+- There was no way to close a session. Selecting another site while the client
+  was `READY` returned `CONNECT REFUSED` because the old session was still held.
+- A half-open control channel (server killed without a FIN, NAT expiry) kept the
+  header on `CONNECTED` indefinitely; only an operation would notice.
+- Remote marks never pruned after a listing because `prune_marks` used the Vita
+  `path_parent`, which rejects `/`-rooted remote paths.
+
+**Decision:**
+
+1. **Deferred refresh.** A completed remote command sets a worker
+   `refresh_remote` flag. The listing starts on the next worker step, after the
+   client has released its operation slot. `OPERATION_DONE` is documented as
+   non-reentrant; a consumer must not start the next operation inside it.
+2. **Remote actions are real FTP commands.** NEW FOLDER, RENAME, DELETE, and
+   directory DELETE go through `ftp_client_mkdir`, `rename`, `delete`, and
+   `rmdir`, one command at a time through a small worker queue. `UiMark` carries
+   the row type so a marked directory uses RMD. The actions are not routed to
+   the local filesystem and skip the local protection table; those rules are
+   for Vita paths only.
+3. **DISCONNECT is a remote action.** The remote ledger is DOWNLOAD, NEW
+   FOLDER, RENAME, DELETE, DISCONNECT. It closes the control and data sockets
+   immediately (no QUIT round trip), clears the worker queue and pane, clears
+   the site identity, and returns to WORKSPACE with `DISCONNECTED`. It is live
+   while the pane is `READING` (the escape from a hung listing) and disabled
+   only during an actual client transfer.
+4. **Connecting always starts a new session.** Selecting a site tears down any
+   existing client session first. A pre-existing `READY` session can no longer
+   cause `CONNECT REFUSED`.
+5. **Idle keepalive.** A `READY` client with no activity for 20 s sends `NOOP`
+   and declares the session `LOST` after 5 s without a reply. A half-open
+   control channel therefore cannot stay `CONNECTED`. The keepalive is an
+   operation, so a user command in that short window returns `BUSY` and the UI
+   clears `READING` with `BUSY - TRY AGAIN`.
+6. **Row actions need a settled, connected pane.** While the remote pane is
+   disconnected or `READING`, DOWNLOAD, NEW FOLDER, RENAME, and DELETE are dim
+   with `NOT CONNECTED`/`READING`. The row arena is not read while loading; a
+   remote error clears the eager `READING` flag so a failed CWD returns to the
+   previous folder with the error in the status/dock.
+7. **A lost session clears identity, keeps rows.** The site name/host and the
+   remote band's site are cleared on a drop; the rows remain, marks clear, and
+   the pane offers RECONNECT. The header switches to `NOT CONNECTED`. A new
+   session's first listing clears the old rows even when the root path matches.
+
+**Consequences:** Navigation, refresh after upload/mutation, remote rename and
+delete, manual disconnect, and site switching all have one serialized FTP path.
+A dead server is detected within 25 s even if the transport never reports the
+close. Remote DELETE still requires the existing full-path confirmation; a
+non-empty directory returns the server's refusal. Remote folder *transfer* is
+recursive by R22 but is not part of this decision; the current engine still
+downloads/uploads one file per queue item. R21's refresh command remains
+unbound to an action.
+
+## D65. Remote refresh, unsafe names, upload preflight, and the folder-transfer limit
+
+**Date:** 2026-11-13
+**Status:** accepted; R22/R23 deferred by the user's choice.
+
+**Context:** The b32 remote pane fixed navigation, disconnect, and remote
+mutations. Four gaps remained: R21 had a `UI_CMD_REFRESH` with no action, R44
+allowed a remote listing name with `/` or `:` to be flattened into a local
+name, a download showed no total until the transfer finished, and an upload
+silently overwrote an existing remote file. A recursive folder transfer
+(R22/R23) was also still open; the user chose not to implement it in this pass.
+
+**Decision:**
+
+1. **REFRESH is a remote action.** The remote ledger is DOWNLOAD, NEW FOLDER,
+   RENAME, DELETE, REFRESH, DISCONNECT (six rows, the settled maximum). REFRESH
+   emits `UI_CMD_REFRESH`; the existing worker path lists the current remote
+   folder. It is dim while the pane is disconnected or `READING`.
+2. **Unsafe remote names are refused.** A listed name is unsafe when it is
+   empty, `.`/`..`, or contains `/`, `\`, or `:`. The row stays visible with the
+   yellow risk diamond; DOWNLOAD, RENAME, and DELETE show `UNSAFE NAME`, and
+   Cross/Square return `UNSAFE NAME` without building any local path. The worker
+   repeats the name check before a single-file download as a backstop.
+3. **Folder transfers are refused, not mis-queued.** R22/R23 are deferred.
+   A local folder UPLOAD and a remote folder DOWNLOAD are dim with `FOLDER NOT
+   SUPPORTED`; a marked set containing a folder refuses the whole transfer with
+   the same status. The worker refuses a `UI_ROW_DIR` source as a backstop. A
+   file transfer still works; the plan's recursive requirement remains open.
+4. **Uploads preflight the remote destination.** When FEAT advertises MLST, the
+   client sends `MLST <destination>` before a STOR. A file that exists asks
+   OVERWRITE ALL / SKIP EXISTING / CANCEL once per batch; SKIP drops each
+   existing file, OVERWRITE applies to the rest, and CANCEL clears the batch. A
+   directory destination fails with `DESTINATION IS A FOLDER`. A server without
+   MLST is not probed and keeps the prior overwrite behavior; this limit is
+   named in the docs. On the Vita server and any MLST server, the prompt is the
+   R41 behavior.
+5. **Download totals come from the listing.** The selected row or mark size
+   rides on the transfer command, the worker's `XferItem`, and the client's
+   `FtpClientTransfer`; the dock shows the total before the first byte. An
+   unknown size remains `--`.
+6. **CANCEL at a batch conflict ends the batch.** The queue is cleared and the
+   dock reports `CANCELLED`; it no longer advances to the next item.
+
+**Consequences:** Remote browsing now has a refresh path, unsafe names cannot
+become local paths, uploads ask before replacing an existing file on an MLST
+server, and a partly-known download shows its size. Recursive transfers remain
+the one plan item deliberately left out; the UI refuses them instead of sending
+a folder as one RETR/STOR. Adding recursion later should reuse the same name,
+total, and conflict rules.

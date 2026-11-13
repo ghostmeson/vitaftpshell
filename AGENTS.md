@@ -14,10 +14,23 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 nineteen host suites, and `tools/preview/run.sh` renders 36 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b15.vpk` with the real app linked. Nothing
-has run on hardware yet; the first console launch is Phase 6 (U14). Do not start
-coding from this file alone: the plan is the source of truth for behavior,
-sequencing, and verification, and `docs/DESIGN.md` is the layout authority.
+`build.sh` emits `vitaftpshell-v01.00-b36.vpk` with the real app linked. b16,
+b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
+browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
+stack and rename completed; b22 made "no selection" disable every action except
+new folder; b23 fixed the server IP byte order and free-space queries, and FTP
+works. b24 added the clipboard/PASTE copy/move model and hardened DELETE; b25
+defers worker confirmations while a local dialog owns the screen. b26 widened
+the FTP client connect window and logged the resolved IP and raw network result;
+b27 clears the CONNECTING state on remote errors; b28 fixed the PASV data
+connection by using the control peer's address and the reply port; b32 contains
+the remote-pane fix (stuck READING, remote actions routed to the FTP client, DISCONNECT,
+site teardown, idle NOOP liveness, remote mark pruning); b36 adds REFRESH,
+unsafe-name refusal, download totals, upload MLST preflight, and folder-transfer
+refusal (R22/R23 deferred). No M1–M8 row has passed, so the project is
+`building`, not `verified`. Do not start coding from this file alone: the plan
+is the source of truth for behavior, sequencing, and verification, and
+`docs/DESIGN.md` is the layout authority.
 
 ## Read order
 
@@ -28,8 +41,10 @@ sequencing, and verification, and `docs/DESIGN.md` is the layout authority.
 5. `docs/ARCHITECTURE.md` — planned layers, ports, and allowed platform files.
 6. `docs/DESIGN.md` — the settled layout, states, and input; the sheets in `docs/design/`.
 7. `docs/DECISIONS.md` — numbered decisions with context and consequences.
-8. `docs/THIRD_PARTY.md` — reused code, licenses, and protocol references.
-9. `docs/README.md` — the documentation map.
+8. `docs/FIXES.md` — chronological fix index with hardware status; start here
+   before re-debugging a known failure.
+9. `docs/THIRD_PARTY.md` — reused code, licenses, and protocol references.
+10. `docs/README.md` — the documentation map.
 
 ## What this is
 
@@ -205,6 +220,9 @@ run is the only evidence that promotes the project to `verified`.
 
 - Update `PROJECTS.md` after every job. One row, one next action.
 - Update the plan when behavior changes; do not leave the truth only in chat.
+- Record every fixed defect in `docs/FIXES.md` with its build, evidence, and
+  `HW`/`HOST`/`PENDING` status. The detailed evidence stays in
+  `docs/VERIFICATION.md`.
 - Put feature additions under `docs/features/` with a dated document.
 - Put screen mockups and design notes under `docs/design/`.
 - Add a numbered entry to `docs/DECISIONS.md` for every product or architecture
@@ -222,6 +240,7 @@ A job is finished when:
 - the build produces one uniquely named VPK;
 - `PROJECTS.md` reflects the phase and next action;
 - `docs/` reflects the change, including a decision when one was made;
+- the fix is indexed in `docs/FIXES.md` with its hardware status;
 - no new `[C]` claim escaped the adapter;
 - the documentation link and code-fence check reports no issues;
 - `verified` is not claimed without hardware evidence.
@@ -245,7 +264,12 @@ passive ports, threading, listing caps, the site and log formats, MLSD, the serv
 foundation, the local `tai` policy, and the five deferred product choices; the
 answers are D30-D43 and the plan's KTDs; D44-D47 record the standalone
 repository and the Phase 4 implementation shapes; D48-D52 record the Phase 5
-composition, UI evidence, and safety backstops.
+composition, UI evidence, and safety backstops; D53-D63 record the Phase 6
+all-drives root, always-on log, action feedback, IME sequence, worker stack,
+the no-selection rule, the server address/free-space policy, the clipboard, the
+destructive-confirmation rules, the FTP-client connect/PASV diagnostics, the
+remote-pane session/action rules, and the remote refresh/name/upload/folder
+rules.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
@@ -258,7 +282,6 @@ judgment call:
   reports unknown and the UI renders `--` (D48);
 - directory sync after a rename: `FsPort` has no call for it, so power-loss
   durability needs a port extension or a confirmed platform guarantee;
-- the IME initialization order;
 - the mksfoex flags this SDK build needs;
 - the icon and LiveArea art.
 
@@ -296,7 +319,8 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D52
+    DECISIONS.md       numbered decisions, D1-D65
+    FIXES.md           chronological fix index with HW/HOST/PENDING status
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification
     features/          future feature documents

@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <sys/select.h>
@@ -22,9 +23,12 @@
  * socket option layer; the core sees only NetSocket handles and NetResult.
  */
 
-#define PSP2_NET_MEMORY_BYTES (1024u * 1024u)
+/* VitaShell's ftpvita uses a 4 MiB pool and a 128-connection backlog for the
+ * FTP listener. 1 MiB was enough for one client connect but is not the server
+ * shape this app runs. */
+#define PSP2_NET_MEMORY_BYTES (4u * 1024u * 1024u)
 #define PSP2_NET_SOCKETS 16
-#define PSP2_NET_LISTEN_BACKLOG 4
+#define PSP2_NET_LISTEN_BACKLOG 128
 #define PSP2_NET_RESOLVE_RETRIES 1
 #define PSP2_NET_RESOLVE_NAME "vftpshell"
 /* sceNetCtlInit reports this when net control is already up. The value is not
@@ -191,28 +195,47 @@ static NetResult net_resolve(void *ctx, const char *host, unsigned timeout_ms,
     if (!net_ensure_ready())
         return NET_ERROR;
 
-    int rid = sceNetResolverCreate(PSP2_NET_RESOLVE_NAME, NULL, 0);
-    if (rid < 0)
+    /* The resolver handle takes a parameter block, not NULL. Match the
+     * known-working vita-cap-test path: a zeroed block lets the SDK provide
+     * its default allocation callbacks. */
+    SceNetResolverParam param;
+    memset(&param, 0, sizeof(param));
+
+    int rid = sceNetResolverCreate(PSP2_NET_RESOLVE_NAME, &param, 0);
+    if (rid >= 0) {
+        unsigned seconds =
+            timeout_ms / 1000u + (timeout_ms % 1000u != 0 ? 1u : 0u);
+        if (seconds < 1)
+            seconds = 1;
+
+        SceNetInAddr address;
+        memset(&address, 0, sizeof(address));
+
+        /* [C] The resolver timeout is documented in seconds and the retry
+         * count is unverified on hardware; one retry is used so a lost UDP
+         * packet does not consume the caller's whole budget. */
+        int rc = sceNetResolverStartNtoa(rid, host, &address, (int)seconds,
+                                         PSP2_NET_RESOLVE_RETRIES, 0);
+        int destroyed = sceNetResolverDestroy(rid);
+        if (rc >= 0 && destroyed >= 0 && address.s_addr != 0) {
+            out->addr = ntohl(address.s_addr);
+            out->port = 0;
+            return NET_OK;
+        }
+    }
+
+    /* The SDK's libc also exposes the usual resolving path. It has no timeout
+     * of its own, so it is only a fallback after the resolver handle fails;
+     * the worker thread, not the UI, pays the wait. */
+    struct hostent *entry = gethostbyname(host);
+    if (entry == NULL || entry->h_addrtype != AF_INET ||
+        entry->h_length != 4 || entry->h_addr_list[0] == NULL)
         return NET_RESOLVE_FAILED;
 
-    unsigned seconds = timeout_ms / 1000u + (timeout_ms % 1000u != 0 ? 1u : 0u);
-    if (seconds < 1)
-        seconds = 1;
-
-    SceNetInAddr address;
-    memset(&address, 0, sizeof(address));
-
-    /* [C] The resolver timeout is documented in seconds and the retry count is
-     * unverified on hardware; one retry is used so a lost UDP packet does not
-     * consume the caller's whole budget. */
-    int rc = sceNetResolverStartNtoa(rid, host, &address, (int)seconds,
-                                     PSP2_NET_RESOLVE_RETRIES, 0);
-    int destroyed = sceNetResolverDestroy(rid);
-    if (rc < 0 || destroyed < 0)
-        return NET_RESOLVE_FAILED;
-
-    out->addr = ntohl(address.s_addr);
-    out->port = 0; /* resolution supplies an address; the caller owns the port */
+    uint32_t address_bits;
+    memcpy(&address_bits, entry->h_addr_list[0], sizeof(address_bits));
+    out->addr = ntohl(address_bits);
+    out->port = 0;
     return NET_OK;
 }
 
@@ -554,7 +577,10 @@ static NetResult net_link(void *ctx, NetLink *out)
         return NET_OK;
 
     out->address_known = 1;
-    out->address.addr = parsed.s_addr;
+    /* inet_pton writes network byte order; NetAddress.addr is host order
+     * everywhere else (net_connect applies htonl). Without this conversion the
+     * SERVER panel shows 192.29.168.192 for a console at 192.168.29.192. */
+    out->address.addr = ntohl(parsed.s_addr);
     out->address.port = 0; /* the link has no peer */
     return NET_OK;
 }

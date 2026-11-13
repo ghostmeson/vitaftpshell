@@ -24,17 +24,26 @@
 #define UI_ROWS_VISIBLE 10
 #define UI_CONFIRM_VIEW 5
 #define UI_CONFIRM_MAX 64
+#define UI_CLIP_MAX 64
+
+typedef enum {
+    UI_CLIP_NONE = 0,
+    UI_CLIP_COPY,
+    UI_CLIP_MOVE
+} UiClipMode;
 
 typedef enum {
     UI_ROW_FILE = 0,
     UI_ROW_DIR,
-    UI_ROW_UP
+    UI_ROW_UP,
+    UI_ROW_VOLUME
 } UiRowType;
 
 typedef struct {
     char name[PATH_NAME_MAX];
     uint8_t type;
     uint8_t risk;
+    uint8_t unsafe; /* a remote name with a separator or dot segment */
     uint64_t size;
     int size_known;
 } UiRow;
@@ -43,6 +52,7 @@ typedef struct {
     Path path;
     uint64_t size;
     int size_known;
+    uint8_t type; /* UI_ROW_FILE or UI_ROW_DIR; remote delete needs it */
 } UiMark;
 
 typedef struct {
@@ -120,6 +130,7 @@ typedef struct {
      * caller buffer that has gone out of scope. */
     UiConfirmItem local_items[UI_CONFIRM_MAX];
     char local_names[UI_CONFIRM_MAX][PATH_NAME_MAX];
+    char local_paths[UI_CONFIRM_MAX][PATH_MAX_LEN];
 } UiConfirm;
 
 #define UI_SITES_MAX SITE_BOOK_MAX
@@ -139,6 +150,7 @@ typedef struct {
     int first;
     int save_unavailable;
     int login_failed;
+    int connecting;
     char reply[160];
     UiSiteRow rows[UI_SITES_MAX];
 } UiSiteList;
@@ -192,6 +204,7 @@ typedef struct {
 typedef struct {
     int selected;
     int marked;
+    int has_selection;
     int enabled[UI_ACTION_COUNT];
     char reason[UI_ACTION_COUNT][40];
     char path[PATH_MAX_LEN];
@@ -239,6 +252,12 @@ typedef struct {
     UiActions actions;
     UiTextEntry text;
 
+    /* Local copy/move clipboard. The paths are frozen when COPY or MOVE is
+     * chosen; the current folder becomes the destination at PASTE. */
+    UiClipMode clip_mode;
+    int clip_count;
+    Path clip_paths[UI_CLIP_MAX];
+
     char status[128];
     int quit;
 
@@ -251,6 +270,7 @@ typedef struct {
     int pending_action_valid;
     UiAction pending_action;
     UiPane pending_pane;
+    int pending_source_type;
     Path pending_path;
     Path pending_dest;
 } UiState;
@@ -283,7 +303,7 @@ typedef enum {
 
 typedef struct {
     UiStateEventKind kind;
-    UiPane pane;
+    int pane; /* UiPane, or -1 for a pane-less error */
     UiKey key;
     int repeat;
     int stick_y;

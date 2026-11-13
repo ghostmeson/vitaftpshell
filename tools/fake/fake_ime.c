@@ -61,6 +61,12 @@ static void fake_end(void *ctx)
     memset(&s_current, 0, sizeof(s_current));
 }
 
+static int fake_last_error(void *ctx)
+{
+    (void)ctx;
+    return 0;
+}
+
 void fake_ime_reset(void)
 {
     memset(s_queue, 0, sizeof(s_queue));
@@ -72,6 +78,7 @@ void fake_ime_reset(void)
     s_port.begin = fake_begin;
     s_port.poll = fake_poll;
     s_port.end = fake_end;
+    s_port.last_error = fake_last_error;
 }
 
 TextInputPort *fake_ime_port(void)

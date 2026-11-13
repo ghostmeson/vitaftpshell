@@ -297,6 +297,45 @@ unsigned handoff_listing_lost(const Handoff *handoff, UiPane pane)
     return handoff->listings[pane].lost;
 }
 
+int handoff_log_push(Handoff *handoff, const HandoffLogRecord *record)
+{
+    if (handoff == NULL || record == NULL)
+        return 0;
+
+    uint32_t head = LOAD_ACQ(&handoff->log.head);
+    uint32_t tail = LOAD_ACQ(&handoff->log.tail);
+    if (head - tail >= HANDOFF_LOG_CAP) {
+        handoff->log.lost++;
+        return 0;
+    }
+
+    HandoffLogRecord *slot = &handoff->log.records[head % HANDOFF_LOG_CAP];
+    *slot = *record;
+    STORE_REL(&handoff->log.head, head + 1);
+    return 1;
+}
+
+int handoff_log_pop(Handoff *handoff, HandoffLogRecord *out)
+{
+    if (handoff == NULL)
+        return 0;
+
+    uint32_t head = LOAD_ACQ(&handoff->log.head);
+    uint32_t tail = LOAD_ACQ(&handoff->log.tail);
+    if (head == tail)
+        return 0;
+
+    if (out != NULL)
+        *out = handoff->log.records[tail % HANDOFF_LOG_CAP];
+    STORE_REL(&handoff->log.tail, tail + 1);
+    return 1;
+}
+
+unsigned handoff_log_lost(const Handoff *handoff)
+{
+    return handoff != NULL ? handoff->log.lost : 0;
+}
+
 void handoff_confirm_request(Handoff *handoff, const HandoffConfirm *confirm)
 {
     if (handoff == NULL || confirm == NULL)

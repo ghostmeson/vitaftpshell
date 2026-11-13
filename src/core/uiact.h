@@ -32,11 +32,15 @@ typedef enum {
 typedef enum {
     UI_ACTION_COPY = 0,
     UI_ACTION_MOVE,
+    UI_ACTION_PASTE,
+    UI_ACTION_CLEAR_CLIPBOARD,
     UI_ACTION_UPLOAD,
     UI_ACTION_DOWNLOAD,
     UI_ACTION_NEW_FOLDER,
     UI_ACTION_RENAME,
     UI_ACTION_DELETE,
+    UI_ACTION_REFRESH,
+    UI_ACTION_DISCONNECT,
     UI_ACTION_COUNT
 } UiAction;
 
@@ -106,6 +110,9 @@ typedef struct {
     int index;
     int value;
     int masked;
+    int source_type; /* UI_ROW_FILE or UI_ROW_DIR for a remote source */
+    uint64_t total;
+    int total_known;
     char path[PATH_MAX_LEN];
     char path2[PATH_MAX_LEN];
     char text[256];

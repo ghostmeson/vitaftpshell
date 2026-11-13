@@ -55,6 +55,13 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
 
 ### Pane
 
+- **Root:** the local pane opens at `ALL DRIVES`, a virtual root that lists the
+  mounted `ux0:`, `ur0:`, and `uma0:` volumes as `DRIVE` rows. Entering a volume
+  lists its root; Circle at a volume root returns to `ALL DRIVES`. Neither the
+  virtual root nor a volume root carries a `..` row. Copy, move, rename, and
+  delete are unavailable at the virtual root; new folder is unavailable there
+  too. A volume root is protected against rename and delete, but new folder is
+  allowed inside it.
 - **Band:** title at `y+8` (px 2, tracked 2); path at `y+26` (px 1.5); a hairline
   at `y+43`; rows from `y+48`.
 - **Row:** 30 px pitch; ten visible. Name at `x+40` (px 2). Type or size
@@ -104,14 +111,18 @@ allowed outside the hazard band.
 - **Idle:** `IDLE` dim; the active pane and path; the mark count and total on the
   right; the action hint (`X TO DOWNLOAD n ITEMS`) on line three.
 - **Active:** `DOWNLOAD` or `UPLOAD` yellow; filename; `n OF m`; a yellow
-  continuous bar; transferred and total bytes, percentage, and rate. When the
-  total is unknown, the total and percentage render `--`.
+  continuous bar; transferred and total bytes, percentage, and rate. A download
+  total comes from the listing row and is visible before the first byte. When
+  the total is unknown, the total and percentage render `--`.
 - **Done:** `DONE` green; filename; `n OF m`; a full yellow bar; size and elapsed
   time; average rate.
 - **Failed:** `FAILED` yellow; filename; `n OF m`; the bar stops at the failure
   point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure ends
   with `X TO RETRY`; a control failure leaves the reconnect to the pane.
 - **No session:** `IDLE` dim; `REMOTE`; `NO MARKS`; `NO SELECTION`.
+- **Status:** a status message (`ACTION UNAVAILABLE`, a failed operation, a
+  refused path) replaces the idle hint on line three in yellow until the next
+  key. The rest of the idle dock does not change.
 - **Focused dock:** only focusable when a transfer is active or queued. Down from
   the last row enters it; the 1 px outline turns white; the legend becomes
   `[X] CANCEL  [O] TO LIST`; Cross opens the cancel CONFIRM; Circle returns to
@@ -121,13 +132,20 @@ allowed outside the hazard band.
 
 ### Pane states
 
+- **Connecting:** the remote pane shows `CONNECTING` in yellow and `PLEASE
+  WAIT` in micro while the worker resolves and connects. The SITES card says
+  `CONNECTING...` in cyan. A success replaces it with the remote listing; a
+  failure shows the existing not-connected/login-failed state.
 - **Reading:** `READING` white px 2, centred in the list area. The band keeps the
-  path being read.
+  path being read. A command that fails before a listing begins (busy client,
+  refused CWD, not connected) clears `READING` and returns the pane to the
+  previous folder with the reason in the status/dock.
 - **Empty:** `EMPTY FOLDER` dim px 2, centred.
 - **Session lost:** `SESSION LOST` yellow px 2; the mapped reason in micro dim;
   `X RECONNECT  O DISMISS` in micro with the keys white and the words dim. The
-  block is centred; the band keeps the last path dim; marks clear; the dock keeps
-  the failed transfer.
+  block is centred; the band keeps the last path dim, the site identity clears,
+  marks clear, the header reads `NOT CONNECTED`, and the dock keeps the failed
+  transfer.
 - **Data-channel failure with a healthy control channel:** the rows stay; the
   dock shows FAILED and the retry; the session stays connected.
 
@@ -136,16 +154,16 @@ allowed outside the hazard band.
 - L/R switches the active pane and preserves both path and selection.
 - Cross opens a directory, or transfers the selected file or marked set.
 - Circle goes to the parent; at a volume root or `/` it says so.
-- Square marks; Triangle opens SITES; Start opens SERVER; Select opens ACTIONS.
+- Square marks; Triangle opens ACTIONS; Start opens SERVER; Select opens SITES.
 - Down from the last row enters the dock only when a transfer is active or
   queued.
 - On the session-lost state, Cross reconnects and Circle dismisses.
 
 ### Legend
 
-- Standard: `[X] OPEN/SEND  [O] UP  [□] MARK  [△] SITES  L/R PANE  START SERVER
-  SELECT ACTIONS`.
-- Reconnect: `[X] RECONNECT  [O] DISMISS  L/R PANE  START SERVER  SELECT ACTIONS`.
+- Standard: `[X] OPEN/SEND  [O] UP  [□] MARK  [△] ACTIONS  L/R PANE  START SERVER
+  SELECT SITES`.
+- Reconnect: `[X] RECONNECT  [O] DISMISS  L/R PANE  START SERVER  SELECT SITES`.
 
 ## SITES
 
@@ -194,6 +212,9 @@ five states are in
 - **Empty:** the card is not drawn; the table becomes a full-height panel
   (18, 76, 924, 352) with `ALL SITES`, `0 SAVED`, and a centred
   `NO SITES` + `TRIANGLE TO ADD A SITE`.
+- **Connecting:** the card footer says `CONNECTING...` in cyan while the
+  worker resolves and connects; the selected row stays. A success shows the
+  remote listing; a failure replaces the footer with the login-failed reply.
 - **Login failed:** the card footer carries the server reply in yellow; the site
   stays selected and editable; the table is untouched; the header stays
   `NOT CONNECTED`.
@@ -352,9 +373,10 @@ The header repeats the server state on every screen: `SERVER OFF`,
 
 ## ACTIONS
 
-Direction A: the action ledger with the target panel (D26), with local copy/move
-using the marks as the source and the current folder as the destination (D27).
-The four states are in
+Direction A: the action ledger with the target panel (D26). Local COPY/MOVE
+freeze the marks on a clipboard; PASTE runs them into the folder the user
+navigated to (D60). Remote row actions run over the FTP session; the remote
+ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
 [`design/2026-11-08-actions-a-states.html`](design/2026-11-08-actions-a-states.html).
 
 ### Geometry
@@ -370,7 +392,8 @@ The four states are in
 
 - `LOCAL ACTIONS` or `REMOTE ACTIONS` at 32, 84 (px 2, tracked 2); the path at
   32, 102 (micro, cyan); the band state right-aligned at 556: `n ITEM(S)`,
-  `n MARKED`, or `VOLUME ROOT`.
+  `n MARKED`, `COPY n`, `MOVE n`, `NO SELECTION`, `VOLUME ROOT`, or
+  `PROTECTED PATH`.
 - A hairline at 119; rows from 124 at 44 px, six maximum.
 - Each row: label at 50 (px 2), description at 50 (micro, `y+23`). Disabled rows
   are dim and carry the reason (`MARK TO COPY`, `PROTECTED PATH`, `VOLUME ROOT`).
@@ -382,27 +405,59 @@ The four states are in
 - `TARGET` at 596, 84; the pane at 596, 108; the path at 596, 126.
 - Multi: the count at 596, 148 (px 5), `MARKED` and the total at 169. Single: the
   name at 596, 148 (px 3) and the size at 178 (px 2). Protected: the root at 148
-  (px 3) and `VOLUME ROOT` at 178 (px 2, yellow).
+  (px 3) and `VOLUME ROOT` at 178 (px 2, yellow). No selection: `--` at 148 and
+  `NO SELECTION` at 178 (px 2, dim). PASTE: the clipboard count at 148 (px 5)
+  and `CLIPBOARD` at 169 (micro).
 - A hairline at 210; `DESTINATION` at 224 with the value right-aligned at 928.
+  COPY and MOVE show `CLIPBOARD`; PASTE and the other actions show the current
+  folder (or the remote pane for upload). REFRESH shows `--` at 148 and `FOLDER`
+  at 178; DISCONNECT shows `--` at 148 and `SESSION` at 178.
 - The selected action at 300 and its consequence at 320 (micro); the note at
   400 (micro).
 - The target is the single source of truth for where an action goes.
 
 ### States
 
+- **No selection:** the cursor is on `..` or the folder has no rows. Copy, move,
+  upload, rename, and delete are dim with `NO SELECTION`; the target panel says
+  `NO SELECTION`. New folder is the only live action and creates in the current
+  folder. Marks count as a selection for copy, move, and delete.
 - **Local single, no marks:** copy and move are dim (`MARK TO COPY`,
   `MARK TO MOVE`); upload, new folder, rename, and delete use the cursor; the
   upload destination is the remote pane.
-- **Local multi:** copy and move go `TO THIS FOLDER`; rename is dim (`ONE ITEM
-  ONLY`); delete is flagged; the marks stay after the operation (D18).
-- **Remote single:** download to the local pane; rename, delete, new folder.
+- **Local multi:** copy and move put the marks on the clipboard (`TO
+  CLIPBOARD`); rename is dim (`ONE ITEM ONLY`); delete is flagged; the marks
+  stay after the operation (D18).
+- **Clipboard armed:** PASTE and CLEAR replace COPY and MOVE in the first two
+  rows. The target reads `n CLIPBOARD`; the destination is the current folder.
+  PASTE executes one COPY or MOVE per clipboard path into that folder. A
+  same-folder MOVE is dim (`ALREADY HERE`); a same-folder COPY is allowed and
+  uses a free copy name. CLEAR discards the clipboard.
+- **Remote single:** download to the local pane; rename, delete, new folder;
+  refresh; disconnect. Row actions are dim while the pane is disconnected or
+  reading. DISCONNECT stays live while reading and closes the session; it is the
+  escape from a listing that is taking too long. While `READING` the ledger's row
+  actions read `READING`, and a disconnected pane reads `NOT CONNECTED`.
+- **Remote folder:** DOWNLOAD is dim (`FOLDER NOT SUPPORTED`). R22/R23 recursion
+  is not implemented yet; a marked set containing a folder refuses the whole
+  transfer with the same reason. The worker repeats the refusal.
+- **Unsafe remote name:** the row keeps the yellow risk diamond; DOWNLOAD,
+  RENAME, and DELETE are dim (`UNSAFE NAME`), and Cross/Square return
+  `UNSAFE NAME` without building a local path. A name is unsafe when it is empty,
+  `.`/`..`, or contains `/`, `\`, or `:`.
 - **Protected root:** copy, move, rename, and delete are dim with their reasons;
   new folder is the only action.
 
 ### Dock and legend
 
 - Dock: `READY`, the selected action and its target, the size or destination on
-  the right, and `X TO RUN`.
+  the right, and `X TO RUN`. A disabled action's reason replaces `X TO RUN` in
+  yellow until the next key.
+- Running an action returns to WORKSPACE so the transfer dock shows its progress
+  and result. A confirmation also returns to WORKSPACE after its run.
+- The workspace idle dock shows `COPY n - TRIANGLE TO PASTE` or `MOVE n -
+  TRIANGLE TO PASTE` while a clipboard is armed. A local delete runs as
+  `DELETE`, not `MOVE`.
 - Legend: `[X] RUN  [O] CLOSE  UP/DOWN ACTION`.
 
 ## CONFIRM
@@ -442,10 +497,16 @@ five-row viewport; a longer set scrolls (D29). The six states are in
 
 ### States
 
-- **Delete:** three or many items; the item viewport, the count and known size,
-  `THIS CANNOT BE UNDONE.`, CANCEL / DELETE.
+- **Delete:** three or many items; the item list shows the **full path** of every
+  source, including marks from another folder; the count and known size,
+  `THIS CANNOT BE UNDONE.`, CANCEL / DELETE. When any source is high-risk, the
+  same panel carries the risk path at 168 and still shows the full item list;
+  the DELETE choice approves the high-risk plan. There is no separate
+  path-only confirmation for a delete (D61).
 - **Batch conflict:** `2 DESTINATIONS EXIST`; the batch count; CANCEL / SKIP
-  EXISTING / OVERWRITE ALL; the replace warning.
+  EXISTING / OVERWRITE ALL; the replace warning. A download checks the local
+  destination; an upload checks the remote destination with MLST when the server
+  advertises it. CANCEL ends the batch.
 - **Cancel a transfer:** the item, the progress, the partial removed; KEEP
   DOWNLOADING / CANCEL.
 - **Stop the server during a write:** the client’s write and the partial removed;
