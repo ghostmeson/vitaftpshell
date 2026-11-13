@@ -8,7 +8,7 @@ This file is an **index**, not the full evidence record:
 - [`VERIFICATION.md`](VERIFICATION.md) owns the hardware matrix, the logs, the
   core-dump analysis, and the host-test evidence.
 - [`DECISIONS.md`](DECISIONS.md) owns the numbered product and architecture
-  choices (D53–D66 for this period).
+  choices (D53–D67 for this period).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the layering and port rules.
 - [`DESIGN.md`](DESIGN.md) owns the settled layout, states, and input.
 
@@ -27,11 +27,11 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b37.vpk`, 248,620 bytes,
-  SHA-256 `a60584582e7c1f89ebf8527be454d84cda1158a3c0acae1e0061fbc55b3eb765`.
+- **Current artifact:** `vitaftpshell-v01.00-b38.vpk`, 248,757 bytes,
+  SHA-256 `00d798a67d913ff5c283b7612a3b20268ed360dd03ea4d2c789ca6954e823061`.
 - **Last hardware-observed build:** b37 (operator report, 2026-11-13). The
-  report did not enumerate the M1–M8 rows, so those stay `PENDING`. b28, b32,
-  and b36 were not separately tested.
+  report did not enumerate the M1–M8 rows, so those stay `PENDING`. b38 is
+  built but not hardware-tested. b28, b32, and b36 were not separately tested.
 - **Latest hardware evidence:** b37 operator report (no log pulled yet);
   `logs/session-b27.log` (local actions, server start, localhost control/login,
   PASV data refusal); `logs/b20/` (complete worker-stack core); `logs/b18/`
@@ -114,6 +114,12 @@ matrix passes.
 | b32 | A pane-less error could write `panes[-1]` | `UI_EVT_ERROR` checked only the upper bound; the command-queue error passes `-1` | `UiStateEvent.pane` is an `int`; all pane accesses check both bounds | host suites | `PENDING b32` |
 | b32 | A selected row could be read while the listing arena was being written | The reducer read `rows[selected]` even when `loading` | Row access returns `NULL` while loading; Cross/Square are refused | `test_remote_actions_availability` | `PENDING b32` |
 
+## Remote volume-root regression (b38)
+
+| Build | Symptom → cause | Fix | Evidence | Status |
+|---|---|---|---|---|
+| b38 | The remote pane could not open `UX0:`, `UR0:`, or `UMA0:` on localhost; FileZilla could | The b36/b37 unsafe-name guard refused Cross on every row containing `:`, including directories; navigation builds no local path | Let a directory row open; files still refuse `UNSAFE NAME`; add a reducer test and an integration CWD test | `test_remote_volume_root_open` (UI + integration) | `HOST b38` |
+
 ## Review pass (b37)
 
 | Build | Symptom → cause | Fix | Evidence | Status |
@@ -179,9 +185,13 @@ matrix passes.
 | D64 | Remote sessions are explicit, refreshable, and self-healing |
 | D65 | Remote refresh, unsafe names, upload preflight, and the folder-transfer limit |
 | D66 | A session teardown owns the batch; `pump_queue` iterates; a capped listing is a truncated success |
+| D67 | The unsafe-name rule guards transfers, not navigation |
 
 ## Still open
 
+- **b38 remote volume-root test:** install b38 and open `UX0:`, `UR0:`, and
+  `UMA0:` through the remote pane; the server-side CWD is already proven by
+  FileZilla.
 - **b37 row-level observations:** the operator reported b37 hardware-tested on
   2026-11-13, but the M1–M8 rows, the remote-pane pass, the 2000+ entry folder,
   the high-risk delete warning, and the localhost/`FTP.GNU.ORG` data path still

@@ -999,6 +999,46 @@ static void test_remote_unsafe_name(void)
     app_destroy(app);
 }
 
+static void test_remote_volume_root_open(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    static const char *root =
+        "type=dir;modify=20240101000000; UX0:\r\n"
+        "type=dir;modify=20240101000000; UR0:\r\n";
+
+    Peer peer;
+    connect_site_listing(app, &peer, root, NULL);
+    select_remote(app);
+
+    UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
+    int target = -1;
+    for (int i = 0; i < remote->row_count; ++i) {
+        if (strcmp(remote->rows[i].name, "UX0:") == 0)
+            target = i;
+    }
+    CHECK(target >= 0);
+    if (target < 0) {
+        app_destroy(app);
+        return;
+    }
+
+    remote->selected = target;
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.cwds > 0)
+            break;
+    }
+    CHECK(peer.cwds == 1);
+    CHECK(strcmp(peer.cwd, "/UX0:") == 0);
+
+    app_destroy(app);
+}
+
 static void test_remote_refresh(void)
 {
     App *app = make_app();
@@ -1388,6 +1428,7 @@ int main(void)
     test_remote_mutations();
     test_remote_disconnect_and_reconnect();
     test_remote_unsafe_name();
+    test_remote_volume_root_open();
     test_remote_refresh();
     test_upload_conflict();
     test_upload_preflight_unsupported();
