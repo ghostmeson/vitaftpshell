@@ -150,8 +150,9 @@ arena.
   the following step after the client has released its slot. This is the U9
   remote-action path from D64, not the local `fsop` planner. REFRESH uses the
   existing `UI_CMD_REFRESH`; a listing name with a separator or dot segment is
-  marked unsafe and never reaches a transfer; a folder source is refused with
-  `FOLDER NOT SUPPORTED` until R22/R23 are implemented (D65). One
+  marked unsafe and never reaches a transfer, though a directory row still
+  opens because navigation builds no local path (D67); a folder source is
+  refused with `FOLDER NOT SUPPORTED` until R22/R23 are implemented (D65). One
   `reset_remote_session` owns every teardown (DISCONNECT, CONNECT, and
   LOST/FAILED/STALLED): it drops the queue, the batch counters, the conflict
   answer, the remote actions, and the upload preflight together (D66).

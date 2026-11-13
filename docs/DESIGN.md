@@ -442,9 +442,11 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
   is not implemented yet; a marked set containing a folder refuses the whole
   transfer with the same reason. The worker repeats the refusal.
 - **Unsafe remote name:** the row keeps the yellow risk diamond; DOWNLOAD,
-  RENAME, and DELETE are dim (`UNSAFE NAME`), and Cross/Square return
-  `UNSAFE NAME` without building a local path. A name is unsafe when it is empty,
-  `.`/`..`, or contains `/`, `\`, or `:`.
+  RENAME, and DELETE are dim (`UNSAFE NAME`), and Square refuses marking. Cross
+  refuses an unsafe **file** without building a local path, but an unsafe
+  **directory** still opens: the Vita server's own volume roots are `UX0:`,
+  `UR0:`, and `UMA0:`, and navigation builds no local path (D67). A name is
+  unsafe when it is empty, `.`/`..`, or contains `/`, `\`, or `:`.
 - **Protected root:** copy, move, rename, and delete are dim with their reasons;
   new folder is the only action.
 

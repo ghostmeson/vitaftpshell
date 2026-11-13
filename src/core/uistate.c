@@ -663,7 +663,11 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         const UiRow *row = selected_row(state, state->active_pane);
         if (row == NULL)
             return;
-        if (row->unsafe) {
+        int is_dir = row->type == UI_ROW_DIR || row->type == UI_ROW_VOLUME;
+        /* The unsafe-name rule protects the local path a transfer builds. It
+         * must not block navigation: the Vita server's own volume roots are
+         * named `UX0:`, `UR0:`, and `UMA0:` (D65). */
+        if (row->unsafe && !is_dir) {
             set_status(state, "UNSAFE NAME");
             return;
         }
@@ -683,7 +687,7 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
             return;
         }
 
-        if (row->type == UI_ROW_DIR || row->type == UI_ROW_VOLUME) {
+        if (is_dir) {
             if (state->active_pane == UI_PANE_REMOTE && !pane->connected) {
                 set_status(state, "NOT CONNECTED");
                 return;

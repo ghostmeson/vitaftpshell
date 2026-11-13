@@ -1259,6 +1259,30 @@ static void test_high_risk_delete_warning(void)
     CHECK(strcmp(s_state.confirm.risk_path, "ur0:tai/X.SUPRX") == 0);
 }
 
+static void test_remote_volume_root_open(void)
+{
+    reset();
+    /* The Vita server lists its volumes as UX0:/UR0:/UMA0:. The colon makes
+     * the row unsafe for transfers, but it must still open as a directory. */
+    UiRow rows[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "UX0:", .type = UI_ROW_DIR, .unsafe = 1},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_REMOTE, rows, 2, 0);
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 1;
+    send_key(UI_KEY_CROSS);
+
+    UiCommand *open = command(UI_CMD_OPEN_PATH);
+    CHECK(open != NULL);
+    if (open != NULL) {
+        CHECK(open->pane == UI_PANE_REMOTE);
+        CHECK(strcmp(open->path, "/UX0:") == 0);
+    }
+    CHECK(s_state.panes[UI_PANE_REMOTE].loading == 1);
+    CHECK(strcmp(s_state.status, "UNSAFE NAME") != 0);
+}
+
 static void test_remote_marked_dir_delete_type(void)
 {
     reset();
@@ -1369,6 +1393,7 @@ int main(void)
     test_remote_multi_download();
     test_remote_download_from_all_drives();
     test_high_risk_delete_warning();
+    test_remote_volume_root_open();
     test_remote_unsafe_and_folder();
     test_remote_error_clears_reading();
     test_session_lost_clears_identity();

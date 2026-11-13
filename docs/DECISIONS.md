@@ -1457,3 +1457,23 @@ can no longer exhaust the worker stack; a 2000+ entry folder browses as a
 truncated success; and the destructive confirmation says what is at risk. The
 plan's R2, R19, R21-R23, R26, R36, R41, and M1 now describe the shipped
 behavior.
+
+## D67. The unsafe-name rule guards transfers, not navigation
+
+**Date:** 2026-11-13
+**Status:** accepted; fixes the b38 regression.
+
+**Context:** b36/b37 marked every remote listing row containing `/`, `\`, `:`,
+or a dot segment as unsafe and refused Cross on it. The Vita server's own volume
+roots are `UX0:`, `UR0:`, and `UMA0:`, so the client could no longer enter any
+drive while FileZilla could. R44 exists to keep a remote-supplied name out of a
+local path; a CWD builds no local path.
+
+**Decision:** A directory row opens even when its name is unsafe. Files still
+refuse Cross, DOWNLOAD/RENAME/DELETE still show `UNSAFE NAME`, and Square still
+refuses marking an unsafe row. The risk diamond stays on the row because its
+transfer and destructive actions are restricted.
+
+**Consequences:** The volume roots are reachable again. The unsafe check is now
+scoped to the operation that can actually be harmed by the name, so a future
+navigation path cannot inherit the transfer refusal by accident.
