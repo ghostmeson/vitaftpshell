@@ -72,6 +72,26 @@ static void set_status(UiState *state, const char *text)
     fmt_copy(state->status, sizeof(state->status), text != NULL ? text : "");
 }
 
+/* A refused action keeps its rows, so the failure belongs in the pane's inline
+ * error line, not only in the small dock status. */
+static void set_action_error(UiState *state, UiPaneState *pane,
+                             const char *text)
+{
+    if (text == NULL)
+        return;
+    set_status(state, text);
+    if (pane != NULL)
+        fmt_copy(pane->error, sizeof(pane->error), text);
+}
+
+/* Clear an action failure on the next key. A failed listing (no rows) and a
+ * lost session keep their detail because their centered state reads it. */
+static void clear_action_error(UiPaneState *pane)
+{
+    if (pane != NULL && pane->row_count > 0 && !pane->session_lost)
+        pane->error[0] = '\0';
+}
+
 static void begin_remote_connect(UiState *state);
 
 static void enter_screen(UiState *state, UiScreen screen)
@@ -639,6 +659,8 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         return;
     }
 
+    clear_action_error(pane);
+
     if (pane->loading &&
         (key == UI_KEY_CROSS || key == UI_KEY_SQUARE)) {
         if (state->active_pane == UI_PANE_REMOTE)
@@ -668,7 +690,8 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
          * must not block navigation: the Vita server's own volume roots are
          * named `UX0:`, `UR0:`, and `UMA0:` (D65). */
         if (row->unsafe && !is_dir) {
-            set_status(state, "UNSAFE NAME");
+            set_action_error(state, pane,
+                             "UNSAFE NAME - CANNOT MAKE A LOCAL FILE");
             return;
         }
         if (row->type == UI_ROW_UP) {
@@ -716,7 +739,8 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         if (pane->mark_count > 0) {
             for (int i = 0; i < pane->mark_count; ++i) {
                 if (pane->marks[i].type == UI_ROW_DIR) {
-                    set_status(state, "FOLDER TRANSFER NOT SUPPORTED");
+                    set_action_error(state, pane,
+                                     "FOLDER TRANSFER NOT SUPPORTED");
                     return;
                 }
             }

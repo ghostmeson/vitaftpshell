@@ -1339,7 +1339,10 @@ static void test_remote_unsafe_and_folder(void)
 
     send_key(UI_KEY_CROSS);
     CHECK(s_command_count == 0);
-    CHECK(strcmp(s_state.status, "UNSAFE NAME") == 0);
+    CHECK(strstr(s_state.status, "UNSAFE NAME") != NULL);
+    CHECK(strstr(s_state.panes[UI_PANE_REMOTE].error, "UNSAFE NAME") != NULL);
+    send_key(UI_KEY_UP);
+    CHECK(s_state.panes[UI_PANE_REMOTE].error[0] == '\0');
 
     /* A folder is refused, never sent as one RETR. */
     reset();

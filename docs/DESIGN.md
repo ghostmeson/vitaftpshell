@@ -87,6 +87,10 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
   the user unmarks each row.
 - **Identity:** the remote band shows the site and path; the local band shows
   the path and free space. The site identity also stays in the header (D19).
+- **Action failure:** a refused or failed action replaces the path with the
+  error in yellow, fitted with `..`; it clears on the next workspace key or a
+  successful listing. A failed listing keeps its centered `LISTING FAILED`; a
+  lost session keeps its centered detail (D68).
 - **Truncation:** names and paths end in `..`. A path too deep for the band is
   shown in full in ACTIONS, which is still to be designed.
 

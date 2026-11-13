@@ -123,7 +123,17 @@ static void band(const UiState *state, UiPane pane, const LayoutRect *r)
                   C_YELLOW);
     }
 
-    if (pane == UI_PANE_LOCAL) {
+    int show_error = p->error[0] != '\0' && !p->loading && !p->session_lost;
+    if (show_error) {
+        /* A failed action keeps its rows, so the inline failure lives in the
+         * path line instead of the empty-pane state. It stays until the next
+         * key or a successful listing. */
+        char fitted[128];
+        font_fit(p->error, PX_MICRO, (float)r->w - 2.0f * PANE_INSET, fitted,
+                 sizeof(fitted));
+        font_text(fitted, (float)r->x + PANE_INSET,
+                  (float)r->y + PANE_PATH_Y, PX_MICRO, C_YELLOW);
+    } else if (pane == UI_PANE_LOCAL) {
         const char *path_text = strcmp(p->path, "*") == 0 ? "ALL DRIVES"
                                                           : p->path;
         font_text(path_text, (float)r->x + PANE_INSET,
