@@ -1477,3 +1477,24 @@ transfer and destructive actions are restricted.
 **Consequences:** The volume roots are reachable again. The unsafe check is now
 scoped to the operation that can actually be harmed by the name, so a future
 navigation path cannot inherit the transfer refusal by accident.
+
+## D68. A refused action reports inside the pane, not only in the dock
+
+**Date:** 2026-11-13
+**Status:** accepted; b39.
+
+**Context:** The b37 volume-root regression refused Cross with only the small
+dock status line, and a refused CWD kept the old rows while setting a pane error
+the pane never drew. The user read the silence as a software bug. The settled
+error surface is inline (R65), and a recoverable refusal does not justify a
+modal interrupt (R67).
+
+**Decision:** A refused or failed action sets the pane's inline error and the
+dock status. The pane band replaces its path line with the error text in yellow,
+fitted with `..`. The notice clears on the next workspace key or a successful
+listing. A failed listing keeps its centered `LISTING FAILED` state, and a lost
+session keeps its centered detail; neither is cleared by a key.
+
+**Consequences:** The user sees the reason next to the rows they acted on
+instead of guessing. The path is temporarily hidden while the notice is up; the
+dock status and the next successful listing restore it.

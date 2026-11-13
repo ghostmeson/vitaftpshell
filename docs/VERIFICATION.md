@@ -1,11 +1,11 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b38.vpk
-**SHA-256:** 00d798a67d913ff5c283b7612a3b20268ed360dd03ea4d2c789ca6954e823061
-**ELF:** build/vitaftpshell, 509,168 bytes
+**Build:** vitaftpshell-v01.00-b39.vpk
+**SHA-256:** acc6457ce2fc171ac3ce602b2473c12d53e880594eb4e2eb6ff86e3a71b08fe3
+**ELF:** build/vitaftpshell, 509,264 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-13
-**Status:** b37 hardware-tested (operator report); b38 built, not tested; M1–M8 row transcription pending
+**Status:** b37 hardware-tested (operator report); b39 built, not tested; M1–M8 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
@@ -608,6 +608,7 @@ evidence.
 | confirm/risk | A high-risk delete lost the boot warning | Only the plain delete warning was drawn | Full boot warning for high-risk deletes | `test_high_risk_delete_warning`, render | b37 HW (operator report) |
 | client/mlst | A failed MLST write left the upload check latched | `client_send` failure ignored | Return `NOT_CONNECTED` | `test_mlst_send_failure` | b37 HW (operator report) |
 | remote/root | The client could not open its own server's `UX0:`/`UR0:`/`UMA0:` roots | The unsafe-name guard refused Cross on every `:` row, including directories | Unsafe blocks files only; a directory still opens | `test_remote_volume_root_open` (UI + integration) | b38 built |
+| ui/action-error | A refused action looked like nothing happened | The pane rendered its error only when empty; refusals set only the dock status | Error in the pane band; clears on the next key or a good listing | `test_pane_error`, `test_remote_unsafe_and_folder` | b39 built |
 
 ## File-manager slice (b19–b25)
 
@@ -624,7 +625,7 @@ executor, and fake filesystem:
 
 Hardware pass steps:
 
-1. Install `build/vitaftpshell-v01.00-b38.vpk`.
+1. Install `build/vitaftpshell-v01.00-b39.vpk`.
 2. Launch; confirm `ALL DRIVES` lists `ux0:`, `ur0:`, and `uma0:` when mounted.
 3. Enter `ux0:`, then `ux0:data`. Confirm the rows and that Circle returns to
    `ALL DRIVES` from the volume root.

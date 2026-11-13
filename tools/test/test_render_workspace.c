@@ -312,6 +312,18 @@ static void test_session_lost(void)
     CHECK(trace_has_text("X RECONNECT  O DISMISS"));
 }
 
+static void test_pane_error(void)
+{
+    setup();
+    s_state.active_pane = UI_PANE_REMOTE;
+    snprintf(s_state.panes[UI_PANE_REMOTE].error,
+             sizeof(s_state.panes[UI_PANE_REMOTE].error), "CWD FAILED");
+    render();
+
+    CHECK(trace_text_at_color("CWD FAILED", 500.0f, 102.0f, C_YELLOW));
+    CHECK(!trace_text_at("/GNU/", 500.0f, 102.0f));
+}
+
 int main(void)
 {
     test_ten_rows_and_scroll();
@@ -319,6 +331,7 @@ int main(void)
     test_active_pane();
     test_first_2000();
     test_risk_mark();
+    test_pane_error();
     test_dock_states();
     test_header();
     test_regions();

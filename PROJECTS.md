@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-13 — Phase 6 (b37 hardware-tested, operator report; b38 fixes remote root opening): b32 fixed the remote pane (READING, remote actions, DISCONNECT, keepalive); b36 added REFRESH, unsafe-name refusal, download totals, and MLST upload preflight; b37 closes the review pass: an iterated queue pump (no 128 KiB stack overflow), one session teardown that clears the overwrite latch, a 2000-row cap that lists as a truncated success, the ALL DRIVES download fallback, the high-risk delete warning, MLST send-failure handling, and plan/M1 alignment. Recursive folders (R22/R23) remain deferred and refused. Nineteen host suites, 36 preview states, ASan/UBSan clean | Install b38 and open `UX0:`, `UR0:`, `UMA0:` through the remote pane; then record the b37/b38 hardware results row by row and pull the three logs | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b37.vpk` links the real app. b37 hardware-tested (operator report); b38 built, not tested; no M1–M8 row transcribed yet, so not `verified`. Full b20 core is in `logs/b20/`. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-13 — Phase 6 (b37 hardware-tested, operator report; b38 fixes remote root opening; b39 shows action errors): b32 fixed the remote pane (READING, remote actions, DISCONNECT, keepalive); b36 added REFRESH, unsafe-name refusal, download totals, and MLST upload preflight; b37 closes the review pass: an iterated queue pump (no 128 KiB stack overflow), one session teardown that clears the overwrite latch, a 2000-row cap that lists as a truncated success, the ALL DRIVES download fallback, the high-risk delete warning, MLST send-failure handling, and plan/M1 alignment. Recursive folders (R22/R23) remain deferred and refused. Nineteen host suites, 36 preview states, ASan/UBSan clean | Install b39 and open `UX0:`, `UR0:`, `UMA0:`; trigger a refused action and confirm the pane shows why; then record the b37/b38/b39 results row by row and pull the three logs | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b37.vpk` links the real app. b37 hardware-tested (operator report); b39 built, not tested; no M1–M8 row transcribed yet, so not `verified`. Full b20 core is in `logs/b20/`. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
@@ -43,13 +43,13 @@ target console with evidence. Host tests alone cannot promote it.
   `.c`/`.h` under `src/` plus the nineteen host suites; `./tools/preview/run.sh`
   renders 36 settled states. `./send.sh <vita-ip>` refuses an artifact whose
   build number does not match `BUILD_NUMBER`.
-- **Next:** Install b38 and open `UX0:`, `UR0:`, and `UMA0:` through the
-  remote pane, then record the b37/b38 hardware results row by row in
-  `docs/VERIFICATION.md` (M1–M8, the remote-pane pass, the 2000+ entry folder,
-  the high-risk delete warning, the upload preflight, and the
-  localhost/`FTP.GNU.ORG` path), and pull the three logs with
-  `tools/logs/pull.sh <vita-ip>`. The project stays `building` until every
-  M1–M8 row has a recorded PASS.
+- **Next:** Install b39, open `UX0:`, `UR0:`, and `UMA0:`, and trigger a
+  refused action to confirm the pane names the reason. Then record the
+  b37/b38/b39 hardware results row by row in `docs/VERIFICATION.md` (M1–M8,
+  the remote-pane pass, the 2000+ entry folder, the high-risk delete warning,
+  the upload preflight, and the localhost/`FTP.GNU.ORG` path), and pull the
+  three logs with `tools/logs/pull.sh <vita-ip>`. The project stays `building`
+  until every M1–M8 row has a recorded PASS.
 - **Product shape:** two live panes on the Vita — local files and a saved FTP
   site — with a site manager, transfer dock, local file manager, and an
   anonymous FTP server.
@@ -137,6 +137,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 2026-11-13 | Phase 6 — review pass (U14) | Closed the independent review: `pump_queue` iterates instead of recursing (the 64-item SKIP stack overflow); one `reset_remote_session` clears the queue, batch counters, overwrite latch, remote actions, and upload preflight on DISCONNECT, CONNECT, and loss; a 2000-row cap is a truncated success and the `FIRST 2000` flag is applied with its rows; DOWNLOAD at ALL DRIVES reaches the `ux0:data` fallback; a high-risk delete keeps the boot warning; `ftp_client_mlst` reports a lost control write. Added listing-cap, download-conflict, upload-preflight (unsupported/directory/failure), high-risk-warning, ALL DRIVES download, PASV target, MLST send-failure, and stronger CANCEL tests. Updated the plan (R2, R19, R21-R23, R26, R36, R41, M1) and added D66. Nineteen suites pass, zero warnings, ASan/UBSan clean. Build `vitaftpshell-v01.00-b37.vpk`. No M1–M8 row passed. |
 | 2026-11-13 | Phase 6 — b37 hardware run (U14) | The operator reported the b37 VPK installed and exercised on the console. The b37 fix rows moved from `HOST` to `HW` in `docs/FIXES.md`; row-level M1–M8 observations are still to be transcribed. No log was pulled with the report. The project remains `building`. |
 | 2026-11-13 | Phase 6 — remote volume-root fix (U14) | b38 fixes the b37 regression where the remote pane could not enter its own server's `UX0:`, `UR0:`, or `UMA0:` roots. The unsafe-name guard refused Cross on every row containing `:`, including directories; navigation builds no local path. A directory row now opens, while files still refuse `UNSAFE NAME` and Square still refuses marking. Added reducer and integration `test_remote_volume_root_open`; both were red before the fix. D67. Build `vitaftpshell-v01.00-b38.vpk`; not hardware-tested yet. |
+| 2026-11-13 | Phase 6 — visible action errors (U14) | b39 makes a refused or failed action visible in the pane. The error is drawn in the pane band in place of the path, in yellow, and clears on the next workspace key or a successful listing; worker errors (refused CWD, server reply) use the same field. The unsafe refusal and folder-transfer refusal set it explicitly. D68. Build `vitaftpshell-v01.00-b39.vpk`; not hardware-tested yet. |
 | 2026-11-09 | Phase 4 — operations and state (U8, U16, U17, U9, U15) | Added the ordered transfer queue and single slot; the pure local planner (copy, move, delete, mkdir, rename, merge, conflict gate, risk flags, protected-path refusals); the executor with templed writes, destination sync, aside recovery, rollback, and partial-delete reporting; the input repeat decoder, one-writer UI reducer, and command vocabulary; and the SPSC handoff with critical stop/cancel slots, a coalesced progress seqlock, three listing generations per pane, a bulk lane, and a latched server state. Sixteen host suites pass under ASan/UBSan. Two independent reviews found 16 issues; all were fixed, including the move-batch rollback that could delete the only copy, the overwrite rollback that could leave neither, the volume-root recursion, stale progress after a terminal event, the ACTIONS source, the marked transfer, the high-risk action, the save-dirty state, and the dock focus split. Build `vitaftpshell-v01.00-b10.vpk`. No hardware run. |
 
 ## Links

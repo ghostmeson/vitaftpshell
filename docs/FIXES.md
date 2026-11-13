@@ -8,7 +8,7 @@ This file is an **index**, not the full evidence record:
 - [`VERIFICATION.md`](VERIFICATION.md) owns the hardware matrix, the logs, the
   core-dump analysis, and the host-test evidence.
 - [`DECISIONS.md`](DECISIONS.md) owns the numbered product and architecture
-  choices (D53–D67 for this period).
+  choices (D53–D68 for this period).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the layering and port rules.
 - [`DESIGN.md`](DESIGN.md) owns the settled layout, states, and input.
 
@@ -27,11 +27,12 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b38.vpk`, 248,757 bytes,
-  SHA-256 `00d798a67d913ff5c283b7612a3b20268ed360dd03ea4d2c789ca6954e823061`.
+- **Current artifact:** `vitaftpshell-v01.00-b39.vpk`, 248,828 bytes,
+  SHA-256 `acc6457ce2fc171ac3ce602b2473c12d53e880594eb4e2eb6ff86e3a71b08fe3`.
 - **Last hardware-observed build:** b37 (operator report, 2026-11-13). The
-  report did not enumerate the M1–M8 rows, so those stay `PENDING`. b38 is
-  built but not hardware-tested. b28, b32, and b36 were not separately tested.
+  report did not enumerate the M1–M8 rows, so those stay `PENDING`. b38 and b39
+  are built but not hardware-tested. b28, b32, and b36 were not separately
+  tested.
 - **Latest hardware evidence:** b37 operator report (no log pulled yet);
   `logs/session-b27.log` (local actions, server start, localhost control/login,
   PASV data refusal); `logs/b20/` (complete worker-stack core); `logs/b18/`
@@ -114,6 +115,12 @@ matrix passes.
 | b32 | A pane-less error could write `panes[-1]` | `UI_EVT_ERROR` checked only the upper bound; the command-queue error passes `-1` | `UiStateEvent.pane` is an `int`; all pane accesses check both bounds | host suites | `PENDING b32` |
 | b32 | A selected row could be read while the listing arena was being written | The reducer read `rows[selected]` even when `loading` | Row access returns `NULL` while loading; Cross/Square are refused | `test_remote_actions_availability` | `PENDING b32` |
 
+## Visible action errors (b39)
+
+| Build | Symptom → cause | Fix | Evidence | Status |
+|---|---|---|---|---|
+| b39 | A refused action looked like a software bug: the pane kept its rows and only the small dock line changed | A failed action set `pane->error` but the pane only renders it when empty; the unsafe refusal set only the dock status | Draw the error in the pane band in place of the path; set it for refusals and worker errors; clear it on the next key or a successful listing | `test_pane_error`, `test_remote_unsafe_and_folder` | `HOST b39` |
+
 ## Remote volume-root regression (b38)
 
 | Build | Symptom → cause | Fix | Evidence | Status |
@@ -186,6 +193,7 @@ matrix passes.
 | D65 | Remote refresh, unsafe names, upload preflight, and the folder-transfer limit |
 | D66 | A session teardown owns the batch; `pump_queue` iterates; a capped listing is a truncated success |
 | D67 | The unsafe-name rule guards transfers, not navigation |
+| D68 | A refused action reports inside the pane, not only in the dock |
 
 ## Still open
 

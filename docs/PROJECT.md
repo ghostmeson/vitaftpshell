@@ -21,7 +21,7 @@ server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime exist. `tools/test/run.sh` passes nineteen
 host suites, `tools/preview/run.sh` renders 36 settled states, and `build.sh`
-emits `vitaftpshell-v01.00-b38.vpk` with the real app linked. b16 and b18 have
+emits `vitaftpshell-v01.00-b39.vpk` with the real app linked. b16 and b18 have
 run on the console: b18 proved the drive browser, pinned the IME as the
 new-folder/rename blocker, showed the client failing at TCP connect, and showed
 the server with no client. b20 opened the IME and reached a rename, then the
@@ -42,9 +42,10 @@ session teardown that clears the overwrite latch, a truncated-success listing
 cap, the ALL DRIVES download fallback, the high-risk delete warning, and MLST
 send-failure handling. b37 has run on the console (operator report,
 2026-11-13); b38 fixes the unsafe-name guard refusing to open the server's own
-`UX0:`/`UR0:`/`UMA0:` roots, and is built but not tested. No M1–M8 row result
-has been transcribed; the project stays `building` until every row has a
-recorded PASS.
+`UX0:`/`UR0:`/`UMA0:` roots; b39 shows a refused or failed action in the pane
+band instead of only the dock status. b38 and b39 are built but not tested. No
+M1–M8 row result has been transcribed; the project stays `building` until every
+row has a recorded PASS.
 
 ## Users
 
@@ -92,7 +93,7 @@ requirements R1-R70.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | b37 hardware-tested (operator report); b38 built, not tested; M1–M8 evidence transcription pending |
+| Phase 6: Hardware verification | b37 hardware-tested (operator report); b39 built, not tested; M1–M8 evidence transcription pending |
 
 ## Failure policy
 

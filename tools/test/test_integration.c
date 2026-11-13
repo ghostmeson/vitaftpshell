@@ -987,7 +987,8 @@ static void test_remote_unsafe_name(void)
 
     remote->selected = unsafe_index;
     press(app, INPUT_BIT(INPUT_CROSS));
-    CHECK(strcmp(app_state(app)->status, "UNSAFE NAME") == 0);
+    CHECK(strstr(app_state(app)->status, "UNSAFE NAME") != NULL);
+    CHECK(strstr(remote->error, "UNSAFE NAME") != NULL);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
 
     press(app, INPUT_BIT(INPUT_TRIANGLE));
