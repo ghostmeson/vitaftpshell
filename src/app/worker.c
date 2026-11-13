@@ -303,18 +303,6 @@ static const char *last_name(const char *path)
 }
 
 /* A remote listing supplies one name; it may not smuggle a local path. R44. */
-static int remote_name_is_safe(const char *name)
-{
-    if (name == NULL || name[0] == '\0')
-        return 0;
-    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
-        return 0;
-    for (const char *p = name; *p != '\0'; ++p) {
-        if (*p == '/' || *p == '\\' || *p == ':')
-            return 0;
-    }
-    return 1;
-}
 
 static const char *remote_last_name(const char *path)
 {
@@ -602,6 +590,7 @@ static void worker_list_local(Worker *worker, const char *path)
     }
 
     FsResult next = FS_END;
+    int stopped_at_cap = 0;
     FsEntry entry;
     while ((next = worker->ports.fs->list_next(worker->ports.fs->ctx, dir,
                                                &entry)) == FS_OK) {
@@ -609,6 +598,7 @@ static void worker_list_local(Worker *worker, const char *path)
             continue;
         if (count >= WORKER_LIST_CAP) {
             truncated = 1;
+            stopped_at_cap = 1;
             break;
         }
         UiRow *row = &rows[count++];
@@ -654,7 +644,9 @@ static void worker_list_local(Worker *worker, const char *path)
         }
     }
 
-    int ok = next == FS_END;
+    /* A folder that stops at the cap is a complete, truncated listing, not a
+     * read error. Only a real list_next failure is a failed listing. */
+    int ok = stopped_at_cap || next == FS_END;
     log_event(worker, LOGEV_LIST, NULL, NULL, canonical.text,
               ok ? "end" : "read", ok ? "app" : "storage", count, 0);
     emit_listing_end(worker, UI_PANE_LOCAL, canonical.text, ok, truncated,
@@ -700,7 +692,7 @@ static void remote_listing_row(Worker *worker, const ListingEntry *entry)
                     : (entry->type == LISTING_FILE ? UI_ROW_FILE : UI_ROW_FILE);
     row->size = entry->size;
     row->size_known = entry->size_known;
-    row->unsafe = (uint8_t)!remote_name_is_safe(entry->name);
+    row->unsafe = (uint8_t)!path_name_is_safe(entry->name);
 }
 
 static void remote_listing_end(Worker *worker, int ok)
@@ -1309,6 +1301,32 @@ static void queue_remote_action(Worker *worker, const UiCommand *command)
     pump_remote_actions(worker);
 }
 
+static void batch_reset(Worker *worker)
+{
+    worker->batch_total = 0;
+    worker->batch_done = 0;
+    worker->batch_conflict_decided = 0;
+    worker->batch_conflict = XFER_CONFLICT_NONE;
+}
+
+/*
+ * Every path that ends a remote session drops the queued batch with it. A
+ * batch cannot resume across a new login, and keeping an OVERWRITE ALL answer
+ * would silently replace files on the next site (D66).
+ */
+static void reset_remote_session(Worker *worker)
+{
+    worker->connected = 0;
+    worker->refresh_remote = 0;
+    worker->remote_action_count = 0;
+    worker->upload_stat_active = 0;
+    worker->upload_stat_ready = 0;
+    worker->upload_stat_failed = 0;
+    remote_listing_abort(worker);
+    xfer_init(&worker->queue);
+    batch_reset(worker);
+}
+
 static void handle_disconnect(Worker *worker)
 {
     if (worker->transfer_active) {
@@ -1318,16 +1336,7 @@ static void handle_disconnect(Worker *worker)
     }
 
     (void)ftp_client_disconnect(worker->client);
-    worker->connected = 0;
-    worker->refresh_remote = 0;
-    worker->remote_action_count = 0;
-    worker->upload_stat_active = 0;
-    worker->upload_stat_ready = 0;
-    worker->upload_stat_failed = 0;
-    remote_listing_abort(worker);
-    xfer_init(&worker->queue);
-    worker->batch_total = 0;
-    worker->batch_done = 0;
+    reset_remote_session(worker);
     log_event(worker, LOGEV_CONNECT,
               worker->connecting_valid ? worker->connecting_site.name : NULL,
               worker->connecting_valid ? worker->connecting_site.host : NULL,
@@ -1480,16 +1489,7 @@ static void handle_connect(Worker *worker, const UiCommand *command)
     if (ftp_client_state(worker->client) != FTP_CLIENT_IDLE) {
         (void)ftp_client_disconnect(worker->client);
     }
-    worker->connected = 0;
-    worker->refresh_remote = 0;
-    worker->remote_action_count = 0;
-    worker->upload_stat_active = 0;
-    worker->upload_stat_ready = 0;
-    worker->upload_stat_failed = 0;
-    remote_listing_abort(worker);
-    xfer_init(&worker->queue);
-    worker->batch_total = 0;
-    worker->batch_done = 0;
+    reset_remote_session(worker);
 
     worker->connecting_site = *site;
     worker->connecting_valid = 1;
@@ -1536,12 +1536,8 @@ static int local_destination_exists(Worker *worker, const XferItem *item)
 
 static void batch_finish(Worker *worker)
 {
-    if (worker->batch_total > 0 && worker->batch_done >= worker->batch_total) {
-        worker->batch_total = 0;
-        worker->batch_done = 0;
-        worker->batch_conflict_decided = 0;
-        worker->batch_conflict = XFER_CONFLICT_NONE;
-    }
+    if (worker->batch_total > 0 && worker->batch_done >= worker->batch_total)
+        batch_reset(worker);
 }
 
 static void start_transfer_item(Worker *worker, const XferItem *item)
@@ -1605,109 +1601,114 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
 
 static void pump_queue(Worker *worker)
 {
-    if (worker->transfer_active || worker->pending.valid)
-        return;
-    if (ftp_server_busy(worker->server))
-        return;
-    if (ftp_client_busy(worker->client))
-        return;
-
-    XferItem item;
-    int already_active = xfer_busy(&worker->queue);
-    if (already_active) {
-        if (!xfer_active(&worker->queue, &item))
+    /*
+     * Iterate instead of calling back into this function after a skipped or
+     * failed item. Each frame carries an XferItem, and a 64-item SKIP batch
+     * would otherwise need more than the 128 KiB worker stack (D57, D66).
+     */
+    for (;;) {
+        if (worker->transfer_active || worker->pending.valid)
             return;
-    } else if (!xfer_claim(&worker->queue, &item)) {
-        return;
-    }
+        if (ftp_server_busy(worker->server))
+            return;
+        if (ftp_client_busy(worker->client))
+            return;
 
-    /* The MLST check for this upload finished on the previous step. */
-    if (worker->upload_stat_ready) {
-        worker->upload_stat_ready = 0;
-        if (worker->upload_stat_failed) {
-            emit_error(worker, UI_PANE_REMOTE, "REMOTE CHECK FAILED",
-                       worker->upload_stat_cause, worker->upload_stat_stage);
-            xfer_release(&worker->queue, XFER_ITEM_FAILED,
-                         worker->upload_stat_cause, worker->upload_stat_stage,
-                         NULL);
-            worker->batch_done++;
-            batch_finish(worker);
-            pump_queue(worker);
+        XferItem item;
+        int already_active = xfer_busy(&worker->queue);
+        if (already_active) {
+            if (!xfer_active(&worker->queue, &item))
+                return;
+        } else if (!xfer_claim(&worker->queue, &item)) {
             return;
         }
-        if (worker->upload_stat_unsupported || !worker->upload_stat_exists) {
+
+        /* The MLST check for this upload finished on the previous step. */
+        if (worker->upload_stat_ready) {
+            worker->upload_stat_ready = 0;
+            if (worker->upload_stat_failed) {
+                emit_error(worker, UI_PANE_REMOTE, "REMOTE CHECK FAILED",
+                           worker->upload_stat_cause,
+                           worker->upload_stat_stage);
+                xfer_release(&worker->queue, XFER_ITEM_FAILED,
+                             worker->upload_stat_cause,
+                             worker->upload_stat_stage, NULL);
+                worker->batch_done++;
+                batch_finish(worker);
+                continue;
+            }
+            if (worker->upload_stat_unsupported || !worker->upload_stat_exists) {
+                start_transfer_item(worker, &item);
+                return;
+            }
+            if (worker->upload_stat_is_dir) {
+                emit_error(worker, UI_PANE_REMOTE, "DESTINATION IS A FOLDER",
+                           OP_CAUSE_APP, OP_STAGE_TRANSFER);
+                xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
+                             OP_STAGE_TRANSFER, NULL);
+                worker->batch_done++;
+                batch_finish(worker);
+                continue;
+            }
+            if (worker->batch_conflict == XFER_CONFLICT_SKIP_EXISTING) {
+                xfer_release(&worker->queue, XFER_ITEM_DONE, OP_CAUSE_APP,
+                             OP_STAGE_TRANSFER, NULL);
+                worker->batch_done++;
+                batch_finish(worker);
+                continue;
+            }
+            if (!worker->batch_conflict_decided) {
+                request_transfer_conflict(worker, &item);
+                return;
+            }
             start_transfer_item(worker, &item);
             return;
         }
-        if (worker->upload_stat_is_dir) {
-            emit_error(worker, UI_PANE_REMOTE, "DESTINATION IS A FOLDER",
-                       OP_CAUSE_APP, OP_STAGE_TRANSFER);
+
+        if (item.direction == XFER_DIR_DOWNLOAD) {
+            if (local_destination_exists(worker, &item) &&
+                !worker->batch_conflict_decided) {
+                request_transfer_conflict(worker, &item);
+                return;
+            }
+            if (local_destination_exists(worker, &item) &&
+                worker->batch_conflict == XFER_CONFLICT_SKIP_EXISTING) {
+                xfer_release(&worker->queue, XFER_ITEM_DONE, OP_CAUSE_APP,
+                             OP_STAGE_TRANSFER, NULL);
+                worker->batch_done++;
+                batch_finish(worker);
+                continue;
+            }
+            start_transfer_item(worker, &item);
+            return;
+        }
+
+        /* Uploads: check the remote destination before the STOR when the
+         * server advertises MLST. A server without it starts the transfer
+         * directly, as before. R41 asks once per batch and applies the answer
+         * to every file. */
+        if (worker->batch_conflict != XFER_CONFLICT_OVERWRITE_ALL &&
+            ftp_client_has_mlsd(worker->client)) {
+            FtpClientResult check =
+                ftp_client_mlst(worker->client, item.destination.text);
+            if (check == FTP_CLIENT_OK) {
+                worker->upload_stat_active = 1;
+                return;
+            }
+            if (check == FTP_CLIENT_BUSY)
+                return; /* a keepalive is in flight; retry on the next step */
+            emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
+                       OP_STAGE_CONNECT);
             xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
-                         OP_STAGE_TRANSFER, NULL);
+                         OP_STAGE_CONNECT, NULL);
             worker->batch_done++;
             batch_finish(worker);
-            pump_queue(worker);
-            return;
+            continue;
         }
-        if (worker->batch_conflict == XFER_CONFLICT_SKIP_EXISTING) {
-            xfer_release(&worker->queue, XFER_ITEM_DONE, OP_CAUSE_APP,
-                         OP_STAGE_TRANSFER, NULL);
-            worker->batch_done++;
-            batch_finish(worker);
-            pump_queue(worker);
-            return;
-        }
-        if (!worker->batch_conflict_decided) {
-            request_transfer_conflict(worker, &item);
-            return;
-        }
+
         start_transfer_item(worker, &item);
         return;
     }
-
-    if (item.direction == XFER_DIR_DOWNLOAD) {
-        if (local_destination_exists(worker, &item) &&
-            !worker->batch_conflict_decided) {
-            request_transfer_conflict(worker, &item);
-            return;
-        }
-        if (local_destination_exists(worker, &item) &&
-            worker->batch_conflict == XFER_CONFLICT_SKIP_EXISTING) {
-            xfer_release(&worker->queue, XFER_ITEM_DONE, OP_CAUSE_APP,
-                         OP_STAGE_TRANSFER, NULL);
-            worker->batch_done++;
-            batch_finish(worker);
-            pump_queue(worker);
-            return;
-        }
-        start_transfer_item(worker, &item);
-        return;
-    }
-
-    /* Uploads: check the remote destination before the STOR when the server
-     * advertises MLST. A server without it starts the transfer directly, as
-     * before. R41 asks once per batch and applies the answer to every file. */
-    if (worker->batch_conflict != XFER_CONFLICT_OVERWRITE_ALL &&
-        ftp_client_has_mlsd(worker->client)) {
-        FtpClientResult check =
-            ftp_client_mlst(worker->client, item.destination.text);
-        if (check == FTP_CLIENT_OK) {
-            worker->upload_stat_active = 1;
-            return;
-        }
-        if (check == FTP_CLIENT_BUSY)
-            return; /* a keepalive is in flight; retry on the next step */
-        emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
-                   OP_STAGE_CONNECT);
-        xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
-                     OP_STAGE_CONNECT, NULL);
-        worker->batch_done++;
-        batch_finish(worker);
-        pump_queue(worker);
-        return;
-    }
-
-    start_transfer_item(worker, &item);
 }
 
 static void default_local_dir(Worker *worker, char *out, size_t cap)
@@ -1753,7 +1754,7 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
             return;
         }
         const char *name = last_name(source.text);
-        if (!remote_name_is_safe(name)) {
+        if (!path_name_is_safe(name)) {
             emit_error(worker, UI_PANE_LOCAL, "UNSAFE NAME", OP_CAUSE_APP,
                        OP_STAGE_PLAN);
             return;
@@ -1782,7 +1783,7 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
         item.direction = XFER_DIR_DOWNLOAD;
         fmt_copy(item.source.text, sizeof(item.source.text), command->path);
         const char *name = remote_last_name(command->path);
-        if (!remote_name_is_safe(name)) {
+        if (!path_name_is_safe(name)) {
             emit_error(worker, UI_PANE_REMOTE, "UNSAFE REMOTE NAME",
                        OP_CAUSE_SERVER, OP_STAGE_PLAN);
             return;
@@ -1982,12 +1983,6 @@ static void client_event(void *ctx, const FtpClientEvent *event)
                    event->state == FTP_CLIENT_FAILED ||
                    event->state == FTP_CLIENT_STALLED) {
             worker->connected = 0;
-            worker->refresh_remote = 0;
-            worker->remote_action_count = 0;
-            worker->upload_stat_active = 0;
-            worker->upload_stat_ready = 0;
-            worker->upload_stat_failed = 0;
-            remote_listing_abort(worker);
             if (worker->ports.log != NULL) {
                 LogRecord record;
                 logev_init(&record, LOGEV_CONNECT_FAIL);
@@ -2020,11 +2015,7 @@ static void client_event(void *ctx, const FtpClientEvent *event)
                                    event->total_known, event->cause,
                                    event->stage, worker->transfer_start_ms);
             }
-            xfer_init(&worker->queue);
-            worker->batch_total = 0;
-            worker->batch_done = 0;
-            worker->batch_conflict_decided = 0;
-            worker->batch_conflict = XFER_CONFLICT_NONE;
+            reset_remote_session(worker);
         }
         break;
     case FTP_CLIENT_EVENT_LISTING_BEGIN:
@@ -2312,10 +2303,7 @@ static void handle_command(Worker *worker, const UiCommand *command)
                 if (command->choice == UI_CHOICE_CANCEL) {
                     /* CANCEL ends the batch, not just the item in the prompt. */
                     xfer_init(&worker->queue);
-                    worker->batch_total = 0;
-                    worker->batch_done = 0;
-                    worker->batch_conflict_decided = 0;
-                    worker->batch_conflict = XFER_CONFLICT_NONE;
+                    batch_reset(worker);
                     HandoffEvent cancelled;
                     event_init(&cancelled, HANDOFF_EVT_TRANSFER_CANCELLED);
                     emit(worker, &cancelled);

@@ -21,7 +21,7 @@ server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime exist. `tools/test/run.sh` passes nineteen
 host suites, `tools/preview/run.sh` renders 36 settled states, and `build.sh`
-emits `vitaftpshell-v01.00-b36.vpk` with the real app linked. b16 and b18 have
+emits `vitaftpshell-v01.00-b37.vpk` with the real app linked. b16 and b18 have
 run on the console: b18 proved the drive browser, pinned the IME as the
 new-folder/rename blocker, showed the client failing at TCP connect, and showed
 the server with no client. b20 opened the IME and reached a rename, then the
@@ -37,8 +37,11 @@ address and the reply port; b32 fixes the remote pane (READING cleared on a
 failed CWD, remote actions over the FTP client, DISCONNECT, site teardown, an
 idle NOOP for liveness, remote mark pruning); b36 adds REFRESH, unsafe-name
 refusal, download totals, upload MLST preflight, and folder-transfer refusal
-(R22/R23 deferred). No M1–M8 row has passed; the project stays `building` until
-it does.
+(R22/R23 deferred); b37 closes the review pass with an iterated queue pump, one
+session teardown that clears the overwrite latch, a truncated-success listing
+cap, the ALL DRIVES download fallback, the high-risk delete warning, and MLST
+send-failure handling. No M1–M8 row has passed; the project stays `building`
+until it does.
 
 ## Users
 
@@ -86,7 +89,7 @@ requirements R1-R70.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | M1–M8 evidence; project becomes `verified` — in progress (b36) |
+| Phase 6: Hardware verification | M1–M8 evidence; project becomes `verified` — in progress (b37) |
 
 ## Failure policy
 

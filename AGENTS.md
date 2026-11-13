@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 nineteen host suites, and `tools/preview/run.sh` renders 36 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b36.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b37.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -27,7 +27,10 @@ connection by using the control peer's address and the reply port; b32 contains
 the remote-pane fix (stuck READING, remote actions routed to the FTP client, DISCONNECT,
 site teardown, idle NOOP liveness, remote mark pruning); b36 adds REFRESH,
 unsafe-name refusal, download totals, upload MLST preflight, and folder-transfer
-refusal (R22/R23 deferred). No M1–M8 row has passed, so the project is
+refusal (R22/R23 deferred); b37 closes the review pass with an iterated queue
+pump, one session teardown that clears the overwrite latch, a truncated-success
+listing cap, the ALL DRIVES download fallback, the high-risk delete warning, and
+MLST send-failure handling. No M1–M8 row has passed, so the project is
 `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
@@ -319,7 +322,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D65
+    DECISIONS.md       numbered decisions, D1-D66
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification

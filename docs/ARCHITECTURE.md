@@ -151,7 +151,12 @@ arena.
   remote-action path from D64, not the local `fsop` planner. REFRESH uses the
   existing `UI_CMD_REFRESH`; a listing name with a separator or dot segment is
   marked unsafe and never reaches a transfer; a folder source is refused with
-  `FOLDER NOT SUPPORTED` until R22/R23 are implemented (D65).
+  `FOLDER NOT SUPPORTED` until R22/R23 are implemented (D65). One
+  `reset_remote_session` owns every teardown (DISCONNECT, CONNECT, and
+  LOST/FAILED/STALLED): it drops the queue, the batch counters, the conflict
+  answer, the remote actions, and the upload preflight together (D66).
+  `pump_queue` iterates over released items instead of recursing, so a full skip
+  batch cannot exhaust the worker stack.
 - `src/core/handoff.c` carries commands and events across fixed rings. A server
   stop and a cancel have dedicated slots and are never lost to a full command
   ring; progress is a coalesced seqlock latch, so a terminal state cannot be

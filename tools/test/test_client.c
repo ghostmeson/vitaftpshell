@@ -847,6 +847,15 @@ static void test_pasv_nat(void)
 
     CHECK(ftp_client_state(client) == FTP_CLIENT_LISTING);
 
+    /* The data socket must dial the control peer, not the PASV-advertised
+     * 10.0.0.1, and must use the reply port 19*256+140 = 5004 (D63). */
+    NetSocket *data = fake_net_last_connected();
+    uint32_t addr = 0;
+    uint16_t port = 0;
+    fake_net_socket_peer(data, &addr, &port);
+    CHECK(addr == 0xC0A8012Au);
+    CHECK(port == 5004);
+
     ftp_client_destroy(client);
 }
 
@@ -1199,6 +1208,27 @@ static void test_disconnect(void)
     ftp_client_destroy(client);
 }
 
+static void test_mlst_send_failure(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    /* The control write dies while the worker is asking about the destination.
+     * The call must report the lost session, not accept an op that can never
+     * complete and leave the upload check latched (b37). */
+    fake_net_fail_send_next(NET_ERROR);
+    CHECK(ftp_client_mlst(client, "/X.BIN") == FTP_CLIENT_NOT_CONNECTED);
+    CHECK(ftp_client_state(client) != FTP_CLIENT_READY);
+
+    ftp_client_destroy(client);
+}
+
 static void test_mlst(void)
 {
     setup();
@@ -1267,6 +1297,7 @@ int main(void)
     test_high_risk();
     test_simple_commands();
     test_nlst();
+    test_mlst_send_failure();
     test_mlst();
     test_keepalive();
     test_idle_control_drop();

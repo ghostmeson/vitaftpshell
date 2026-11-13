@@ -73,7 +73,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 **Workspace and navigation**
 
 - R1. The app opens into a two-pane WORKSPACE: local files and the connected remote site, with one pane active at a time.
-- R2. The local pane starts at the last local path when it still exists, otherwise at `ux0:data` when `ux0:` is mounted, otherwise at the first mounted volume root; it shows only volumes that respond.
+- R2. The local pane starts at the virtual `ALL DRIVES` root that lists the mounted volumes (D53); opening a volume shows its folders. The last local path is remembered for the upload fallback when it still exists. The pane shows only volumes that respond.
 - R3. The remote pane starts at the server's working directory after login; before a connection it shows a not-connected state and no stale rows. While loading it names the path being read; an empty folder says it is empty; after a control-channel drop it keeps its rows but disables row actions until reconnect.
 - R4. The active pane shows its full path; the remote pane also shows the site name and `host:port`.
 - R5. Up and Down move the row selection; the left stick scrolls the active list without changing selection; the selection stays visible.
@@ -107,14 +107,14 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 
 **FTP client**
 
-- R19. The client uses passive FTP only; active mode is not offered in v1. The data channel connects to the control connection's peer address, and a PASV reply advertising a different address is refused through R25.
+- R19. The client uses passive FTP only; active mode is not offered in v1. The data channel connects to the control connection's peer address; a PASV reply's advertised host is ignored and its port is used (D63).
 - R20. Directory listings use MLSD when the server offers it, fall back to LIST, parse Unix and DOS formats, skip `.` and `..`, and sort directories before files.
-- R21. Remote browsing supports enter, parent, refresh, and shows name, type, and size when known; unknown size renders `--`.
-- R22. The client downloads files and recursively downloads folders.
-- R23. The client uploads files and recursively uploads folders.
+- R21. Remote browsing supports enter, parent, refresh, and shows name, type, and size when known; unknown size renders `--`. A listing is capped at 2000 rows and marks a truncated one `FIRST 2000` (D65).
+- R22. The client downloads files. Recursive folder download is deferred from v1 and refused with `FOLDER NOT SUPPORTED` (D65).
+- R23. The client uploads files. Recursive folder upload is deferred from v1 and refused with `FOLDER NOT SUPPORTED` (D65).
 - R24. The client creates remote directories, renames, deletes files, and deletes directories; every remote delete requires an explicit confirmation that names the items and says it cannot be undone.
 - R25. A remote command failure reports the server reply or a mapped reason; the app does not claim success.
-- R26. A dropped control connection marks the session disconnected, stops active transfers with an error, and offers reconnect to the same site; a dropped data connection aborts the active transfer and keeps the session when the control channel is healthy. Resolve, connect, login, and the first listing share one 10-second budget, with caps of 3 s resolve, 3 s connect, 2 s greeting and login, and 2 s first listing; a data-channel read has its own 15 s idle deadline, and expiry puts the dock in a stalled state naming the last completed step, stops the transfer, and keeps the session when only the data channel timed out.
+- R26. A dropped control connection marks the session disconnected, stops active transfers with an error, and offers reconnect to the same site; a dropped data connection aborts the active transfer and keeps the session when the control channel is healthy. Resolve, connect, login, and the first listing share a 35-second budget, with caps of 3 s resolve, 12 s connect, 5 s greeting and login, and 10 s first listing (D62); a data-channel read has its own 20 s idle deadline (D63), and expiry puts the dock in a stalled state naming the last completed step, stops the transfer, and keeps the session when only the data channel timed out.
 - R27. The client supports plain FTP only in v1; FTPS and SFTP are outside the product. A server reply that rejects the session is reported through R25.
 
 **Local file manager**
@@ -127,7 +127,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - R33. Volume roots and protected system directories cannot be renamed, moved, or deleted; the app names the protection.
 - R34. `ur0:tai/boot_config.txt` is never written, renamed, or deleted by the local manager, the server, or a download from a remote site.
 - R35. Local operations show progress and can be cancelled; a cancelled or failed operation leaves no partial output presented as complete. A copy, move, upload, or download leaves the destination unchanged on cancel. A recursive delete cannot be rolled back, so it stops after the item in flight and reports `DELETED n OF m`; the remaining items stay.
-- R36. The local pane shows free space for its volume when the platform reports it, and `--` when it does not.
+- R36. The local pane shows free space for its volume when the platform reports it. The figure is cached per volume and refreshed at the volume root or on first use (D59); before any report it renders `--`.
 - R37. Names that do not fit truncate with `..`; the full name remains available in the actions or confirm view. Non-ASCII names render with a fallback glyph but operations use the original bytes.
 
 **Transfers**
@@ -135,7 +135,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - R38. One transfer is active at a time; additional items are queued in selection order. A server-side transfer occupies the same slot and is shown in the dock; a server data command, or a server command that mutates a path (`STOR`, `DELE`, `RNFR`, `RNTO`, `MKD`, `RMD`), while another operation owns the slot is refused with a 450 busy reply.
 - R39. The dock shows the active item, direction, transferred bytes, total bytes and percentage when known, and queue depth; when the total is unknown it shows transferred bytes with `--` for total and percentage; when idle it shows the active pane and selection summary.
 - R40. Cancelling the active transfer requires confirmation; queued items remain and can be cleared.
-- R41. Any app-side transfer whose destination exists asks once: OVERWRITE ALL, SKIP EXISTING, or CANCEL; a single item is treated as a batch of one. An existing destination directory is merged, never replaced: missing folders are created, files inside follow the same rule one by one, and SKIP EXISTING applies per file. A file received in server mode overwrites through the templed write without a console prompt, because the anonymous client is the one writing and the console may be unattended; the SERVER warning discloses it (D41).
+- R41. Any app-side transfer whose destination exists asks once: OVERWRITE ALL, SKIP EXISTING, or CANCEL; a single item is treated as a batch of one. An existing destination directory is merged, never replaced: missing folders are created, files inside follow the same rule one by one, and SKIP EXISTING applies per file. An upload asks only when the server can report the destination through MLST; a server without MLST starts the STOR directly and cannot be preflighted (D65). A file received in server mode overwrites through the templed write without a console prompt, because the anonymous client is the one writing and the console may be unattended; the SERVER warning discloses it (D41).
 - R42. A failed or cancelled transfer leaves no destination file that looks complete; every write goes to a temporary name in the destination directory and is renamed into place only after the complete file is closed, so a failure leaves the previous destination byte-identical. A partial is removed. A cross-volume move is all-or-nothing: the source is deleted only after the copy is renamed into place, and if that delete fails the destination is removed as well, so the volumes never disagree about whether the file moved; if the rollback also fails, the dock names both paths. This applies to files received in server mode as well as app-side transfers.
 - R43. Transfers continue while the user navigates either pane; the dock is not modal.
 - R44. Uploads and downloads preserve file names and relative folder structure; a remote-supplied name containing `/`, `\`, `:`, NUL, or a `..` segment is refused with an inline error before any local path is built.
@@ -1020,7 +1020,7 @@ The units above landed with these recorded additions and shapes:
 
 | Row | Setup | Passes when |
 |---|---|---|
-| M1 | `ftp.gnu.org`, anonymous, passive | Connect to first listing under 10 s; a 1 MB+ download completes with matching size |
+| M1 | `ftp.gnu.org`, anonymous, passive | First listing within the 35 s session budget (12 s connect, 10 s first listing); a 1 MB+ download completes with matching size |
 | M2 | LAN server with MLSD | MLSD is used, browse and download complete |
 | M3 | LAN server with MLSD disabled | LIST fallback parses, browse and download complete |
 | M4 | DOS-listing server | Names, sizes, and folders parse; a download completes |

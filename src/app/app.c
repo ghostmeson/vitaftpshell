@@ -353,15 +353,17 @@ static void drain_events(App *app)
              * Apply the published rows before the end event. The begin event
              * has already reset the pane, so this is the exact point where the
              * two channels meet in order. Applying later let the begin reset
-             * arrive after the rows and erase a populated folder.
+             * arrive after the rows and erase a populated folder. The flag is
+             * stored first so the rows and their truncation come from one
+             * event (D65).
              */
+            if (event.pane < UI_PANE_COUNT)
+                app->listing_truncated[event.pane] = event.truncated;
             apply_listing(app, (UiPane)event.pane);
             ui.kind = UI_EVT_LISTING_END;
             ui.pane = event.pane;
             ui.ok = event.ok;
             ui.truncated = event.truncated;
-            if (event.pane < UI_PANE_COUNT)
-                app->listing_truncated[event.pane] = event.truncated;
             fmt_copy(ui.text, sizeof(ui.text),
                      event.ok ? ""
                               : (event.detail[0] != '\0' ? event.detail

@@ -31,6 +31,8 @@ void fake_net_set_link(int up, int known, uint32_t addr, uint16_t port);
 void fake_net_fail_next(NetResult result);
 
 NetSocket *fake_net_last_connected(void);
+/* The address a socket actually dialed; 0 when it never connected. */
+void fake_net_socket_peer(NetSocket *socket, uint32_t *addr, uint16_t *port);
 NetSocket *fake_net_last_listener(void);
 /* Listen/accept order, for a server test that binds two ports. */
 unsigned fake_net_listener_count(void);

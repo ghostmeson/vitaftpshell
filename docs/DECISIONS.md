@@ -1420,3 +1420,40 @@ server, and a partly-known download shows its size. Recursive transfers remain
 the one plan item deliberately left out; the UI refuses them instead of sending
 a folder as one RETR/STOR. Adding recursion later should reuse the same name,
 total, and conflict rules.
+
+## D66. A session teardown owns the batch, and the queue pump iterates
+
+**Date:** 2026-11-13
+**Status:** accepted; closes the Phase 6 review pass.
+
+**Context:** The review found that DISCONNECT and CONNECT cleared the queue
+and the batch counters but not the OVERWRITE ALL / SKIP EXISTING latch, so an
+answer given on one site could silently replace files on the next. It also
+found `pump_queue` calling itself once per skipped or failed item; with a
+2.4 KiB frame and a 128 KiB worker stack, a 64-item SKIP batch could overflow.
+A local folder that stopped at the 2000-row cap was emitted as a failed
+listing, the truncation flag reached the pane one listing late, and a
+high-risk delete confirmation lost the console-boot sentence.
+
+**Decision:**
+
+1. Every path that ends a remote session (DISCONNECT, CONNECT, and
+   LOST/FAILED/STALLED) calls one `reset_remote_session`: the transfer queue,
+   the batch counters, the conflict answer, the remote action queue, and the
+   upload preflight state are dropped together. A batch never resumes across
+   a login.
+2. `pump_queue` iterates; after releasing a skipped or failed item it loops to
+   the next item instead of calling itself. The worker step already calls it
+   every frame.
+3. A listing that stops at `WORKER_LIST_CAP` is a successful truncated listing
+   (`ok=1`, `truncated=1`); only a real `list_next` failure is a failed
+   listing. The truncation flag is stored before the rows are applied, so the
+   badge belongs to the same listing.
+4. A high-risk DELETE confirmation carries the full boot warning, not only the
+   ordinary "cannot be undone" line.
+
+**Consequences:** A stale overwrite answer cannot cross a session; the queue
+can no longer exhaust the worker stack; a 2000+ entry folder browses as a
+truncated success; and the destructive confirmation says what is at risk. The
+plan's R2, R19, R21-R23, R26, R36, R41, and M1 now describe the shipped
+behavior.

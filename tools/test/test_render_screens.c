@@ -447,6 +447,17 @@ static void test_confirm(void)
     CHECK(trace_has_text("DELETE"));
     CHECK(trace_has_line(256.0f, 362.0f, 464.0f, 362.0f, C_WHITE));
 
+    /* A delete inside a tai folder keeps the console-boot warning (R71). */
+    snprintf(confirm->warning, sizeof(confirm->warning),
+             "A BAD EDIT CAN STOP THE CONSOLE BOOTING. THERE IS NO UNDO.");
+    snprintf(confirm->risk_path, sizeof(confirm->risk_path),
+             "ur0:tai/X.SUPRX");
+    confirm->high_risk = 1;
+    render();
+    CHECK(trace_text_at_color(
+        "A BAD EDIT CAN STOP THE CONSOLE BOOTING. THERE IS NO UNDO.", 210.0f,
+        336.0f, C_YELLOW));
+
     memset(confirm, 0, sizeof(*confirm));
     confirm->kind = UI_CONFIRM_CONFLICT;
     snprintf(confirm->title, sizeof(confirm->title),
