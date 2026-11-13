@@ -349,7 +349,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - The Vita has no maintained on-device FTP client. This is an unverified premise from `STRATEGY.md`; v1 does not depend on it for correctness.
 - The system IME is available for text entry. If it cannot load, the app reports the failure and keeps the previous value.
 - `ux0:`, `ur0:`, and `uma0:` may not all be present. An absent volume is normal, not an error.
-- The Vita socket path is unverified on hardware: `vita-cap-test` is `built`, not `verified`. The first hardware session is the WiFi proof.
+- The Vita socket path has run on hardware in b37 (operator report, 2026-11-13); the row-level connect, PASV, transfer, and timeout results still need transcription in `VERIFICATION.md`.
 - A project status of `verified` requires hardware evidence; host tests alone cannot promote it.
 
 ### Outstanding Questions

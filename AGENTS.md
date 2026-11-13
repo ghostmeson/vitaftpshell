@@ -30,7 +30,8 @@ unsafe-name refusal, download totals, upload MLST preflight, and folder-transfer
 refusal (R22/R23 deferred); b37 closes the review pass with an iterated queue
 pump, one session teardown that clears the overwrite latch, a truncated-success
 listing cap, the ALL DRIVES download fallback, the high-risk delete warning, and
-MLST send-failure handling. No M1–M8 row has passed, so the project is
+MLST send-failure handling. b37 has run on the console (operator report,
+2026-11-13), but no M1–M8 row result has been transcribed, so the project is
 `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
