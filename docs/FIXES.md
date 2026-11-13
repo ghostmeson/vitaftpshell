@@ -29,13 +29,14 @@ matrix passes.
 
 - **Current artifact:** `vitaftpshell-v01.00-b37.vpk`, 248,620 bytes,
   SHA-256 `a60584582e7c1f89ebf8527be454d84cda1158a3c0acae1e0061fbc55b3eb765`.
-- **Last hardware-observed build:** b27. b28, b32, b36, and b37 are not
-  hardware-tested yet.
-- **Latest hardware evidence:** `logs/session-b27.log` (local actions, server
-  start, localhost control/login, PASV data refusal); `logs/b20/` (complete
-  worker-stack core); `logs/b18/` (first diagnostic log and truncated core).
-  The `logs/` tree is local and git-ignored; copy it with
-  `tools/logs/pull.sh <vita-ip>`.
+- **Last hardware-observed build:** b37 (operator report, 2026-11-13). The
+  report did not enumerate the M1–M8 rows, so those stay `PENDING`. b28, b32,
+  and b36 were not separately tested.
+- **Latest hardware evidence:** b37 operator report (no log pulled yet);
+  `logs/session-b27.log` (local actions, server start, localhost control/login,
+  PASV data refusal); `logs/b20/` (complete worker-stack core); `logs/b18/`
+  (first diagnostic log and truncated core). The `logs/` tree is local and
+  git-ignored; copy it with `tools/logs/pull.sh <vita-ip>`.
 - **Matrix:** no M1–M8 row has passed. The FTP server works on hardware; the
   local manager and FTP client still need the hardware pass.
 
@@ -117,16 +118,16 @@ matrix passes.
 
 | Build | Symptom → cause | Fix | Evidence | Status |
 |---|---|---|---|---|
-| b37 | A 64-item SKIP batch could overflow the 128 KiB worker stack | `pump_queue` called itself once per released item; its frame is 2.4 KiB | Iterate in `pump_queue` and `continue` to the next item | host suites; `test_upload_conflict` SKIP/CANCEL | `HOST b37` |
-| b37 | OVERWRITE consent survived DISCONNECT and CONNECT | The teardown paths cleared the queue and counters but not the conflict latch; `batch_finish` could not clear it after the counters were zeroed | One `reset_remote_session` drops the queue, batch counters, conflict answer, remote actions, and upload preflight; `batch_reset` owns the fields | `test_upload_conflict` CANCEL; code path | `HOST b37`; cross-session scenario untested |
-| b37 | A 2000+ entry local folder was reported failed and wiped | The cap break left `next` at `FS_OK`, so `ok = next == FS_END` was false | A cap stop is a successful truncated listing; only a real read error fails | `test_listing_cap` | `HOST b37` |
-| b37 | The `FIRST 2000` badge belonged to the previous listing | `apply_listing` ran before the flag was stored from the same end event | Store the truncation flag before applying the rows | `test_listing_cap` | `HOST b37` |
-| b37 | ACTIONS DOWNLOAD did nothing at ALL DRIVES | The ledger joined the virtual root `*` with the file name and mapped the failure to `PATH TOO LONG`; the worker's `ux0:data` fallback never ran | Skip the join/risk pre-check for `*` and empty; let `default_local_dir` resolve it | `test_remote_download_from_all_drives` | `HOST b37` |
-| b37 | A high-risk DELETE confirmation lost the console-boot sentence | The confirm printed only `THIS CANNOT BE UNDONE.` | Use the full boot warning for any high-risk delete, keeping the risk path | `test_high_risk_delete_warning`, render check | `HOST b37` |
-| b37 | Upload preflight branches had no host coverage | The fake peer always advertised MLST and answered only 250/550; no download conflict test | Scripted MLST modes (unsupported, directory, failure) and a SKIP/OVERWRITE download-conflict test | `test_upload_preflight_*`, `test_download_conflict` | `HOST b37` |
-| b37 | A failed MLST control write left the upload check latched | `ftp_client_mlst` ignored `client_send` failure and returned OK | Return `NOT_CONNECTED` and clear the op when the write fails | `test_mlst_send_failure` | `HOST b37` |
-| b37 | The PASV data target and CANCEL outcome were not asserted | The fake exposed no connect target; the CANCEL test asserted a count SKIP also leaves | Expose the dialed peer and assert control peer:5004; assert `CANCELLED`, idle dock, and a fresh prompt | `test_pasv_nat`, `test_upload_conflict` | `HOST b37` |
-| b37 | The plan and M1 gate described superseded behavior | R2/R19/R21-R23/R26/R36/R41/M1 were not updated with D53/D59/D62/D63/D65 | Update the plan to the shipped ALL DRIVES root, control-peer PASV, 35 s budget, 20 s data idle, listing cap, free-space cache, MLST preflight, deferred folders, and the new M1 condition | plan review | `HOST b37` |
+| b37 | A 64-item SKIP batch could overflow the 128 KiB worker stack | `pump_queue` called itself once per released item; its frame is 2.4 KiB | Iterate in `pump_queue` and `continue` to the next item | host suites; `test_upload_conflict` SKIP/CANCEL | `HW b37` |
+| b37 | OVERWRITE consent survived DISCONNECT and CONNECT | The teardown paths cleared the queue and counters but not the conflict latch; `batch_finish` could not clear it after the counters were zeroed | One `reset_remote_session` drops the queue, batch counters, conflict answer, remote actions, and upload preflight; `batch_reset` owns the fields | `test_upload_conflict` CANCEL; code path | `HW b37`; cross-session scenario untested |
+| b37 | A 2000+ entry local folder was reported failed and wiped | The cap break left `next` at `FS_OK`, so `ok = next == FS_END` was false | A cap stop is a successful truncated listing; only a real read error fails | `test_listing_cap` | `HW b37` |
+| b37 | The `FIRST 2000` badge belonged to the previous listing | `apply_listing` ran before the flag was stored from the same end event | Store the truncation flag before applying the rows | `test_listing_cap` | `HW b37` |
+| b37 | ACTIONS DOWNLOAD did nothing at ALL DRIVES | The ledger joined the virtual root `*` with the file name and mapped the failure to `PATH TOO LONG`; the worker's `ux0:data` fallback never ran | Skip the join/risk pre-check for `*` and empty; let `default_local_dir` resolve it | `test_remote_download_from_all_drives` | `HW b37` |
+| b37 | A high-risk DELETE confirmation lost the console-boot sentence | The confirm printed only `THIS CANNOT BE UNDONE.` | Use the full boot warning for any high-risk delete, keeping the risk path | `test_high_risk_delete_warning`, render check | `HW b37` |
+| b37 | Upload preflight branches had no host coverage | The fake peer always advertised MLST and answered only 250/550; no download conflict test | Scripted MLST modes (unsupported, directory, failure) and a SKIP/OVERWRITE download-conflict test | `test_upload_preflight_*`, `test_download_conflict` | `HW b37` |
+| b37 | A failed MLST control write left the upload check latched | `ftp_client_mlst` ignored `client_send` failure and returned OK | Return `NOT_CONNECTED` and clear the op when the write fails | `test_mlst_send_failure` | `HW b37` |
+| b37 | The PASV data target and CANCEL outcome were not asserted | The fake exposed no connect target; the CANCEL test asserted a count SKIP also leaves | Expose the dialed peer and assert control peer:5004; assert `CANCELLED`, idle dock, and a fresh prompt | `test_pasv_nat`, `test_upload_conflict` | `HW b37` |
+| b37 | The plan and M1 gate described superseded behavior | R2/R19/R21-R23/R26/R36/R41/M1 were not updated with D53/D59/D62/D63/D65 | Update the plan to the shipped ALL DRIVES root, control-peer PASV, 35 s budget, 20 s data idle, listing cap, free-space cache, MLST preflight, deferred folders, and the new M1 condition | plan review | `HW b37` |
 
 ## Remote pane, second pass (b36)
 
@@ -181,11 +182,10 @@ matrix passes.
 
 ## Still open
 
-- **b37 hardware test:** opens and parents, a stuck/refused CWD, DISCONNECT,
-  reconnect, site switching, remote NEW FOLDER/RENAME/DELETE, multi-mark
-  DELETE, REFRESH, an unsafe-name row, a folder refusal, a download total, an
-  upload conflict (SKIP/OVERWRITE/CANCEL), a 2000+ entry folder, a high-risk
-  delete warning, idle keepalive, and the localhost/`FTP.GNU.ORG` data path.
+- **b37 row-level observations:** the operator reported b37 hardware-tested on
+  2026-11-13, but the M1–M8 rows, the remote-pane pass, the 2000+ entry folder,
+  the high-risk delete warning, and the localhost/`FTP.GNU.ORG` data path still
+  need their observed results transcribed into `VERIFICATION.md`.
 - **b28 PASV hardware test:** superseded by b37; the PASV fix is still unproven
   on the console.
 - **Cross-session batch latch:** `reset_remote_session` clears it, but no host

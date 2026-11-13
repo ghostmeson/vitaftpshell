@@ -5,11 +5,23 @@
 **ELF:** build/vitaftpshell, 509,168 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-13
-**Status:** in progress
+**Status:** hardware-tested (b37, operator report); M1–M8 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b37 hardware run
+
+**Date:** 2026-11-13
+**Build:** `vitaftpshell-v01.00-b37.vpk`
+**Report:** The operator reported the b37 VPK installed and exercised on the
+console.
+
+This establishes that b37 ran on the target hardware and moves the b37 fix rows
+from `HOST` to `HW`. The report did not supply row-level observations for the
+M1–M8 matrix, so each row below stays `PENDING` until its observed result and
+evidence are recorded here. The project therefore stays `building`.
 
 ## Setup
 
@@ -588,13 +600,13 @@ evidence.
 | transfer/upload | Uploads overwrote remote files silently | No remote existence check | MLST preflight + conflict prompt; CANCEL clears the batch | `test_mlst`, `test_upload_conflict` | b36 built |
 | transfer/folder | A folder was queued as one RETR/STOR | R22/R23 deferred | `FOLDER NOT SUPPORTED` in the UI and worker | `test_marks`, `test_remote_unsafe_and_folder` | b36 built (deferred R22/R23) |
 | client/listing-verb | A listing after a transfer sent the previous data verb | `data_kind` was not reset when a listing began | `client_begin_listing` sets `CDATA_LIST` | `test_client` upload-then-list | b36 built |
-| worker/stack | A 64-item SKIP batch could overflow the worker stack | `pump_queue` recursed once per released item | Iterate instead of recursing | host suites, `test_upload_conflict` | b37 built |
-| worker/session | OVERWRITE consent survived DISCONNECT/CONNECT | Teardown did not clear the conflict latch | `reset_remote_session` + `batch_reset` | `test_upload_conflict` CANCEL; cross-session untested | b37 built |
-| listing/cap | A 2000+ entry folder was reported failed and wiped | A cap stop left `next` at `FS_OK` | Cap stop reports `ok=1, truncated=1` | `test_listing_cap` | b37 built |
-| listing/flag | The truncation badge belonged to the previous listing | Flag stored after `apply_listing` | Store before applying rows | `test_listing_cap` | b37 built |
-| actions/download | DOWNLOAD did nothing at ALL DRIVES | The ledger joined `*` with the name | Skip the pre-check for `*`/empty | `test_remote_download_from_all_drives` | b37 built |
-| confirm/risk | A high-risk delete lost the boot warning | Only the plain delete warning was drawn | Full boot warning for high-risk deletes | `test_high_risk_delete_warning`, render | b37 built |
-| client/mlst | A failed MLST write left the upload check latched | `client_send` failure ignored | Return `NOT_CONNECTED` | `test_mlst_send_failure` | b37 built |
+| worker/stack | A 64-item SKIP batch could overflow the worker stack | `pump_queue` recursed once per released item | Iterate instead of recursing | host suites, `test_upload_conflict` | b37 HW (operator report) |
+| worker/session | OVERWRITE consent survived DISCONNECT/CONNECT | Teardown did not clear the conflict latch | `reset_remote_session` + `batch_reset` | `test_upload_conflict` CANCEL; cross-session untested | b37 HW (operator report) |
+| listing/cap | A 2000+ entry folder was reported failed and wiped | A cap stop left `next` at `FS_OK` | Cap stop reports `ok=1, truncated=1` | `test_listing_cap` | b37 HW (operator report) |
+| listing/flag | The truncation badge belonged to the previous listing | Flag stored after `apply_listing` | Store before applying rows | `test_listing_cap` | b37 HW (operator report) |
+| actions/download | DOWNLOAD did nothing at ALL DRIVES | The ledger joined `*` with the name | Skip the pre-check for `*`/empty | `test_remote_download_from_all_drives` | b37 HW (operator report) |
+| confirm/risk | A high-risk delete lost the boot warning | Only the plain delete warning was drawn | Full boot warning for high-risk deletes | `test_high_risk_delete_warning`, render | b37 HW (operator report) |
+| client/mlst | A failed MLST write left the upload check latched | `client_send` failure ignored | Return `NOT_CONNECTED` | `test_mlst_send_failure` | b37 HW (operator report) |
 
 ## File-manager slice (b19–b25)
 

@@ -40,8 +40,9 @@ refusal, download totals, upload MLST preflight, and folder-transfer refusal
 (R22/R23 deferred); b37 closes the review pass with an iterated queue pump, one
 session teardown that clears the overwrite latch, a truncated-success listing
 cap, the ALL DRIVES download fallback, the high-risk delete warning, and MLST
-send-failure handling. No M1–M8 row has passed; the project stays `building`
-until it does.
+send-failure handling. b37 has run on the console (operator report,
+2026-11-13), but no M1–M8 row result has been transcribed; the project stays
+`building` until every row has a recorded PASS.
 
 ## Users
 
@@ -89,7 +90,7 @@ requirements R1-R70.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | M1–M8 evidence; project becomes `verified` — in progress (b37) |
+| Phase 6: Hardware verification | b37 hardware-tested (operator report); M1–M8 evidence transcription pending |
 
 ## Failure policy
 
@@ -122,7 +123,7 @@ sessions, connect-to-first-listing, and server-matrix pass.
 |---|---|
 | Anonymous read-write server exposes the three Vita volumes | OFF by default, visible ON state, client count, warning, denied app data folder and tai writes, protected-path denial |
 | Passwords stored unencrypted | State it before the first save; never log them; no false encryption claim |
-| WiFi path is built but not hardware-verified | First hardware session proves connect, PASV, transfer, and timeouts |
+| WiFi path has a b37 hardware report but no row-level evidence yet | Record connect, PASV, transfer, and timeout results in `VERIFICATION.md` |
 | Public FTP may decline | Personal servers keep the product useful; no protocol widening in v1 |
 | Controller-only density | Design phase reviews each screen before implementation |
 | Cross-volume batch move is not all-or-nothing | Each file is atomic; a batch failure leaves completed moves and reports `n OF m MOVED`, never deletes a moved file (D45) |
