@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 
 #include "core/uistate.h"
-
 #include <stdio.h>
 #include <string.h>
 
@@ -73,6 +72,8 @@ static void set_status(UiState *state, const char *text)
     fmt_copy(state->status, sizeof(state->status), text != NULL ? text : "");
 }
 
+static void begin_remote_connect(UiState *state);
+
 static void enter_screen(UiState *state, UiScreen screen)
 {
     state->return_screen = state->screen;
@@ -99,6 +100,10 @@ static int join_path(UiPane pane, const UiPaneState *pane_state,
                      const char *name, char *out, size_t cap)
 {
     if (pane == UI_PANE_LOCAL) {
+        if (strchr(name, ':') != NULL) {
+            int n = snprintf(out, cap, "%s", name);
+            return n > 0 && (size_t)n < cap;
+        }
         Path joined;
         if (path_join(pane_state->path, name, &joined) != PATH_OK)
             return 0;
@@ -132,6 +137,31 @@ static void remote_volume(const char *path, char *out, size_t cap)
     out[n] = '\0';
 }
 
+/* A remote path is not a Vita path, so path_parent cannot parse it. */
+static int remote_parent_path(const char *path, char *out, size_t cap)
+{
+    if (path == NULL || path[0] != '/' || cap == 0)
+        return 0;
+    const char *slash = NULL;
+    for (const char *p = path; *p != '\0'; ++p) {
+        if (*p == '/')
+            slash = p;
+    }
+    if (slash == NULL || slash == path) {
+        if (cap < 2)
+            return 0;
+        out[0] = '/';
+        out[1] = '\0';
+        return 1;
+    }
+    size_t len = (size_t)(slash - path);
+    if (len + 1 > cap)
+        return 0;
+    memcpy(out, path, len);
+    out[len] = '\0';
+    return 1;
+}
+
 static int volume_changed(UiPane pane, const char *old_path,
                           const char *new_path)
 {
@@ -154,7 +184,7 @@ static int volume_changed(UiPane pane, const char *old_path,
     remote_volume(new_path, new_token, sizeof(new_token));
     if (old_token[0] == '\0' || new_token[0] == '\0')
         return 0;
-    return !ci_equal(old_token, new_token);
+    return strcmp(old_token, new_token) != 0;
 }
 
 static void recompute_marks(UiPaneState *pane)
@@ -204,6 +234,7 @@ static int toggle_mark(UiPaneState *pane, const UiRow *row, const char *path)
     fmt_copy(mark->path.text, sizeof(mark->path.text), path);
     mark->size = row->size;
     mark->size_known = row->size_known;
+    mark->type = row->type;
     recompute_marks(pane);
     return 1;
 }
@@ -366,25 +397,47 @@ static void close_confirm(UiState *state, int return_to_editor)
         set_focus(state, UI_FOCUS_LIST);
 }
 
-static int action_for_pane(UiPane pane, UiAction action)
+static int action_for_pane(UiPane pane, UiAction action, UiClipMode clip)
 {
-    if (pane == UI_PANE_LOCAL)
-        return action != UI_ACTION_DOWNLOAD;
+    if (pane == UI_PANE_LOCAL) {
+        if (action == UI_ACTION_DOWNLOAD || action == UI_ACTION_REFRESH ||
+            action == UI_ACTION_DISCONNECT)
+            return 0;
+        if (clip == UI_CLIP_NONE)
+            return action != UI_ACTION_PASTE &&
+                   action != UI_ACTION_CLEAR_CLIPBOARD;
+        return action != UI_ACTION_COPY && action != UI_ACTION_MOVE;
+    }
     return action == UI_ACTION_DOWNLOAD || action == UI_ACTION_NEW_FOLDER ||
-           action == UI_ACTION_RENAME || action == UI_ACTION_DELETE;
+           action == UI_ACTION_RENAME || action == UI_ACTION_DELETE ||
+           action == UI_ACTION_REFRESH || action == UI_ACTION_DISCONNECT;
 }
 
-static void prepare_visible(UiActions *actions, UiPane pane)
+static void prepare_visible(UiActions *actions, UiPane pane, UiClipMode clip)
 {
     actions->pane = (int)pane;
     actions->visible_count = 0;
     for (int i = 0; i < UI_ACTION_COUNT; ++i) {
-        if (action_for_pane(pane, (UiAction)i))
+        if (action_for_pane(pane, (UiAction)i, clip))
             actions->visible[actions->visible_count++] = i;
     }
     if (actions->visible_count == 0)
         return;
     actions->selected = actions->visible[0];
+}
+
+/* True when every clipboard source is already in `folder`. */
+static int clip_all_in_folder(const UiState *state, const char *folder)
+{
+    if (state->clip_count <= 0)
+        return 0;
+    for (int i = 0; i < state->clip_count; ++i) {
+        Path parent;
+        if (path_parent(state->clip_paths[i].text, &parent) != PATH_OK ||
+            !ci_equal(parent.text, folder))
+            return 0;
+    }
+    return 1;
 }
 
 static void disable(UiActions *actions, UiAction action, const char *reason)
@@ -401,19 +454,29 @@ void ui_actions_prepare(UiState *state)
     UiActions *actions = &state->actions;
     UiPane pane_index = state->active_pane;
     UiPaneState *pane = &state->panes[pane_index];
-    const UiRow *row = selected_row(state, pane_index);
+    /* Never read the row arena while a listing is being written. */
+    const UiRow *row = pane->loading ? NULL : selected_row(state, pane_index);
 
     for (int i = 0; i < UI_ACTION_COUNT; ++i) {
         actions->enabled[i] = 1;
         actions->reason[i][0] = '\0';
     }
-    prepare_visible(actions, pane_index);
+    prepare_visible(actions, pane_index, state->clip_mode);
+
+    /*
+     * A selection is a row that is not "..", or any mark. The cursor sitting
+     * on ".." means the folder itself, and no file action may target it from
+     * inside it. NEW FOLDER is the one action that still uses the folder.
+     */
+    int has_selection = pane->mark_count > 0 ||
+                        (row != NULL && row->type != UI_ROW_UP);
+    actions->has_selection = has_selection;
 
     char source[PATH_MAX_LEN];
     source[0] = '\0';
     if (pane->mark_count > 0)
         fmt_copy(source, sizeof(source), pane->marks[0].path.text);
-    else if (row != NULL && row->type != UI_ROW_UP)
+    else if (has_selection)
         join_path(pane_index, pane, row->name, source, sizeof(source));
     else
         fmt_copy(source, sizeof(source), pane->path);
@@ -423,14 +486,34 @@ void ui_actions_prepare(UiState *state)
     fmt_copy(actions->dest, sizeof(actions->dest), pane->path);
     fmt_copy(actions->other, sizeof(actions->other), state->panes[other_pane(pane_index)].path);
 
-    int at_root = pane_index == UI_PANE_LOCAL ? path_is_volume_root(pane->path)
-                                              : strcmp(pane->path, "/") == 0;
+    /*
+     * The lock belongs to the selected item, not to the folder the cursor is
+     * in. A file inside ux0: is not the volume root; treating it as one made
+     * every action unavailable while browsing a volume root.
+     */
+    int virtual_root = pane_index == UI_PANE_LOCAL &&
+                       strcmp(pane->path, "*") == 0;
+    int source_is_root =
+        has_selection &&
+        (pane_index == UI_PANE_LOCAL
+             ? (strcmp(source, "*") == 0 || path_is_volume_root(source))
+             : strcmp(source, "/") == 0);
     int protected_source = 0;
     PathRisk risk = PATH_RISK_NORMAL;
-    if (pane_index == UI_PANE_LOCAL && source[0] != '\0') {
+    if (has_selection && pane_index == UI_PANE_LOCAL && source[0] != '\0') {
         PathResult check = path_check_delete(source, 0, &risk);
         if (check == PATH_PROTECTED || check == PATH_DENIED)
             protected_source = 1;
+    }
+    int unsafe_source = has_selection && row != NULL && row->unsafe != 0;
+    int source_is_dir = 0;
+    if (pane->mark_count > 0) {
+        for (int i = 0; i < pane->mark_count; ++i) {
+            if (pane->marks[i].type == UI_ROW_DIR)
+                source_is_dir = 1;
+        }
+    } else if (row != NULL && row->type == UI_ROW_DIR) {
+        source_is_dir = 1;
     }
 
     if (pane_index == UI_PANE_LOCAL) {
@@ -438,37 +521,84 @@ void ui_actions_prepare(UiState *state)
             disable(actions, UI_ACTION_COPY, "MARK TO COPY");
             disable(actions, UI_ACTION_MOVE, "MARK TO MOVE");
         }
-        if (at_root || protected_source) {
-            const char *why = at_root ? "VOLUME ROOT" : "PROTECTED PATH";
+        if (!has_selection) {
+            disable(actions, UI_ACTION_COPY, "NO SELECTION");
+            disable(actions, UI_ACTION_MOVE, "NO SELECTION");
+            disable(actions, UI_ACTION_UPLOAD, "NO SELECTION");
+            disable(actions, UI_ACTION_RENAME, "NO SELECTION");
+            disable(actions, UI_ACTION_DELETE, "NO SELECTION");
+        } else if (source_is_root || protected_source) {
+            const char *why = strcmp(source, "*") == 0
+                                  ? "ROOT"
+                                  : (source_is_root ? "VOLUME ROOT"
+                                                    : "PROTECTED PATH");
             disable(actions, UI_ACTION_COPY, why);
             disable(actions, UI_ACTION_MOVE, why);
             disable(actions, UI_ACTION_RENAME, why);
             disable(actions, UI_ACTION_DELETE, why);
         }
+        if (has_selection && source_is_dir)
+            disable(actions, UI_ACTION_UPLOAD, "FOLDER NOT SUPPORTED");
+        if (virtual_root)
+            disable(actions, UI_ACTION_NEW_FOLDER, "ROOT");
         if (pane->mark_count > 1)
             disable(actions, UI_ACTION_RENAME, "ONE ITEM ONLY");
+        if (state->clip_mode != UI_CLIP_NONE) {
+            if (state->clip_count <= 0)
+                disable(actions, UI_ACTION_PASTE, "EMPTY CLIPBOARD");
+            if (virtual_root)
+                disable(actions, UI_ACTION_PASTE, "ROOT");
+            if (state->clip_mode == UI_CLIP_MOVE &&
+                clip_all_in_folder(state, pane->path))
+                disable(actions, UI_ACTION_PASTE, "ALREADY HERE");
+        }
     } else {
         if (!pane->connected) {
             disable(actions, UI_ACTION_DOWNLOAD, "NOT CONNECTED");
+            disable(actions, UI_ACTION_NEW_FOLDER, "NOT CONNECTED");
             disable(actions, UI_ACTION_RENAME, "NOT CONNECTED");
             disable(actions, UI_ACTION_DELETE, "NOT CONNECTED");
-        }
-        if (row == NULL || row->type == UI_ROW_UP)
+            disable(actions, UI_ACTION_REFRESH, "NOT CONNECTED");
+            disable(actions, UI_ACTION_DISCONNECT, "NOT CONNECTED");
+        } else if (pane->loading) {
+            /* The rows on screen belong to the previous folder until the
+             * listing ends. Only DISCONNECT is safe to run while READING. */
+            disable(actions, UI_ACTION_DOWNLOAD, "READING");
+            disable(actions, UI_ACTION_NEW_FOLDER, "READING");
+            disable(actions, UI_ACTION_RENAME, "READING");
+            disable(actions, UI_ACTION_DELETE, "READING");
+            disable(actions, UI_ACTION_REFRESH, "READING");
+        } else if (!has_selection) {
             disable(actions, UI_ACTION_DOWNLOAD, "NO SELECTION");
-        if (at_root || strcmp(pane->path, "/") == 0) {
+            disable(actions, UI_ACTION_RENAME, "NO SELECTION");
+            disable(actions, UI_ACTION_DELETE, "NO SELECTION");
+            /* NEW FOLDER is the one action that uses the folder itself. */
+        } else if (unsafe_source) {
+            disable(actions, UI_ACTION_DOWNLOAD, "UNSAFE NAME");
+            disable(actions, UI_ACTION_RENAME, "UNSAFE NAME");
+            disable(actions, UI_ACTION_DELETE, "UNSAFE NAME");
+        } else if (source_is_dir) {
+            disable(actions, UI_ACTION_DOWNLOAD, "FOLDER NOT SUPPORTED");
+        } else if (source_is_root) {
             disable(actions, UI_ACTION_RENAME, "REMOTE ROOT");
             disable(actions, UI_ACTION_DELETE, "REMOTE ROOT");
         }
+        if (pane->mark_count > 1)
+            disable(actions, UI_ACTION_RENAME, "ONE ITEM ONLY");
+        if (state->dock.active &&
+            (state->dock.direction == XFER_DIR_DOWNLOAD ||
+             state->dock.direction == XFER_DIR_UPLOAD))
+            disable(actions, UI_ACTION_DISCONNECT, "TRANSFER IN PROGRESS");
     }
 
-    if ((pane_index == UI_PANE_LOCAL && !state->panes[UI_PANE_REMOTE].connected) ||
-        (pane_index == UI_PANE_REMOTE && !pane->connected))
+    if (has_selection &&
+        ((pane_index == UI_PANE_LOCAL &&
+          !state->panes[UI_PANE_REMOTE].connected) ||
+         (pane_index == UI_PANE_REMOTE && !pane->connected)))
         disable(actions, UI_ACTION_UPLOAD, "NOT CONNECTED");
-
-    if (row == NULL && pane->mark_count == 0) {
-        disable(actions, UI_ACTION_RENAME, "NO SELECTION");
-        disable(actions, UI_ACTION_DELETE, "NO SELECTION");
-    }
+    if (pane_index == UI_PANE_LOCAL && has_selection &&
+        state->panes[UI_PANE_REMOTE].loading)
+        disable(actions, UI_ACTION_UPLOAD, "REMOTE READING");
 }
 
 static void handle_workspace_key(UiState *state, const UiStateEvent *event,
@@ -486,6 +616,7 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
 
     if (pane->session_lost) {
         if (key == UI_KEY_CROSS) {
+            begin_remote_connect(state);
             UiCommand *c = emit(out, max, count, UI_CMD_RECONNECT);
             if (c != NULL)
                 c->pane = state->active_pane;
@@ -508,6 +639,13 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         return;
     }
 
+    if (pane->loading &&
+        (key == UI_KEY_CROSS || key == UI_KEY_SQUARE)) {
+        if (state->active_pane == UI_PANE_REMOTE)
+            set_status(state, "READING");
+        return;
+    }
+
     switch (key) {
     case UI_KEY_UP:
         move_selection(pane, -1);
@@ -525,6 +663,10 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         const UiRow *row = selected_row(state, state->active_pane);
         if (row == NULL)
             return;
+        if (row->unsafe) {
+            set_status(state, "UNSAFE NAME");
+            return;
+        }
         if (row->type == UI_ROW_UP) {
             UiCommand *c = emit(out, max, count, UI_CMD_GO_PARENT);
             if (c != NULL)
@@ -533,13 +675,23 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         }
 
         char full[PATH_MAX_LEN];
-        if (!join_path(state->active_pane, pane, row->name, full,
-                       sizeof(full))) {
+        if (row->type == UI_ROW_VOLUME) {
+            fmt_copy(full, sizeof(full), row->name);
+        } else if (!join_path(state->active_pane, pane, row->name, full,
+                              sizeof(full))) {
             set_status(state, "PATH TOO LONG");
             return;
         }
 
-        if (row->type == UI_ROW_DIR) {
+        if (row->type == UI_ROW_DIR || row->type == UI_ROW_VOLUME) {
+            if (state->active_pane == UI_PANE_REMOTE && !pane->connected) {
+                set_status(state, "NOT CONNECTED");
+                return;
+            }
+            if (state->active_pane == UI_PANE_REMOTE && pane->loading) {
+                set_status(state, "READING");
+                return;
+            }
             fmt_copy(pane->pending_path, sizeof(pane->pending_path), full);
             pane->loading = 1;
             UiCommand *c = emit(out, max, count, UI_CMD_OPEN_PATH);
@@ -559,10 +711,19 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
 
         if (pane->mark_count > 0) {
             for (int i = 0; i < pane->mark_count; ++i) {
+                if (pane->marks[i].type == UI_ROW_DIR) {
+                    set_status(state, "FOLDER TRANSFER NOT SUPPORTED");
+                    return;
+                }
+            }
+            for (int i = 0; i < pane->mark_count; ++i) {
                 UiCommand *c = emit(out, max, count, UI_CMD_TRANSFER);
                 if (c == NULL)
                     break;
                 c->pane = state->active_pane;
+                c->source_type = pane->marks[i].type;
+                c->total = pane->marks[i].size;
+                c->total_known = pane->marks[i].size_known;
                 fmt_copy(c->path, sizeof(c->path), pane->marks[i].path.text);
                 fmt_copy(c->path2, sizeof(c->path2), state->panes[other].path);
                 c->value = pane->mark_count;
@@ -573,6 +734,9 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         UiCommand *c = emit(out, max, count, UI_CMD_TRANSFER);
         if (c != NULL) {
             c->pane = state->active_pane;
+            c->source_type = row->type;
+            c->total = row->size;
+            c->total_known = row->size_known;
             fmt_copy(c->path, sizeof(c->path), full);
             fmt_copy(c->path2, sizeof(c->path2), state->panes[other].path);
             c->value = 0;
@@ -581,8 +745,23 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
     }
     case UI_KEY_CIRCLE:
         if (state->active_pane == UI_PANE_LOCAL &&
+            strcmp(pane->path, "*") == 0) {
+            set_status(state, "AT ROOT");
+            return;
+        }
+        if (state->active_pane == UI_PANE_LOCAL &&
             path_is_volume_root(pane->path)) {
-            set_status(state, "AT VOLUME ROOT");
+            UiCommand *c = emit(out, max, count, UI_CMD_GO_PARENT);
+            if (c != NULL)
+                c->pane = state->active_pane;
+            return;
+        }
+        if (state->active_pane == UI_PANE_REMOTE && !pane->connected) {
+            set_status(state, "NOT CONNECTED");
+            return;
+        }
+        if (state->active_pane == UI_PANE_REMOTE && pane->loading) {
+            set_status(state, "READING");
             return;
         }
         if (state->active_pane == UI_PANE_REMOTE &&
@@ -598,8 +777,13 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         return;
     case UI_KEY_SQUARE: {
         const UiRow *row = selected_row(state, state->active_pane);
-        if (row == NULL || row->type == UI_ROW_UP)
+        if (row == NULL || row->type == UI_ROW_UP ||
+            row->type == UI_ROW_VOLUME)
             return;
+        if (row->unsafe) {
+            set_status(state, "UNSAFE NAME");
+            return;
+        }
         char full[PATH_MAX_LEN];
         if (!join_path(state->active_pane, pane, row->name, full,
                        sizeof(full))) {
@@ -611,18 +795,53 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         return;
     }
     case UI_KEY_TRIANGLE:
-        enter_screen(state, UI_SCREEN_SITES);
+        enter_screen(state, UI_SCREEN_ACTIONS);
+        ui_actions_prepare(state);
         return;
     case UI_KEY_START:
         enter_screen(state, UI_SCREEN_SERVER);
         return;
     case UI_KEY_SELECT:
-        enter_screen(state, UI_SCREEN_ACTIONS);
-        ui_actions_prepare(state);
+        enter_screen(state, UI_SCREEN_SITES);
         return;
     default:
         return;
     }
+}
+
+static void clear_remote_session(UiState *state)
+{
+    UiPaneState *remote = &state->panes[UI_PANE_REMOTE];
+
+    remote->connected = 0;
+    remote->session_lost = 0;
+    remote->loading = 0;
+    remote->empty = 0;
+    remote->rows = NULL;
+    remote->row_count = 0;
+    remote->selected = 0;
+    remote->scroll = 0;
+    remote->truncated = 0;
+    remote->pending_path[0] = '\0';
+    remote->error[0] = '\0';
+    remote->site[0] = '\0';
+    snprintf(remote->path, sizeof(remote->path), "/");
+    clear_marks(remote);
+
+    state->site_name[0] = '\0';
+    state->site_host[0] = '\0';
+    state->site_port = 21;
+    state->site_known = 0;
+    state->sites.connecting = 0;
+    state->sites.login_failed = 0;
+    state->sites.reply[0] = '\0';
+}
+
+static void begin_remote_connect(UiState *state)
+{
+    clear_remote_session(state);
+    state->panes[UI_PANE_REMOTE].loading = 1;
+    state->sites.connecting = 1;
 }
 
 static void handle_sites_key(UiState *state, const UiStateEvent *event,
@@ -642,6 +861,17 @@ static void handle_sites_key(UiState *state, const UiStateEvent *event,
             state->sites.first = state->sites.selected - 5;
         return;
     case UI_KEY_CROSS: {
+        if (state->sites.count <= 0) {
+            set_status(state, "NO SITES");
+            return;
+        }
+        if (state->dock.active &&
+            (state->dock.direction == XFER_DIR_DOWNLOAD ||
+             state->dock.direction == XFER_DIR_UPLOAD)) {
+            set_status(state, "TRANSFER IN PROGRESS");
+            return;
+        }
+        begin_remote_connect(state);
         UiCommand *c = emit(out, max, count, UI_CMD_CONNECT_SITE);
         if (c != NULL)
             c->index = state->sites.selected;
@@ -935,31 +1165,175 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
         }
 
         const UiPaneState *pane = &state->panes[state->active_pane];
-        const char *sources[UI_CONFIRM_MAX];
-        int source_count = 0;
-        if ((action == UI_ACTION_COPY || action == UI_ACTION_MOVE ||
-             action == UI_ACTION_DELETE) &&
-            pane->mark_count > 0) {
-            for (int i = 0; i < pane->mark_count && i < UI_CONFIRM_MAX; ++i)
-                sources[source_count++] = pane->marks[i].path.text;
-        } else {
-            sources[source_count++] = state->actions.path;
-        }
-
         const char *destination =
             (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD)
                 ? state->actions.other
                 : state->actions.dest;
 
+        /* COPY and MOVE arm the clipboard. Nothing is touched until PASTE,
+         * after the user has navigated to the destination folder. */
+        if (action == UI_ACTION_COPY || action == UI_ACTION_MOVE) {
+            if (pane->mark_count <= 0) {
+                set_status(state, "MARK ITEMS FIRST");
+                return;
+            }
+            if (pane->mark_count > UI_CLIP_MAX) {
+                set_status(state, "TOO MANY ITEMS");
+                return;
+            }
+            state->clip_mode =
+                action == UI_ACTION_COPY ? UI_CLIP_COPY : UI_CLIP_MOVE;
+            state->clip_count = pane->mark_count;
+            for (int i = 0; i < state->clip_count; ++i)
+                state->clip_paths[i] = pane->marks[i].path;
+            leave_screen(state);
+            return;
+        }
+
+        if (action == UI_ACTION_CLEAR_CLIPBOARD) {
+            state->clip_mode = UI_CLIP_NONE;
+            state->clip_count = 0;
+            leave_screen(state);
+            return;
+        }
+
+        if (action == UI_ACTION_PASTE) {
+            if (state->clip_mode == UI_CLIP_NONE || state->clip_count <= 0) {
+                set_status(state, "EMPTY CLIPBOARD");
+                return;
+            }
+
+            int high_risk = 0;
+            char risk_path[PATH_MAX_LEN];
+            risk_path[0] = '\0';
+            for (int i = 0; i < state->clip_count; ++i) {
+                Path target;
+                if (path_join(destination,
+                              last_segment(state->clip_paths[i].text),
+                              &target) != PATH_OK) {
+                    set_status(state, "PATH TOO LONG");
+                    return;
+                }
+                PathRisk risk = PATH_RISK_NORMAL;
+                PathResult result = path_check_write(target.text, 0, &risk);
+                if (result != PATH_OK) {
+                    set_status(state, protection_reason(result, target.text));
+                    return;
+                }
+                if (risk == PATH_RISK_HIGH && !high_risk) {
+                    high_risk = 1;
+                    fmt_copy(risk_path, sizeof(risk_path), target.text);
+                }
+            }
+
+            state->pending_action = action;
+            state->pending_action_valid = 0;
+            state->pending_pane = state->active_pane;
+            fmt_copy(state->pending_path.text, sizeof(state->pending_path.text),
+                     state->clip_paths[0].text);
+            fmt_copy(state->pending_dest.text, sizeof(state->pending_dest.text),
+                     destination);
+            state->confirm_from_worker = 0;
+
+            if (high_risk) {
+                open_confirm(state, UI_CONFIRM_HIGH_RISK);
+                state->confirm_return = UI_SCREEN_WORKSPACE;
+                fmt_copy(state->confirm.risk_path,
+                         sizeof(state->confirm.risk_path), risk_path);
+                state->confirm.high_risk = 1;
+                return;
+            }
+
+            for (int i = 0; i < state->clip_count; ++i) {
+                UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
+                if (c == NULL) {
+                    set_status(state, "COMMAND LIMIT");
+                    break;
+                }
+                c->action = state->clip_mode == UI_CLIP_MOVE ? UI_ACTION_MOVE
+                                                             : UI_ACTION_COPY;
+                c->pane = state->active_pane;
+                fmt_copy(c->path, sizeof(c->path),
+                         state->clip_paths[i].text);
+                fmt_copy(c->path2, sizeof(c->path2), destination);
+            }
+            state->clip_mode = UI_CLIP_NONE;
+            state->clip_count = 0;
+            leave_screen(state);
+            return;
+        }
+
+        if (action == UI_ACTION_DISCONNECT) {
+            clear_remote_session(state);
+            UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
+            if (c != NULL) {
+                c->action = action;
+                c->pane = UI_PANE_REMOTE;
+            }
+            leave_screen(state);
+            set_status(state, "DISCONNECTED");
+            return;
+        }
+
+        if (action == UI_ACTION_REFRESH) {
+            UiCommand *c = emit(out, max, count, UI_CMD_REFRESH);
+            if (c != NULL)
+                c->pane = UI_PANE_REMOTE;
+            leave_screen(state);
+            return;
+        }
+
+        if (!state->actions.has_selection && action != UI_ACTION_NEW_FOLDER) {
+            set_status(state, "NO SELECTION");
+            return;
+        }
+
+        const char *sources[UI_CONFIRM_MAX];
+        int source_types[UI_CONFIRM_MAX];
+        uint64_t source_sizes[UI_CONFIRM_MAX];
+        int source_known[UI_CONFIRM_MAX];
+        int source_count = 0;
+        int use_marks = pane->mark_count > 0 &&
+                        (action == UI_ACTION_DELETE ||
+                         action == UI_ACTION_DOWNLOAD ||
+                         action == UI_ACTION_UPLOAD);
+        if (use_marks) {
+            for (int i = 0; i < pane->mark_count && i < UI_CONFIRM_MAX; ++i) {
+                sources[source_count] = pane->marks[i].path.text;
+                source_types[source_count] = pane->marks[i].type;
+                source_sizes[source_count] = pane->marks[i].size;
+                source_known[source_count] = pane->marks[i].size_known;
+                source_count++;
+            }
+        } else {
+            sources[0] = state->actions.path;
+            source_types[0] = UI_ROW_FILE;
+            source_sizes[0] = 0;
+            source_known[0] = 0;
+            const UiRow *selected =
+                ui_state_selected_row(state, state->active_pane);
+            if (selected != NULL) {
+                source_types[0] = selected->type;
+                source_sizes[0] = selected->size;
+                source_known[0] = selected->size_known;
+            }
+            source_count = 1;
+        }
+
+        int source_type = source_types[0];
+
         int high_risk = 0;
         char risk_path[PATH_MAX_LEN];
         risk_path[0] = '\0';
 
-        if (action == UI_ACTION_DELETE) {
+        /* A remote path is not a Vita path: the local protection table would
+         * reject every remote delete as INVALID PATH. Remote deletes are
+         * confirmed here and executed by the FTP client. */
+        if (action == UI_ACTION_DELETE &&
+            state->active_pane == UI_PANE_LOCAL) {
             for (int i = 0; i < source_count; ++i) {
                 PathRisk risk = PATH_RISK_NORMAL;
-                PathResult result =
-                    path_check_delete(sources[i], 0, &risk);
+                PathResult result = path_check_delete(sources[i], 0, &risk);
                 if (result != PATH_OK) {
                     set_status(state, protection_reason(result, sources[i]));
                     return;
@@ -969,8 +1343,7 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                     fmt_copy(risk_path, sizeof(risk_path), sources[i]);
                 }
             }
-        } else if (action == UI_ACTION_COPY || action == UI_ACTION_MOVE ||
-                   action == UI_ACTION_DOWNLOAD) {
+        } else if (action == UI_ACTION_DOWNLOAD) {
             for (int i = 0; i < source_count; ++i) {
                 Path target;
                 if (path_join(destination, last_segment(sources[i]),
@@ -992,7 +1365,9 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
         }
 
         state->pending_action = action;
+        state->pending_action_valid = 0;
         state->pending_pane = state->active_pane;
+        state->pending_source_type = source_type;
         fmt_copy(state->pending_path.text, sizeof(state->pending_path.text),
                  sources[0]);
         fmt_copy(state->pending_dest.text, sizeof(state->pending_dest.text),
@@ -1017,28 +1392,25 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             return;
         }
 
-        if (high_risk) {
-            open_confirm(state, UI_CONFIRM_HIGH_RISK);
-            fmt_copy(state->confirm.risk_path,
-                     sizeof(state->confirm.risk_path), risk_path);
-            state->confirm.high_risk = 1;
-            return;
-        }
-
         if (action == UI_ACTION_DELETE) {
             open_confirm(state, UI_CONFIRM_DELETE);
+            state->confirm_return = UI_SCREEN_WORKSPACE;
             UiConfirm *confirm = &state->confirm;
             confirm->items = confirm->local_items;
             confirm->item_count = source_count;
+            confirm->high_risk = high_risk;
+            if (high_risk)
+                fmt_copy(confirm->risk_path,
+                         sizeof(confirm->risk_path), risk_path);
             snprintf(confirm->title, sizeof(confirm->title), "DELETE %d ITEM%s",
                      source_count, source_count == 1 ? "" : "S");
-            fmt_copy(confirm->context, sizeof(confirm->context),
-                     state->actions.dest);
+            fmt_copy(confirm->context, sizeof(confirm->context), destination);
             for (int i = 0; i < source_count; ++i) {
-                fmt_copy(confirm->local_names[i],
-                         sizeof(confirm->local_names[i]),
-                         last_segment(sources[i]));
-                confirm->local_items[i].name = confirm->local_names[i];
+                /* Destructive confirmations name the full path. A mark can
+                 * outlive a folder change, so a bare name is ambiguous. */
+                fmt_copy(confirm->local_paths[i],
+                         sizeof(confirm->local_paths[i]), sources[i]);
+                confirm->local_items[i].name = confirm->local_paths[i];
                 confirm->local_items[i].size = 0;
                 confirm->local_items[i].size_known = 0;
                 if (pane->mark_count > 0 && i < pane->mark_count) {
@@ -1057,8 +1429,16 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             return;
         }
 
-        if (action == UI_ACTION_COPY || action == UI_ACTION_MOVE ||
-            action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD) {
+        if (high_risk) {
+            open_confirm(state, UI_CONFIRM_HIGH_RISK);
+            state->confirm_return = UI_SCREEN_WORKSPACE;
+            fmt_copy(state->confirm.risk_path,
+                     sizeof(state->confirm.risk_path), risk_path);
+            state->confirm.high_risk = 1;
+            return;
+        }
+
+        if (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD) {
             for (int i = 0; i < source_count; ++i) {
                 UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
                 if (c == NULL) {
@@ -1067,9 +1447,13 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                 }
                 c->action = action;
                 c->pane = state->active_pane;
+                c->source_type = source_types[i];
+                c->total = source_sizes[i];
+                c->total_known = source_known[i];
                 fmt_copy(c->path, sizeof(c->path), sources[i]);
                 fmt_copy(c->path2, sizeof(c->path2), destination);
             }
+            leave_screen(state);
             return;
         }
 
@@ -1077,6 +1461,9 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
         if (c != NULL) {
             c->action = action;
             c->pane = state->active_pane;
+            c->source_type = source_type;
+            c->total = source_sizes[0];
+            c->total_known = source_known[0];
             fmt_copy(c->path, sizeof(c->path), sources[0]);
             fmt_copy(c->path2, sizeof(c->path2), destination);
         }
@@ -1124,15 +1511,35 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
             int approved = c->kind == UI_CONFIRM_HIGH_RISK
                                ? choice == UI_CHOICE_CONTINUE
                                : choice == UI_CHOICE_DELETE;
+            int approved_value =
+                (c->kind == UI_CONFIRM_HIGH_RISK || c->high_risk) ? 1 : 0;
             if (approved) {
                 UiPaneState *pending =
                     &state->panes[state->pending_pane];
-                if ((state->pending_action == UI_ACTION_DELETE ||
-                     state->pending_action == UI_ACTION_COPY ||
-                     state->pending_action == UI_ACTION_MOVE ||
-                     state->pending_action == UI_ACTION_UPLOAD ||
-                     state->pending_action == UI_ACTION_DOWNLOAD) &&
-                    pending->mark_count > 0) {
+                if (state->pending_action == UI_ACTION_PASTE) {
+                    for (int i = 0; i < state->clip_count; ++i) {
+                        UiCommand *run = emit(out, max, count,
+                                              UI_CMD_RUN_ACTION);
+                        if (run == NULL)
+                            break;
+                        run->action = state->clip_mode == UI_CLIP_MOVE
+                                          ? UI_ACTION_MOVE
+                                          : UI_ACTION_COPY;
+                        run->pane = state->pending_pane;
+                        run->value = 1;
+                        fmt_copy(run->path, sizeof(run->path),
+                                 state->clip_paths[i].text);
+                        fmt_copy(run->path2, sizeof(run->path2),
+                                 state->pending_dest.text);
+                    }
+                    state->clip_mode = UI_CLIP_NONE;
+                    state->clip_count = 0;
+                } else if ((state->pending_action == UI_ACTION_DELETE ||
+                            state->pending_action == UI_ACTION_COPY ||
+                            state->pending_action == UI_ACTION_MOVE ||
+                            state->pending_action == UI_ACTION_UPLOAD ||
+                            state->pending_action == UI_ACTION_DOWNLOAD) &&
+                           pending->mark_count > 0) {
                     for (int i = 0; i < pending->mark_count; ++i) {
                         UiCommand *run = emit(out, max, count,
                                               UI_CMD_RUN_ACTION);
@@ -1140,7 +1547,8 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
                             break;
                         run->action = state->pending_action;
                         run->pane = state->pending_pane;
-                        run->value = c->kind == UI_CONFIRM_HIGH_RISK ? 1 : 0;
+                        run->source_type = pending->marks[i].type;
+                        run->value = approved_value;
                         fmt_copy(run->path, sizeof(run->path), pending->marks[i].path.text);
                         fmt_copy(run->path2, sizeof(run->path2), state->pending_dest.text);
                     }
@@ -1150,7 +1558,8 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
                     if (run != NULL) {
                         run->action = state->pending_action;
                         run->pane = state->pending_pane;
-                        run->value = c->kind == UI_CONFIRM_HIGH_RISK ? 1 : 0;
+                        run->source_type = state->pending_source_type;
+                        run->value = approved_value;
                         fmt_copy(run->path, sizeof(run->path), state->pending_path.text);
                         fmt_copy(run->path2, sizeof(run->path2), state->pending_dest.text);
                     }
@@ -1250,7 +1659,7 @@ void ui_state_init(UiState *state, UiMark *local_marks, int local_cap,
     state->focus = UI_FOCUS_LIST;
 
     UiPaneState *local = &state->panes[UI_PANE_LOCAL];
-    snprintf(local->path, sizeof(local->path), "ux0:data");
+    snprintf(local->path, sizeof(local->path), "*");
     local->connected = 1;
     local->marks = local_marks;
     local->mark_cap = local_cap;
@@ -1274,8 +1683,55 @@ void ui_state_init(UiState *state, UiMark *local_marks, int local_cap,
     state->site_port = 21;
     state->actions.selected = 0;
     state->actions.visible_count = 0;
+    state->clip_mode = UI_CLIP_NONE;
+    state->clip_count = 0;
     for (int i = 0; i < UI_ACTION_COUNT; ++i)
         state->actions.enabled[i] = 1;
+}
+
+/* A mark in the folder being listed must match a row. Marks in other folders
+ * survive directory changes, but a deleted file must not stay marked and
+ * reappear in the next DELETE confirmation. */
+static void prune_marks(UiPaneState *pane, int remote)
+{
+    int keep = 0;
+    for (int i = 0; i < pane->mark_count; ++i) {
+        UiMark *mark = &pane->marks[i];
+        Path local_parent;
+        char remote_parent[PATH_MAX_LEN];
+        int in_folder;
+        if (remote) {
+            in_folder =
+                remote_parent_path(mark->path.text, remote_parent,
+                                   sizeof(remote_parent)) &&
+                strcmp(remote_parent, pane->path) == 0;
+        } else {
+            in_folder = path_parent(mark->path.text, &local_parent) == PATH_OK &&
+                        ci_equal(local_parent.text, pane->path);
+        }
+        int found = 1;
+        if (in_folder) {
+            const char *name = last_segment(mark->path.text);
+            found = 0;
+            for (int r = 0; r < pane->row_count; ++r) {
+                if (pane->rows[r].type == UI_ROW_UP)
+                    continue;
+                int same = remote ? strcmp(pane->rows[r].name, name) == 0
+                                  : ci_equal(pane->rows[r].name, name);
+                if (same) {
+                    found = 1;
+                    break;
+                }
+            }
+        }
+        if (found) {
+            if (keep != i)
+                pane->marks[keep] = *mark;
+            keep++;
+        }
+    }
+    pane->mark_count = keep;
+    recompute_marks(pane);
 }
 
 void ui_state_set_rows(UiState *state, UiPane pane, const UiRow *rows,
@@ -1289,6 +1745,7 @@ void ui_state_set_rows(UiState *state, UiPane pane, const UiRow *rows,
     p->truncated = truncated;
     p->loading = 0;
     p->empty = count == 0;
+    prune_marks(p, pane == UI_PANE_REMOTE);
     clamp_pane(p);
 }
 
@@ -1310,6 +1767,10 @@ const UiRow *ui_state_selected_row(const UiState *state, UiPane pane)
 {
     if (state == NULL || pane >= UI_PANE_COUNT)
         return NULL;
+    /* While a listing is being written the row arena may be reused by the
+     * worker; no caller may read a row until the new generation is applied. */
+    if (state->panes[pane].loading)
+        return NULL;
     return selected_row(state, pane);
 }
 
@@ -1322,6 +1783,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
     int count = 0;
     switch (event->kind) {
     case UI_EVT_KEY:
+        /* A status is a reaction to the previous action. Clear it here so a
+         * stale reason cannot masquerade as the result of this key. */
+        state->status[0] = '\0';
         handle_key(state, event, out, max, &count);
         break;
     case UI_EVT_STICK:
@@ -1331,7 +1795,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         }
         break;
     case UI_EVT_LISTING_BEGIN: {
-        if (event->pane >= UI_PANE_COUNT)
+        if (event->pane < 0 || event->pane >= UI_PANE_COUNT)
             break;
         UiPaneState *pane = &state->panes[event->pane];
         const char *next = event->path[0] != '\0'
@@ -1342,11 +1806,23 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (volume_changed(event->pane, pane->path, next))
             clear_marks(pane);
         int path_changed = strcmp(pane->path, next) != 0;
+        int new_session = !pane->connected || pane->session_lost;
         fmt_copy(pane->path, sizeof(pane->path), next);
         pane->pending_path[0] = '\0';
         pane->loading = 1;
         pane->empty = 0;
         pane->session_lost = 0;
+        pane->error[0] = '\0';
+        if (new_session) {
+            /* The first listing of a session: no row or mark from the old
+             * server may survive a reconnect to the same-looking root. */
+            pane->rows = NULL;
+            pane->row_count = 0;
+            pane->selected = 0;
+            pane->scroll = 0;
+            pane->truncated = 0;
+            clear_marks(pane);
+        }
         if (path_changed) {
             pane->rows = NULL;
             pane->row_count = 0;
@@ -1357,30 +1833,58 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         break;
     }
     case UI_EVT_SET_ROWS:
-        ui_state_set_rows(state, event->pane, event->rows, event->row_count,
-                          event->truncated);
+        if (event->pane >= 0 && event->pane < UI_PANE_COUNT)
+            ui_state_set_rows(state, (UiPane)event->pane, event->rows,
+                              event->row_count, event->truncated);
         break;
     case UI_EVT_LISTING_END:
-        if (event->pane < UI_PANE_COUNT) {
+        if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
             pane->loading = 0;
             pane->empty = pane->row_count == 0;
-            if (!event->ok)
+            if (!event->ok) {
+                pane->rows = NULL;
+                pane->row_count = 0;
+                pane->selected = 0;
+                pane->scroll = 0;
+                pane->empty = 1;
                 fmt_copy(pane->error, sizeof(pane->error), event->text);
+            } else {
+                pane->error[0] = '\0';
+            }
         }
         break;
     case UI_EVT_SESSION_LOST:
-        if (event->pane < UI_PANE_COUNT) {
+        state->sites.connecting = 0;
+        if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
             pane->connected = 0;
             pane->session_lost = 1;
             pane->loading = 0;
+            pane->pending_path[0] = '\0';
+            pane->empty = pane->row_count == 0;
+            /* Do not keep showing the dead site as if it were still current. */
+            pane->site[0] = '\0';
+            if (event->pane == UI_PANE_REMOTE) {
+                state->site_name[0] = '\0';
+                state->site_host[0] = '\0';
+                state->site_port = 21;
+                state->site_known = 0;
+            }
             fmt_copy(pane->error, sizeof(pane->error), event->text);
             clear_marks(pane);
         }
+        if (state->screen == UI_SCREEN_ACTIONS &&
+            state->active_pane == UI_PANE_REMOTE) {
+            /* The ledger's enabled flags describe the dead session. Return to
+             * the workspace and its SESSION LOST prompt. */
+            state->screen = UI_SCREEN_WORKSPACE;
+            set_focus(state, UI_FOCUS_LIST);
+        }
         break;
     case UI_EVT_SESSION_OK:
-        if (event->pane < UI_PANE_COUNT) {
+        state->sites.connecting = 0;
+        if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
             pane->connected = 1;
             pane->session_lost = 0;
@@ -1398,8 +1902,17 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         }
         break;
     case UI_EVT_ERROR:
+        if (event->pane == UI_PANE_REMOTE) {
+            state->sites.connecting = 0;
+            /* A command can fail before any LISTING_END exists (busy client,
+             * refused CWD, not connected). Clear the eager READING state here
+             * or the pane stays on READING forever. */
+            UiPaneState *remote = &state->panes[UI_PANE_REMOTE];
+            remote->loading = 0;
+            remote->pending_path[0] = '\0';
+        }
         set_status(state, event->text);
-        if (event->pane < UI_PANE_COUNT)
+        if (event->pane >= 0 && event->pane < UI_PANE_COUNT)
             fmt_copy(state->panes[event->pane].error,
                      sizeof(state->panes[event->pane].error), event->text);
         break;
@@ -1519,12 +2032,15 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
                 if (c != NULL) {
                     c->action = state->pending_action;
                     c->pane = state->pending_pane;
+                    c->source_type = state->pending_source_type;
                     fmt_copy(c->path, sizeof(c->path),
                              state->pending_path.text);
                     fmt_copy(c->path2, sizeof(c->path2),
                              state->pending_dest.text);
                     fmt_copy(c->text, sizeof(c->text), event->text);
                 }
+                state->screen = UI_SCREEN_WORKSPACE;
+                set_focus(state, UI_FOCUS_LIST);
             }
             state->text.open = 0;
             break;
@@ -1563,7 +2079,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         }
         break;
     case UI_EVT_PANE_INFO:
-        if (event->pane < UI_PANE_COUNT) {
+        if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
             pane->free_known = event->total_known;
             fmt_size(pane->free_text, sizeof(pane->free_text), event->bytes,
@@ -1605,6 +2121,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (event->ok) {
             state->sites.login_failed = 0;
         } else {
+            state->sites.connecting = 0;
             state->sites.login_failed = 1;
             fmt_copy(state->sites.reply, sizeof(state->sites.reply), event->text);
         }

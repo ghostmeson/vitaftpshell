@@ -30,6 +30,39 @@ static uint32_t button_bit(UiKey key)
     return 0;
 }
 
+const char *ui_key_name(UiKey key)
+{
+    switch (key) {
+    case UI_KEY_UP:
+        return "UP";
+    case UI_KEY_DOWN:
+        return "DOWN";
+    case UI_KEY_LEFT:
+        return "LEFT";
+    case UI_KEY_RIGHT:
+        return "RIGHT";
+    case UI_KEY_CROSS:
+        return "CROSS";
+    case UI_KEY_CIRCLE:
+        return "CIRCLE";
+    case UI_KEY_SQUARE:
+        return "SQUARE";
+    case UI_KEY_TRIANGLE:
+        return "TRIANGLE";
+    case UI_KEY_L1:
+        return "L1";
+    case UI_KEY_R1:
+        return "R1";
+    case UI_KEY_START:
+        return "START";
+    case UI_KEY_SELECT:
+        return "SELECT";
+    case UI_KEY_NONE:
+    default:
+        return "NONE";
+    }
+}
+
 void input_repeat_init(InputRepeat *repeat)
 {
     if (repeat == NULL)

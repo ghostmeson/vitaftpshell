@@ -183,6 +183,39 @@ static void test_listing_generations(void)
     handoff_listing_release(&s_handoff, UI_PANE_LOCAL);
 }
 
+static void test_log_ring(void)
+{
+    handoff_init(&s_handoff);
+
+    for (int i = 0; i < HANDOFF_LOG_CAP; ++i) {
+        HandoffLogRecord record;
+        memset(&record, 0, sizeof(record));
+        record.kind = HANDOFF_LOG_KEY;
+        snprintf(record.screen, sizeof(record.screen), "WORKSPACE");
+        snprintf(record.key, sizeof(record.key), "K%d", i);
+        record.value = i;
+        record.value_set = 1;
+        CHECK(handoff_log_push(&s_handoff, &record) == 1);
+    }
+
+    HandoffLogRecord overflow;
+    memset(&overflow, 0, sizeof(overflow));
+    overflow.kind = HANDOFF_LOG_KEY;
+    snprintf(overflow.key, sizeof(overflow.key), "OVERFLOW");
+    CHECK(handoff_log_push(&s_handoff, &overflow) == 0);
+    CHECK(handoff_log_lost(&s_handoff) == 1);
+
+    HandoffLogRecord out;
+    for (int i = 0; i < HANDOFF_LOG_CAP; ++i) {
+        CHECK(handoff_log_pop(&s_handoff, &out) == 1);
+        char expected[16];
+        snprintf(expected, sizeof(expected), "K%d", i);
+        CHECK(strcmp(out.key, expected) == 0);
+        CHECK(out.value == i);
+    }
+    CHECK(handoff_log_pop(&s_handoff, &out) == 0);
+}
+
 static void test_bulk(void)
 {
     handoff_init(&s_handoff);
@@ -431,6 +464,7 @@ int main(void)
     test_event_progress();
     test_latched_server();
     test_listing_generations();
+    test_log_ring();
     test_bulk();
     test_record_integrity();
     test_progress_stress();

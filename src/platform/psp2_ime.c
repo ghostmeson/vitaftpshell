@@ -4,6 +4,7 @@
 
 #include <string.h>
 
+#include <psp2/apputil.h>
 #include <psp2/common_dialog.h>
 #include <psp2/ime_dialog.h>
 
@@ -22,7 +23,10 @@ static SceWChar16 s_title[PSP2_IME_TITLE_CAP];
 static SceWChar16 s_initial[PSP2_IME_INITIAL_CAP];
 static SceWChar16 s_input[PSP2_IME_INPUT_CAP];
 static int s_active;
-static int s_config_state; /* 0 = untried, 1 = ready, -1 = failed */
+static int s_apputil_state; /* 0 = untried, 1 = ready, -1 = failed */
+static int s_config_state;  /* 0 = untried, 1 = ready, -1 = failed */
+static int s_last_error;
+static int s_none_polls;
 static TextInputPort s_port;
 
 /* Bounded UTF-8 to UTF-16LE. Invalid input becomes U+FFFD; a value that does
@@ -149,18 +153,54 @@ static size_t ime_utf16_to_utf8(const SceWChar16 *src, char *dst, size_t cap)
     return out;
 }
 
+static int ime_ensure_apputil(void)
+{
+    if (s_apputil_state != 0)
+        return s_apputil_state > 0;
+
+    /* The SDK's IME sample initializes apputil before it sets the common-dialog
+     * config. Without this, sceCommonDialogSetConfigParam can reject the call
+     * and the IME never opens. This is the order the shipped sample proves. */
+    SceAppUtilInitParam init;
+    SceAppUtilBootParam boot;
+    memset(&init, 0, sizeof(init));
+    memset(&boot, 0, sizeof(boot));
+
+    int rc = sceAppUtilInit(&init, &boot);
+    if (rc < 0) {
+        s_apputil_state = -1;
+        s_last_error = rc;
+        return 0;
+    }
+
+    s_apputil_state = 1;
+    return 1;
+}
+
 static int ime_ensure_config(void)
 {
     if (s_config_state != 0)
         return s_config_state > 0;
+    if (!ime_ensure_apputil())
+        return 0;
 
-    /* [C] The common-dialog config is assumed to be set once, before any dialog
-     * is created. The IME initialization order is an open decision in
-     * AGENTS.md, so this sequence has not run on hardware. */
+    /* sceCommonDialogConfigParamInit leaves language and enterButtonAssign at
+     * MAX_VALUE; the dialog rejects a concrete request when those sentinels
+     * reach it. Set the two values the console actually accepts. */
     SceCommonDialogConfigParam config;
     sceCommonDialogConfigParamInit(&config);
-    s_config_state = sceCommonDialogSetConfigParam(&config) >= 0 ? 1 : -1;
-    return s_config_state > 0;
+    config.language = SCE_SYSTEM_PARAM_LANG_ENGLISH_US;
+    config.enterButtonAssign = SCE_SYSTEM_PARAM_ENTER_BUTTON_CROSS;
+
+    int rc = sceCommonDialogSetConfigParam(&config);
+    if (rc < 0) {
+        s_config_state = -1;
+        s_last_error = rc;
+        return 0;
+    }
+
+    s_config_state = 1;
+    return 1;
 }
 
 static ImeBeginResult ime_begin(void *ctx, const ImeRequest *request)
@@ -170,8 +210,11 @@ static ImeBeginResult ime_begin(void *ctx, const ImeRequest *request)
         return IME_BEGIN_ERROR;
     if (s_active)
         return IME_BEGIN_ERROR;
+
+    s_none_polls = 0;
     if (!ime_ensure_config())
         return IME_BEGIN_UNAVAILABLE;
+    s_last_error = 0;
 
     ime_utf8_to_utf16(request->title != NULL ? request->title : "", s_title,
                       PSP2_IME_TITLE_CAP);
@@ -188,6 +231,10 @@ static ImeBeginResult ime_begin(void *ctx, const ImeRequest *request)
 
     SceImeDialogParam param;
     sceImeDialogParamInit(&param);
+    /* The shipped SDK sample sets one forced language. Leaving the mask at zero
+     * makes sceImeDialogInit reject the request as an invalid language. */
+    param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH;
+    param.languagesForced = SCE_TRUE;
     param.type = SCE_IME_TYPE_DEFAULT;
     param.dialogMode = SCE_IME_DIALOG_DIALOG_MODE_WITH_CANCEL;
     param.textBoxMode = request->password
@@ -203,6 +250,7 @@ static ImeBeginResult ime_begin(void *ctx, const ImeRequest *request)
      * except through poll()'s ImeResponse. */
     int rc = sceImeDialogInit(&param);
     if (rc < 0) {
+        s_last_error = rc;
         memset(s_input, 0, sizeof(s_input));
         return IME_BEGIN_UNAVAILABLE;
     }
@@ -229,20 +277,29 @@ static ImePollResult ime_poll(void *ctx, ImeResponse *out)
         return IME_POLL_ERROR;
 
     SceCommonDialogStatus status = sceImeDialogGetStatus();
-    if (status == SCE_COMMON_DIALOG_STATUS_RUNNING)
+    if (status == SCE_COMMON_DIALOG_STATUS_RUNNING) {
+        s_none_polls = 0;
         return IME_POLL_RUNNING;
+    }
 
     if (status == SCE_COMMON_DIALOG_STATUS_NONE) {
-        /* [C] Whether the dialog needs a frame between init and the first
-         * status query is unverified. NONE while this adapter believes the
-         * dialog is open is treated as an error rather than assumed running. */
+        /* The dialog can report NONE for a frame or two after init; the common
+         * dialog update in the draw path is what moves it to RUNNING. Treat a
+         * short NONE window as still starting, not as a failure. The cap keeps
+         * a dialog that never starts from holding the app forever. */
+        if (++s_none_polls < 120)
+            return IME_POLL_RUNNING;
+
+        s_last_error = SCE_COMMON_DIALOG_ERROR_NOT_RUNNING;
         s_active = 0;
         ime_close_dialog();
         memset(s_input, 0, sizeof(s_input));
         return IME_POLL_ERROR;
     }
 
+    s_none_polls = 0;
     if (status != SCE_COMMON_DIALOG_STATUS_FINISHED) {
+        s_last_error = SCE_COMMON_DIALOG_ERROR_UNEXPECTED_FATAL;
         s_active = 0;
         ime_close_dialog();
         memset(s_input, 0, sizeof(s_input));
@@ -259,6 +316,7 @@ static ImePollResult ime_poll(void *ctx, ImeResponse *out)
         /* Keep the active flag only when Term failed: the dialog may still be
          * open, and end() can retry the abort/term pair. A closed dialog is
          * never reported as active. */
+        s_last_error = got_result < 0 ? got_result : terminated;
         s_active = terminated < 0 ? 1 : 0;
         memset(s_input, 0, sizeof(s_input));
         return IME_POLL_ERROR;
@@ -289,9 +347,16 @@ static void ime_end(void *ctx)
         ime_close_dialog();
 
     s_active = 0;
+    s_none_polls = 0;
     /* The input and initial buffers may hold a password; leave no copy behind. */
     memset(s_input, 0, sizeof(s_input));
     memset(s_initial, 0, sizeof(s_initial));
+}
+
+static int ime_last_error(void *ctx)
+{
+    (void)ctx;
+    return s_last_error;
 }
 
 TextInputPort *psp2_ime_port(void)
@@ -300,5 +365,6 @@ TextInputPort *psp2_ime_port(void)
     s_port.begin = ime_begin;
     s_port.poll = ime_poll;
     s_port.end = ime_end;
+    s_port.last_error = ime_last_error;
     return &s_port;
 }

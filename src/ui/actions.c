@@ -19,6 +19,10 @@ static const char *action_label(UiAction action)
         return "COPY";
     case UI_ACTION_MOVE:
         return "MOVE";
+    case UI_ACTION_PASTE:
+        return "PASTE";
+    case UI_ACTION_CLEAR_CLIPBOARD:
+        return "CLEAR";
     case UI_ACTION_UPLOAD:
         return "UPLOAD";
     case UI_ACTION_DOWNLOAD:
@@ -29,17 +33,26 @@ static const char *action_label(UiAction action)
         return "RENAME";
     case UI_ACTION_DELETE:
         return "DELETE";
+    case UI_ACTION_REFRESH:
+        return "REFRESH";
+    case UI_ACTION_DISCONNECT:
+        return "DISCONNECT";
     default:
         return "";
     }
 }
 
-static const char *action_desc(UiAction action)
+static const char *action_desc(UiAction action, UiClipMode clip)
 {
     switch (action) {
     case UI_ACTION_COPY:
+        return "TO CLIPBOARD";
     case UI_ACTION_MOVE:
-        return "TO THIS FOLDER";
+        return "TO CLIPBOARD";
+    case UI_ACTION_PASTE:
+        return clip == UI_CLIP_MOVE ? "MOVE HERE" : "COPY HERE";
+    case UI_ACTION_CLEAR_CLIPBOARD:
+        return "DISCARD THE CLIPBOARD";
     case UI_ACTION_UPLOAD:
         return "TO REMOTE PANE";
     case UI_ACTION_DOWNLOAD:
@@ -50,18 +63,28 @@ static const char *action_desc(UiAction action)
         return "CHANGE THE NAME";
     case UI_ACTION_DELETE:
         return "CANNOT BE UNDONE";
+    case UI_ACTION_REFRESH:
+        return "READ THE FOLDER AGAIN";
+    case UI_ACTION_DISCONNECT:
+        return "CLOSE THE SESSION";
     default:
         return "";
     }
 }
 
-static const char *action_consequence(UiAction action)
+static const char *action_consequence(UiAction action, UiClipMode clip)
 {
     switch (action) {
     case UI_ACTION_COPY:
-        return "COPIES THE SELECTION INTO THIS FOLDER.";
+        return "PUTS THE MARKS ON THE CLIPBOARD. NAVIGATE, THEN PASTE.";
     case UI_ACTION_MOVE:
-        return "MOVES THE SELECTION INTO THIS FOLDER.";
+        return "PUTS THE MARKS ON THE CLIPBOARD. NAVIGATE, THEN PASTE.";
+    case UI_ACTION_PASTE:
+        return clip == UI_CLIP_MOVE
+                   ? "MOVES THE CLIPBOARD INTO THIS FOLDER."
+                   : "COPIES THE CLIPBOARD INTO THIS FOLDER.";
+    case UI_ACTION_CLEAR_CLIPBOARD:
+        return "DISCARDS THE COPIED ITEMS.";
     case UI_ACTION_UPLOAD:
         return "SENDS THE SELECTION TO THE REMOTE PANE.";
     case UI_ACTION_DOWNLOAD:
@@ -72,6 +95,10 @@ static const char *action_consequence(UiAction action)
         return "RENAMES THE SELECTED ITEM.";
     case UI_ACTION_DELETE:
         return "DELETES PERMANENTLY. CANNOT BE UNDONE.";
+    case UI_ACTION_REFRESH:
+        return "UPDATES THE REMOTE LISTING.";
+    case UI_ACTION_DISCONNECT:
+        return "ENDS THE FTP SESSION AND CLEARS THE REMOTE PANE.";
     default:
         return "";
     }
@@ -101,9 +128,24 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
 
     char band[40];
     uint32_t band_color = C_DIM;
-    if (actions->marked > 0) {
+    if (state->clip_mode != UI_CLIP_NONE) {
+        snprintf(band, sizeof(band), "%s %d",
+                 state->clip_mode == UI_CLIP_MOVE ? "MOVE" : "COPY",
+                 state->clip_count);
+        band_color = C_YELLOW;
+    } else if (actions->marked > 0) {
         snprintf(band, sizeof(band), "%d MARKED", actions->marked);
         band_color = C_YELLOW;
+    } else if ((actions->reason[UI_ACTION_DOWNLOAD][0] != '\0' &&
+                strcmp(actions->reason[UI_ACTION_DOWNLOAD], "UNSAFE NAME") ==
+                    0) ||
+               (actions->reason[UI_ACTION_DELETE][0] != '\0' &&
+                strcmp(actions->reason[UI_ACTION_DELETE], "UNSAFE NAME") == 0)) {
+        snprintf(band, sizeof(band), "UNSAFE NAME");
+        band_color = C_YELLOW;
+    } else if (!actions->has_selection) {
+        snprintf(band, sizeof(band), "NO SELECTION");
+        band_color = C_DIM;
     } else if (actions->reason[UI_ACTION_DELETE][0] != '\0' &&
                (strcmp(actions->reason[UI_ACTION_DELETE], "VOLUME ROOT") == 0 ||
                 strcmp(actions->reason[UI_ACTION_DELETE],
@@ -139,12 +181,15 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
                   enabled ? C_WHITE : C_DIM);
 
         const char *desc =
-            enabled ? action_desc(action) : actions->reason[action];
+            enabled ? action_desc(action, state->clip_mode)
+                    : actions->reason[action];
         uint32_t desc_color = enabled
                                   ? (action == UI_ACTION_DELETE ? C_YELLOW
                                                                 : C_DIM)
                                   : C_DIM;
-        font_text(desc != NULL && desc[0] != '\0' ? desc : action_desc(action),
+        font_text(desc != NULL && desc[0] != '\0'
+                      ? desc
+                      : action_desc(action, state->clip_mode),
                   50.0f, y + 23.0f, PX_MICRO, desc_color);
     }
 }
@@ -195,7 +240,22 @@ static void target_draw(const UiState *state, const LayoutRect *r)
     int known = 0;
     int have_size = target_size(state, actions, &bytes, &known);
 
-    if (protected_root) {
+    UiAction selected = (UiAction)actions->selected;
+    if (selected == UI_ACTION_PASTE && state->clip_mode != UI_CLIP_NONE) {
+        char count[32];
+        snprintf(count, sizeof(count), "%d", state->clip_count);
+        font_text(count, 596.0f, 148.0f, PX_PRIMARY, C_WHITE);
+        font_text("CLIPBOARD", 596.0f, 169.0f, PX_MICRO, C_DIM);
+    } else if (selected == UI_ACTION_REFRESH) {
+        font_text("--", 596.0f, 148.0f, PX_VALUE, C_DIM);
+        font_text("FOLDER", 596.0f, 178.0f, PX_LABEL, C_DIM);
+    } else if (selected == UI_ACTION_DISCONNECT) {
+        font_text("--", 596.0f, 148.0f, PX_VALUE, C_DIM);
+        font_text("SESSION", 596.0f, 178.0f, PX_LABEL, C_DIM);
+    } else if (!actions->has_selection && actions->marked == 0) {
+        font_text("--", 596.0f, 148.0f, PX_VALUE, C_DIM);
+        font_text("NO SELECTION", 596.0f, 178.0f, PX_LABEL, C_DIM);
+    } else if (protected_root) {
         font_text("--", 596.0f, 148.0f, PX_VALUE, C_DIM);
         font_text(actions->reason[UI_ACTION_DELETE], 596.0f, 178.0f, PX_LABEL,
                   C_YELLOW);
@@ -221,12 +281,16 @@ static void target_draw(const UiState *state, const LayoutRect *r)
 
     font_text("DESTINATION", 596.0f, 224.0f, PX_MICRO, C_DIM);
     const char *destination =
-        pane == UI_PANE_LOCAL ? actions->dest : actions->other;
+        selected == UI_ACTION_DISCONNECT
+            ? "--"
+            : ((selected == UI_ACTION_COPY || selected == UI_ACTION_MOVE)
+                   ? "CLIPBOARD"
+                   : (pane == UI_PANE_LOCAL ? actions->dest : actions->other));
     font_text_right(destination, 928.0f, 224.0f, PX_MICRO, C_CYAN);
 
-    UiAction selected = (UiAction)actions->selected;
     font_text(action_label(selected), 596.0f, 300.0f, PX_LABEL, C_WHITE);
-    font_text(action_consequence(selected), 596.0f, 320.0f, PX_MICRO, C_DIM);
+    font_text(action_consequence(selected, state->clip_mode), 596.0f, 320.0f,
+              PX_MICRO, C_DIM);
 
     if (actions->marked > 1)
         font_text("MARKS STAY AFTER THE OPERATION", 596.0f, 400.0f, PX_MICRO,
@@ -241,12 +305,44 @@ static void dock_actions(const UiState *state)
 
     p.word = "READY";
     p.word_color = C_DIM;
-    p.subject = action_label((UiAction)actions->selected);
-    p.path = actions->dest;
-    p.right_a = actions->marked > 0 ? "MARKED" : "1 ITEM";
-    p.right_a_color = actions->marked > 0 ? C_YELLOW : C_DIM;
-    p.left = "X TO RUN";
-    p.left_color = C_WHITE;
+    UiAction dock_selected = (UiAction)actions->selected;
+    p.subject = action_label(dock_selected);
+    p.path = dock_selected == UI_ACTION_DISCONNECT
+                 ? "--"
+                 : ((dock_selected == UI_ACTION_COPY ||
+                     dock_selected == UI_ACTION_MOVE)
+                        ? "CLIPBOARD"
+                        : actions->dest);
+    if (state->clip_mode != UI_CLIP_NONE) {
+        p.right_a = "CLIPBOARD";
+        p.right_a_color = C_YELLOW;
+    } else if (actions->marked > 0) {
+        p.right_a = "MARKED";
+        p.right_a_color = C_YELLOW;
+    } else if (!actions->has_selection) {
+        p.right_a = "NO SELECTION";
+        p.right_a_color = C_DIM;
+    } else {
+        p.right_a = "1 ITEM";
+        p.right_a_color = C_DIM;
+    }
+
+    UiAction selected = (UiAction)actions->selected;
+    if (state->status[0] != '\0') {
+        p.left = state->status;
+        p.left_color = C_YELLOW;
+    } else if (!actions->enabled[selected] &&
+               actions->reason[selected][0] != '\0') {
+        p.left = actions->reason[selected];
+        p.left_color = C_YELLOW;
+    } else if (state->clip_mode != UI_CLIP_NONE &&
+               selected == UI_ACTION_PASTE) {
+        p.left = "X TO PASTE";
+        p.left_color = C_WHITE;
+    } else {
+        p.left = "X TO RUN";
+        p.left_color = C_WHITE;
+    }
 
     dock_panel_draw(&p);
 }

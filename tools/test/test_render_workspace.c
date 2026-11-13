@@ -299,6 +299,19 @@ static void test_regions(void)
     CHECK(trace_has_rect(18.0f, 76.0f, 456.0f, 352.0f, C_PANEL));
 }
 
+static void test_session_lost(void)
+{
+    setup();
+    UiPaneState *remote = &s_state.panes[UI_PANE_REMOTE];
+    remote->connected = 0;
+    remote->session_lost = 1;
+    snprintf(remote->error, sizeof(remote->error), "KEEPALIVE TIMEOUT");
+    render();
+    CHECK(trace_has_text("SESSION LOST"));
+    CHECK(trace_has_text("KEEPALIVE TIMEOUT"));
+    CHECK(trace_has_text("X RECONNECT  O DISMISS"));
+}
+
 int main(void)
 {
     test_ten_rows_and_scroll();
@@ -309,6 +322,7 @@ int main(void)
     test_dock_states();
     test_header();
     test_regions();
+    test_session_lost();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_render_workspace: %d failure(s)\n", s_failures);

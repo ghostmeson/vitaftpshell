@@ -14,12 +14,15 @@
  * 530. Passwords are never a parameter here, so they cannot reach a line.
  *
  * One tab-separated record: monotonic milliseconds, event name, then the
- * key=value fields that apply. At 64 KiB the caller rotates once and retries.
+ * key=value fields that apply. At 256 KiB the caller rotates once and retries.
+ * The adapter keeps three generations: session.log, session.old.log, and
+ * session.old2.log.
  */
 
-#define LOGEV_CAP 65536
+#define LOGEV_CAP 262144
 /* A path can percent-encode to three bytes per source byte. */
 #define LOGEV_LINE_MAX 4096
+#define LOGEV_NO_VALUE INT32_MIN
 
 typedef enum {
     LOGEV_CONNECT = 0,
@@ -33,16 +36,40 @@ typedef enum {
     LOGEV_SERVER_STOP,
     LOGEV_SERVER_CLIENT,
     LOGEV_SAVE,
+    LOGEV_APP_START,
+    LOGEV_APP_STOP,
+    LOGEV_SCREEN,
+    LOGEV_KEY,
+    LOGEV_COMMAND,
+    LOGEV_IME,
+    LOGEV_QUEUE,
+    LOGEV_ERROR,
+    LOGEV_LOG,
+    LOGEV_SETTINGS,
     LOGEV_EVENT_COUNT
 } LogEvent;
 
 typedef struct {
     LogEvent event;
+
     const char *site;
     const char *host;
     const char *path;
     const char *stage;
     const char *cls;
+
+    /* New diagnostic fields. All are optional; detail is a mapped reason, never
+     * a raw server reply or a field value. */
+    const char *screen;
+    const char *key;
+    const char *command;
+    const char *detail;
+    const char *version;
+    int build;
+    int value;      /* LOGEV_NO_VALUE when absent */
+    int repeat;
+    int masked;
+
     uint64_t bytes;
     uint64_t total;
     int port;    /* -1 when absent */

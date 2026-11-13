@@ -53,6 +53,9 @@ typedef struct {
 
 void input_repeat_init(InputRepeat *repeat);
 
+/* Stable key names for the session log. */
+const char *ui_key_name(UiKey key);
+
 /*
  * Returns the number of semantic events written. The caller should provide at
  * least two slots; a key edge and a stick step can share one poll.

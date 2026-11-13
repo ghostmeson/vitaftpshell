@@ -21,8 +21,24 @@ server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime exist. `tools/test/run.sh` passes nineteen
 host suites, `tools/preview/run.sh` renders 36 settled states, and `build.sh`
-emits `vitaftpshell-v01.00-b15.vpk` with the real app linked. Nothing has run
-on hardware yet; the first console launch is Phase 6 (U14).
+emits `vitaftpshell-v01.00-b36.vpk` with the real app linked. b16 and b18 have
+run on the console: b18 proved the drive browser, pinned the IME as the
+new-folder/rename blocker, showed the client failing at TCP connect, and showed
+the server with no client. b20 opened the IME and reached a rename, then the
+worker crashed on a stack overflow; b21 fixed the worker stack and rename
+completed. b22 made "no selection" disable every file action except new folder,
+and exposed the server advertising a byte-swapped IP. b23 fixed the IP, matched
+ftpvitalib's net pool/backlog, and restricted free-space queries to `ux0:`; FTP
+works. b24 adds clipboard/PASTE copy/move and hardens DELETE; b25 defers worker
+confirmations while a local dialog owns the screen; b26 widens the FTP-client
+connect window and logs the resolved IP and raw network result; b27 clears the
+CONNECTING state on remote errors; b28 fixes PASV by using the control peer's
+address and the reply port; b32 fixes the remote pane (READING cleared on a
+failed CWD, remote actions over the FTP client, DISCONNECT, site teardown, an
+idle NOOP for liveness, remote mark pruning); b36 adds REFRESH, unsafe-name
+refusal, download totals, upload MLST preflight, and folder-transfer refusal
+(R22/R23 deferred). No M1–M8 row has passed; the project stays `building` until
+it does.
 
 ## Users
 
@@ -70,7 +86,7 @@ requirements R1-R70.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | M1–M8 evidence; project becomes `verified` — next |
+| Phase 6: Hardware verification | M1–M8 evidence; project becomes `verified` — in progress (b36) |
 
 ## Failure policy
 

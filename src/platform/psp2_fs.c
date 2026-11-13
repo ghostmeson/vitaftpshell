@@ -416,9 +416,13 @@ static FsResult fs_free_space(void *ctx, const char *path, FsFreeSpace *out)
     if (volume_prefix(path, volume, sizeof(volume)) == 0)
         return FS_OK;
 
-    /* [C] sceIoDevctl(0x3001) free space is proven on ux0: under the shipped
-     * UNSAFE eboot; ur0: and uma0: are unverified (D32 records a safe-authid
-     * failure, not the UNSAFE result). */
+    /* VitaShell queries free space on the device entry; the worker now does
+     * that once per volume. Only ux0: is proven here. The b21 console warning
+     * about the memory card followed repeated devctl calls on ur0:/uma0:, so
+     * those volumes report unknown and the UI renders --. */
+    if (!volume_is(volume, "ux0:"))
+        return FS_OK;
+
     SceIoDevInfo info;
     memset(&info, 0, sizeof(info));
 
@@ -430,17 +434,14 @@ static FsResult fs_free_space(void *ctx, const char *path, FsFreeSpace *out)
         return FS_OK;
     }
 
-    /* A devctl failure, or a success that carried no usable free-size, falls
-     * back to the app-manager query, which is documented for ux0: only. */
-    if (volume_is(volume, "ux0:")) {
-        uint64_t max_size = 0;
-        uint64_t free_size = 0;
-        if (sceAppMgrGetDevInfo("ux0:", &max_size, &free_size) >= 0) {
-            (void)max_size;
-            out->known = 1;
-            out->bytes = free_size;
-            return FS_OK;
-        }
+    /* The app-manager query is documented for ux0: only. */
+    uint64_t max_size = 0;
+    uint64_t free_size = 0;
+    if (sceAppMgrGetDevInfo("ux0:", &max_size, &free_size) >= 0) {
+        (void)max_size;
+        out->known = 1;
+        out->bytes = free_size;
+        return FS_OK;
     }
 
     /* Both queries failed: unknown is reported, never a guessed zero. */

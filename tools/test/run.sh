@@ -62,6 +62,11 @@ fi
 
 echo "layering guard: OK"
 
+# --- Asset guard ------------------------------------------------------------
+# The installer rejects 24-bit truecolor LiveArea art with 0x8010113D; every
+# sce_sys PNG must be indexed 8-bit (color type 3, bit depth 8).
+"$ROOT/tools/check_assets.sh"
+
 # --- Host tests -------------------------------------------------------------
 mkdir -p "$OUT"
 shopt -s nullglob

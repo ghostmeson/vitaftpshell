@@ -74,6 +74,54 @@ static void test_reply_text_is_not_logged(void)
     CHECK(strstr(line, "reply") == NULL);
 }
 
+static void test_diagnostic_fields(void)
+{
+    LogRecord record;
+    logev_init(&record, LOGEV_KEY);
+    record.screen = "WORKSPACE";
+    record.key = "CROSS";
+    record.command = "transfer";
+    record.detail = "worker";
+    record.version = "01.00";
+    record.build = 17;
+    record.value = 3;
+    record.repeat = 1;
+    record.masked = 1;
+
+    char line[LOGEV_LINE_MAX];
+    CHECK(logev_format(line, sizeof(line), 99, &record) > 0);
+    CHECK(strstr(line, "screen=WORKSPACE") != NULL);
+    CHECK(strstr(line, "key=CROSS") != NULL);
+    CHECK(strstr(line, "cmd=transfer") != NULL);
+    CHECK(strstr(line, "detail=worker") != NULL);
+    CHECK(strstr(line, "ver=01.00") != NULL);
+    CHECK(strstr(line, "build=17") != NULL);
+    CHECK(strstr(line, "value=3") != NULL);
+    CHECK(strstr(line, "repeat=1") != NULL);
+    CHECK(strstr(line, "masked=1") != NULL);
+
+    LogRecord ime;
+    logev_init(&ime, LOGEV_IME);
+    ime.screen = "SITE EDITOR";
+    ime.command = "ime";
+    ime.detail = "PASSWORD";
+    ime.masked = 1;
+    CHECK(logev_format(line, sizeof(line), 100, &ime) > 0);
+    CHECK(strstr(line, "masked=1") != NULL);
+    CHECK(strstr(line, "hunter2-secret") == NULL); /* no value crosses */
+}
+
+static void test_detail_encoding(void)
+{
+    LogRecord record;
+    logev_init(&record, LOGEV_ERROR);
+    record.detail = "bad\tline\nwith space";
+    char line[LOGEV_LINE_MAX];
+    CHECK(logev_format(line, sizeof(line), 7, &record) > 0);
+    CHECK(strchr(line, '\n') == NULL);
+    CHECK(strstr(line, "bad%09line%0Awith%20space") != NULL);
+}
+
 static void test_rotation(void)
 {
     fake_log_reset();
@@ -115,6 +163,8 @@ int main(void)
 {
     test_no_passwords();
     test_reply_text_is_not_logged();
+    test_diagnostic_fields();
+    test_detail_encoding();
     test_rotation();
 
     if (s_failures != 0) {

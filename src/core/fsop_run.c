@@ -2,6 +2,7 @@
 
 #include "core/fsop_run.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -88,8 +89,9 @@ static int rollback_step(FsPort *fs, const FsOpPlan *plan, int index)
     }
 }
 
-static int apply_rollback(FsPort *fs, const FsOpPlan *plan, const int *applied,
-                          int applied_count, int *failed_index)
+static int apply_rollback(FsPort *fs, const FsOpPlan *plan,
+                          const uint16_t *applied, int applied_count,
+                          int *failed_index)
 {
     int ok = 1;
     for (int i = applied_count - 1; i >= 0; --i) {
@@ -102,6 +104,15 @@ static int apply_rollback(FsPort *fs, const FsOpPlan *plan, const int *applied,
     return ok;
 }
 
+/*
+ * Keep the 8 KiB copy buffer out of fsop_run's frame. With it inlined, the
+ * frame was 19,540 bytes against a 19,756-byte worker stack (b20 core), and a
+ * rename that never copies a byte still reserved it. A rename now enters only
+ * fsop_run's small frame; the buffer exists only during an actual copy.
+ */
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
 static int run_copy_file(FsPort *fs, const FsOpPlan *plan, int step_index,
                          FsOpProgress *progress, FsOpCancelFn cancel,
                          void *cancel_ctx, int *cancelled)
@@ -340,7 +351,9 @@ FsOpRunResult fsop_run(FsPort *fs, const FsOpPlan *plan, FsOpProgress *progress,
     progress->bytes_total = plan->total_bytes;
     progress->total_known = plan->total_known;
 
-    int applied[FSOP_ROLLBACK_MAX];
+    /* A rollback index is at most FSOP_ROLLBACK_MAX - 1 (2047), so 16 bits
+     * are enough and the array costs half the stack of an int array. */
+    uint16_t applied[FSOP_ROLLBACK_MAX];
     int applied_count = 0;
     int cancelled = 0;
     int failed = 0;
@@ -381,7 +394,7 @@ FsOpRunResult fsop_run(FsPort *fs, const FsOpPlan *plan, FsOpProgress *progress,
         }
         if (step->rollback_index >= 0 &&
             applied_count < FSOP_ROLLBACK_MAX)
-            applied[applied_count++] = step->rollback_index;
+            applied[applied_count++] = (uint16_t)step->rollback_index;
     }
 
     if (cancelled || failed) {

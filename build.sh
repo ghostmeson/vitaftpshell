@@ -25,6 +25,9 @@ if ! command -v arm-vita-eabi-gcc >/dev/null 2>&1; then
   exit 1
 fi
 
+# Install-time guard: the Vita promoter rejects 24-bit truecolor LiveArea art.
+"$ROOT/tools/check_assets.sh"
+
 # A build number identifies a *distinct* build, not a compiler invocation.
 #
 # Rebuilding unchanged sources -- which happens constantly while checking for
