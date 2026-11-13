@@ -16,6 +16,7 @@ discovery.
 | `DESIGN.md` | The settled layout, states, and input; the sheets | Design |
 | `DECISIONS.md` | Numbered decisions with context and consequences | All |
 | `FIXES.md` | Chronological fix index: build, symptom, cause, fix, evidence, hardware status | Engineering |
+| `VERIFICATION.md` | Hardware matrix, build evidence, and the per-build test record | Engineering |
 | `THIRD_PARTY.md` | Reused code, licenses, and protocol references | Engineering |
 | `plans/` | The v1 plan: requirements, decisions, units, verification | Planning |
 | `features/` | Future feature documents | Product |

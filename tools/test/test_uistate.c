@@ -1217,6 +1217,48 @@ static void test_remote_multi_download(void)
     CHECK(s_commands[1].total == 5 && s_commands[1].total_known == 1);
 }
 
+static void test_remote_download_from_all_drives(void)
+{
+    reset();
+    /* The local pane starts at the virtual ALL DRIVES root (D53). A download
+     * with no concrete folder must reach the worker's ux0:data fallback. */
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "*");
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 2; /* B.BIN */
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.selected == UI_ACTION_DOWNLOAD);
+    send_key(UI_KEY_CROSS);
+
+    CHECK(command(UI_CMD_RUN_ACTION) != NULL);
+    CHECK(command(UI_CMD_RUN_ACTION)->action == UI_ACTION_DOWNLOAD);
+    CHECK(strcmp(command(UI_CMD_RUN_ACTION)->path2, "*") == 0);
+    CHECK(strcmp(s_state.status, "PATH TOO LONG") != 0);
+}
+
+static void test_high_risk_delete_warning(void)
+{
+    reset();
+    UiRow rows[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "X.SUPRX", .type = UI_ROW_FILE, .size = 1, .size_known = 1},
+    };
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ur0:tai");
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, rows, 2, 0);
+    s_state.panes[UI_PANE_LOCAL].selected = 1;
+
+    send_key(UI_KEY_TRIANGLE);
+    s_state.actions.selected = UI_ACTION_DELETE;
+    send_key(UI_KEY_CROSS);
+
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
+    CHECK(s_state.confirm.high_risk == 1);
+    CHECK(strstr(s_state.confirm.warning, "BOOTING") != NULL);
+    CHECK(strcmp(s_state.confirm.risk_path, "ur0:tai/X.SUPRX") == 0);
+}
+
 static void test_remote_marked_dir_delete_type(void)
 {
     reset();
@@ -1325,6 +1367,8 @@ int main(void)
     test_remote_delete_confirm_and_type();
     test_remote_marked_dir_delete_type();
     test_remote_multi_download();
+    test_remote_download_from_all_drives();
+    test_high_risk_delete_warning();
     test_remote_unsafe_and_folder();
     test_remote_error_clears_reading();
     test_session_lost_clears_identity();

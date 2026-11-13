@@ -1680,7 +1680,12 @@ FtpClientResult ftp_client_mlst(FtpClient *client, const char *path)
     client->stage = FTP_STAGE_COMMAND;
     client->stage_deadline = now_ms(client) + CLIENT_COMMAND_MS;
     client->step = CSTEP_MLST;
-    client_send(client, "MLST %s", client->pending_path);
+    if (!client_send(client, "MLST %s", client->pending_path)) {
+        /* The control write failed and client_lost already owns the session.
+         * Do not leave the worker waiting for a STAT event that cannot come. */
+        client_clear_op(client);
+        return FTP_CLIENT_NOT_CONNECTED;
+    }
     return FTP_CLIENT_OK;
 }
 

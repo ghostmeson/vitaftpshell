@@ -1,8 +1,8 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b36.vpk
-**SHA-256:** 9b58b7d25ba30397c67a5df96c1c370c93c8173f16a3ca8abcf8e4fd1873e48c
-**ELF:** build/vitaftpshell, 509,144 bytes
+**Build:** vitaftpshell-v01.00-b37.vpk
+**SHA-256:** a60584582e7c1f89ebf8527be454d84cda1158a3c0acae1e0061fbc55b3eb765
+**ELF:** build/vitaftpshell, 509,168 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-13
 **Status:** in progress
@@ -304,7 +304,7 @@ idle 20 s, and the session 35 s; a data connect failure records its raw
 
 The older external `ftp.gnu.org` run failed at `first_listing` after the old
 2 s window. The PASV-host change and the wider window must both be tested on the
-console; the Mac still receives `220`/`230` from the site. b36 supersedes b28
+console; the Mac still receives `220`/`230` from the site. b37 supersedes b28
 as the build to install and keeps the same PASV behavior.
 
 ### b32 remote pane
@@ -373,6 +373,35 @@ hint), `test_integration` (`test_remote_refresh`, `test_remote_unsafe_name`,
 and `test_uistate` (`test_remote_refresh_action`,
 `test_remote_unsafe_and_folder`, folder refusal in `test_marks`). The console
 test is pending.
+
+### b37 review pass
+
+An independent review of the uncommitted Phase 6 work found five P1 and ten
+P2/P3 issues. b37 fixes them and adds the missing host coverage:
+
+- `pump_queue` no longer recurses; a 64-item SKIP batch used ~150 KiB against
+  the 128 KiB worker stack.
+- One `reset_remote_session` clears the queue, batch counters, conflict latch,
+  remote actions, and upload preflight on DISCONNECT, CONNECT, and loss. A
+  stale OVERWRITE ALL answer can no longer cross a login.
+- A folder that stops at the 2000-row cap is a successful truncated listing;
+  the `FIRST 2000` badge is applied with the rows it describes.
+- ACTIONS DOWNLOAD at the ALL DRIVES root uses the worker's `ux0:data`
+  fallback instead of failing with `PATH TOO LONG`.
+- A high-risk DELETE confirmation shows the console-boot warning.
+- `ftp_client_mlst` reports a lost control write instead of leaving the upload
+  check latched.
+- The fake peer can script MLST as unsupported, a directory, or a failure;
+  the PASV test asserts the data socket dialed the control peer and reply
+  port; the CANCEL test asserts `CANCELLED`, an idle dock, and a fresh prompt.
+
+Host evidence: `test_listing_cap`, `test_remote_download_from_all_drives`,
+`test_high_risk_delete_warning`, `test_upload_preflight_unsupported`,
+`test_upload_preflight_directory`, `test_upload_preflight_failure`,
+`test_download_conflict`, `test_mlst_send_failure`, `test_pasv_nat`, and the
+strengthened `test_upload_conflict`. Nineteen suites pass with zero warnings;
+ASan/UBSan are clean for integration, client, and UI state. The console test is
+pending.
 
 ### M1 - ftp.gnu.org anonymous
 
@@ -559,6 +588,13 @@ evidence.
 | transfer/upload | Uploads overwrote remote files silently | No remote existence check | MLST preflight + conflict prompt; CANCEL clears the batch | `test_mlst`, `test_upload_conflict` | b36 built |
 | transfer/folder | A folder was queued as one RETR/STOR | R22/R23 deferred | `FOLDER NOT SUPPORTED` in the UI and worker | `test_marks`, `test_remote_unsafe_and_folder` | b36 built (deferred R22/R23) |
 | client/listing-verb | A listing after a transfer sent the previous data verb | `data_kind` was not reset when a listing began | `client_begin_listing` sets `CDATA_LIST` | `test_client` upload-then-list | b36 built |
+| worker/stack | A 64-item SKIP batch could overflow the worker stack | `pump_queue` recursed once per released item | Iterate instead of recursing | host suites, `test_upload_conflict` | b37 built |
+| worker/session | OVERWRITE consent survived DISCONNECT/CONNECT | Teardown did not clear the conflict latch | `reset_remote_session` + `batch_reset` | `test_upload_conflict` CANCEL; cross-session untested | b37 built |
+| listing/cap | A 2000+ entry folder was reported failed and wiped | A cap stop left `next` at `FS_OK` | Cap stop reports `ok=1, truncated=1` | `test_listing_cap` | b37 built |
+| listing/flag | The truncation badge belonged to the previous listing | Flag stored after `apply_listing` | Store before applying rows | `test_listing_cap` | b37 built |
+| actions/download | DOWNLOAD did nothing at ALL DRIVES | The ledger joined `*` with the name | Skip the pre-check for `*`/empty | `test_remote_download_from_all_drives` | b37 built |
+| confirm/risk | A high-risk delete lost the boot warning | Only the plain delete warning was drawn | Full boot warning for high-risk deletes | `test_high_risk_delete_warning`, render | b37 built |
+| client/mlst | A failed MLST write left the upload check latched | `client_send` failure ignored | Return `NOT_CONNECTED` | `test_mlst_send_failure` | b37 built |
 
 ## File-manager slice (b19–b25)
 
@@ -575,7 +611,7 @@ executor, and fake filesystem:
 
 Hardware pass steps:
 
-1. Install `build/vitaftpshell-v01.00-b36.vpk`.
+1. Install `build/vitaftpshell-v01.00-b37.vpk`.
 2. Launch; confirm `ALL DRIVES` lists `ux0:`, `ur0:`, and `uma0:` when mounted.
 3. Enter `ux0:`, then `ux0:data`. Confirm the rows and that Circle returns to
    `ALL DRIVES` from the volume root.

@@ -5,7 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FAKE_FS_NODES 128
+/* Enough nodes for the 2000-row listing-cap test plus the fixture tree. */
+#define FAKE_FS_NODES 2200
 #define FAKE_FS_PATH_MAX 1024
 #define FAKE_FS_CONTENT_MAX 8192
 #define FAKE_FS_HANDLES 16

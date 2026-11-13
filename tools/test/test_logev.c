@@ -108,7 +108,9 @@ static void test_diagnostic_fields(void)
     ime.masked = 1;
     CHECK(logev_format(line, sizeof(line), 100, &ime) > 0);
     CHECK(strstr(line, "masked=1") != NULL);
-    CHECK(strstr(line, "hunter2-secret") == NULL); /* no value crosses */
+    /* A masked IME record carries no value field at all, not merely a value
+     * that happens not to contain a guessed secret. */
+    CHECK(strstr(line, "value=") == NULL);
 }
 
 static void test_detail_encoding(void)

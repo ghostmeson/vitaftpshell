@@ -28,6 +28,14 @@ static int s_failures;
 #define PEER_ADDR 0xC0A8012Au
 #define PEER_PORT 21
 
+/* Scripted MLST answers for the upload preflight. */
+enum {
+    MLST_NORMAL = 0,
+    MLST_UNSUPPORTED,
+    MLST_DIR,
+    MLST_FAIL
+};
+
 typedef struct {
     FakeFtpd server;
     NetSocket *control;
@@ -37,6 +45,7 @@ typedef struct {
     const char *payload;
     const char *exists_path;
     uint64_t exists_size;
+    int mlst_mode;
     NetSocket *stor_data;
     char last_stor[256];
     char cwd[64];
@@ -119,8 +128,21 @@ static void peer_serve(Peer *peer)
             fake_ftpd_reply(&peer->server, 200, "Still here.");
         } else if (strncmp(line, "MLST ", 5) == 0) {
             const char *path = line + 5;
-            if (peer->exists_path != NULL &&
-                strcmp(path, peer->exists_path) == 0) {
+            if (peer->mlst_mode == MLST_UNSUPPORTED) {
+                fake_ftpd_reply(&peer->server, 502, "Not implemented.");
+            } else if (peer->mlst_mode == MLST_FAIL) {
+                fake_ftpd_reply(&peer->server, 421,
+                                "Service not available.");
+            } else if (peer->mlst_mode == MLST_DIR) {
+                char reply_text[640];
+                snprintf(reply_text, sizeof(reply_text),
+                         "250-Listing %s\r\n"
+                         " type=dir; %s\r\n"
+                         "250 End\r\n",
+                         path, path);
+                fake_ftpd_send_raw(&peer->server, reply_text);
+            } else if (peer->exists_path != NULL &&
+                       strcmp(path, peer->exists_path) == 0) {
                 char reply_text[640];
                 snprintf(reply_text, sizeof(reply_text),
                          "250-Listing %s\r\n"
@@ -1117,6 +1139,189 @@ static void test_upload_conflict(void)
     press(app, INPUT_BIT(INPUT_CROSS)); /* CANCEL is focused first */
     pump(app, &peer, 40);
     CHECK(peer.stors == 1);
+    /* CANCEL must be observed as a cancellation, not look like SKIP. */
+    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    CHECK(strcmp(app_state(app)->status, "CANCELLED") == 0);
+
+    /* CANCEL cleared the batch latch: a new attempt asks again. */
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM)
+            break;
+    }
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    press(app, INPUT_BIT(INPUT_CIRCLE));
+
+    app_destroy(app);
+}
+
+static void start_upload(App *app, Peer *peer)
+{
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_UPLOAD);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, peer, 120);
+}
+
+static void test_upload_preflight_unsupported(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+
+    /* A server that does not implement MLST keeps the old direct STOR. */
+    start_upload(app, &peer);
+    CHECK(peer.stors == 1);
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+
+    app_destroy(app);
+}
+
+static void test_upload_preflight_directory(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_DIR;
+
+    start_upload(app, &peer);
+    CHECK(peer.stors == 0);
+    CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
+
+    app_destroy(app);
+}
+
+static void test_upload_preflight_failure(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_FAIL;
+
+    start_upload(app, &peer);
+    CHECK(peer.stors == 0);
+    CHECK(strstr(app_state(app)->status, "REMOTE CHECK FAILED") != NULL);
+
+    app_destroy(app);
+}
+
+static void test_download_conflict(void)
+{
+    App *app = make_app_ex("ux0:data/TEST.BIN", "OLD!!", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    pump(app, NULL, 10);
+    Peer peer;
+    connect_site(app, &peer);
+    select_remote(app);
+
+    /* Rows are .., BIG.BIN, TEST.BIN. */
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM)
+            break;
+    }
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+
+    /* SKIP keeps the local bytes and starts no RETR. */
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, &peer, 60);
+    CHECK(peer.retrs == 0);
+    CHECK(content_is("ux0:data/TEST.BIN", "OLD!!"));
+
+    /* OVERWRITE runs the RETR and replaces the destination. */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM)
+            break;
+    }
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 160; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.retrs > 0 && app_state(app)->dock.state == UI_DOCK_DONE)
+            break;
+    }
+    CHECK(peer.retrs == 1);
+    CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
+
+    app_destroy(app);
+}
+
+static void test_listing_cap(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    fake_fs_add_dir("ux0:data/BIG");
+    char path[64];
+    for (int i = 0; i < 2001; ++i) {
+        snprintf(path, sizeof(path), "ux0:data/BIG/F%04d.TXT", i);
+        fake_fs_add_file(path, 1);
+    }
+
+    pump(app, NULL, 10);
+    enter_ux0_data(app);
+    enter_local_named(app, "BIG", "ux0:data/BIG");
+
+    const UiPaneState *local = &app_state(app)->panes[UI_PANE_LOCAL];
+    CHECK(strcmp(local->path, "ux0:data/BIG") == 0);
+    CHECK(local->row_count == WORKER_LIST_CAP);
+    CHECK(local->truncated == 1);
+    CHECK(local->loading == 0);
+    CHECK(local->error[0] == '\0');
+
+    /* A small folder must not inherit the previous truncation badge. */
+    press(app, INPUT_BIT(INPUT_CIRCLE));
+    for (int i = 0; i < 40; ++i) {
+        (void)app_tick(app);
+        if (strcmp(app_state(app)->panes[UI_PANE_LOCAL].path, "ux0:data") ==
+                0 &&
+            !app_state(app)->panes[UI_PANE_LOCAL].loading)
+            break;
+    }
+    local = &app_state(app)->panes[UI_PANE_LOCAL];
+    CHECK(strcmp(local->path, "ux0:data") == 0);
+    CHECK(local->truncated == 0);
 
     app_destroy(app);
 }
@@ -1185,6 +1390,11 @@ int main(void)
     test_remote_unsafe_name();
     test_remote_refresh();
     test_upload_conflict();
+    test_upload_preflight_unsupported();
+    test_upload_preflight_directory();
+    test_upload_preflight_failure();
+    test_download_conflict();
+    test_listing_cap();
     test_local_file_actions();
     test_local_new_folder_without_selection();
     test_clipboard_copy();

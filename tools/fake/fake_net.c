@@ -323,6 +323,14 @@ NetSocket *fake_net_last_connected(void)
     return s_last_connected;
 }
 
+void fake_net_socket_peer(NetSocket *socket, uint32_t *addr, uint16_t *port)
+{
+    if (addr != NULL)
+        *addr = socket != NULL ? socket->peer.addr : 0;
+    if (port != NULL)
+        *port = socket != NULL ? socket->peer.port : 0;
+}
+
 NetSocket *fake_net_last_listener(void)
 {
     return s_last_listener;

@@ -1343,7 +1343,8 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                     fmt_copy(risk_path, sizeof(risk_path), sources[i]);
                 }
             }
-        } else if (action == UI_ACTION_DOWNLOAD) {
+        } else if (action == UI_ACTION_DOWNLOAD && destination[0] != '\0' &&
+                   strcmp(destination, "*") != 0) {
             for (int i = 0; i < source_count; ++i) {
                 Path target;
                 if (path_join(destination, last_segment(sources[i]),
@@ -1399,9 +1400,14 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             confirm->items = confirm->local_items;
             confirm->item_count = source_count;
             confirm->high_risk = high_risk;
-            if (high_risk)
+            if (high_risk) {
                 fmt_copy(confirm->risk_path,
                          sizeof(confirm->risk_path), risk_path);
+                /* The plain delete warning is not enough inside a tai folder:
+                 * name the boot risk as well (R71, D30). */
+                snprintf(confirm->warning, sizeof(confirm->warning),
+                         "A BAD EDIT CAN STOP THE CONSOLE BOOTING. THERE IS NO UNDO.");
+            }
             snprintf(confirm->title, sizeof(confirm->title), "DELETE %d ITEM%s",
                      source_count, source_count == 1 ? "" : "S");
             fmt_copy(confirm->context, sizeof(confirm->context), destination);

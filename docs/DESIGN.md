@@ -500,9 +500,10 @@ five-row viewport; a longer set scrolls (D29). The six states are in
 - **Delete:** three or many items; the item list shows the **full path** of every
   source, including marks from another folder; the count and known size,
   `THIS CANNOT BE UNDONE.`, CANCEL / DELETE. When any source is high-risk, the
-  same panel carries the risk path at 168 and still shows the full item list;
-  the DELETE choice approves the high-risk plan. There is no separate
-  path-only confirmation for a delete (D61).
+  same panel carries the risk path at 168, replaces the warning with
+  `A BAD EDIT CAN STOP THE CONSOLE BOOTING. THERE IS NO UNDO.`, and still shows
+  the full item list; the DELETE choice approves the high-risk plan. There is no
+  separate path-only confirmation for a delete (D61, D66).
 - **Batch conflict:** `2 DESTINATIONS EXIST`; the batch count; CANCEL / SKIP
   EXISTING / OVERWRITE ALL; the replace warning. A download checks the local
   destination; an upload checks the remote destination with MLST when the server
