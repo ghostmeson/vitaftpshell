@@ -118,6 +118,10 @@ static const char *direction_word(XferDirection direction)
         return "MOVE";
     case XFER_DIR_LOCAL_DELETE:
         return "DELETE";
+    case XFER_DIR_LOCAL_RENAME:
+        return "RENAME";
+    case XFER_DIR_LOCAL_MKDIR:
+        return "NEW FOLDER";
     case XFER_DIR_SERVER_DOWNLOAD:
         return "DOWNLOAD";
     case XFER_DIR_SERVER_UPLOAD:

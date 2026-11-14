@@ -24,6 +24,7 @@
 #define FSOP_ARENA_MAX 262144
 #define FSOP_STEP_MAX 2048
 #define FSOP_ROLLBACK_MAX 2048
+#define FSOP_CONFLICT_NAMES 16
 
 typedef enum {
     FSOP_COPY = 0,
@@ -98,6 +99,9 @@ typedef struct {
 
     int needs_conflict;
     int existing_count;
+    int skipped_count;
+    Path existing_dest[FSOP_CONFLICT_NAMES];
+    int existing_named;
 
     int item_count;
     int file_count;
@@ -129,6 +133,7 @@ int fsop_plan_build(FsOpPlan *plan, const FsOpRequest *request);
 
 const char *fsop_plan_step_source(const FsOpPlan *plan, int step);
 const char *fsop_plan_step_dest(const FsOpPlan *plan, int step);
+const char *fsop_plan_existing_dest(const FsOpPlan *plan, int index);
 const char *fsop_plan_rollback_from(const FsOpPlan *plan, int rollback);
 const char *fsop_plan_rollback_to(const FsOpPlan *plan, int rollback);
 

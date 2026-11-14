@@ -113,6 +113,10 @@ typedef struct {
     int source_type; /* UI_ROW_FILE or UI_ROW_DIR for a remote source */
     uint64_t total;
     int total_known;
+    unsigned batch_id;
+    int batch_index;
+    int batch_total;
+    int batch_last;
     char path[PATH_MAX_LEN];
     char path2[PATH_MAX_LEN];
     char text[256];

@@ -42,6 +42,19 @@ static UiPane other_pane(UiPane pane)
     return pane == UI_PANE_LOCAL ? UI_PANE_REMOTE : UI_PANE_LOCAL;
 }
 
+/* Every command in one reducer emission carries the same batch id, so the
+ * worker can report one terminal state for the whole set. */
+static void stamp_batch(UiState *state, UiCommand *command, int index,
+                        int total)
+{
+    if (state == NULL || command == NULL)
+        return;
+    command->batch_id = state->batch_seq;
+    command->batch_index = index;
+    command->batch_total = total;
+    command->batch_last = index + 1 >= total;
+}
+
 static UiFocus focus_for_screen(UiScreen screen)
 {
     switch (screen) {
@@ -1281,12 +1294,14 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                 return;
             }
 
+            state->batch_seq++;
             for (int i = 0; i < state->clip_count; ++i) {
                 UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
                 if (c == NULL) {
                     set_status(state, "COMMAND LIMIT");
                     break;
                 }
+                stamp_batch(state, c, i, state->clip_count);
                 c->action = state->clip_mode == UI_CLIP_MOVE ? UI_ACTION_MOVE
                                                              : UI_ACTION_COPY;
                 c->pane = state->active_pane;
@@ -1482,12 +1497,14 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
         }
 
         if (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD) {
+            state->batch_seq++;
             for (int i = 0; i < source_count; ++i) {
                 UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
                 if (c == NULL) {
                     set_status(state, "COMMAND LIMIT");
                     break;
                 }
+                stamp_batch(state, c, i, source_count);
                 c->action = action;
                 c->pane = state->active_pane;
                 c->source_type = source_types[i];
@@ -1500,8 +1517,10 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             return;
         }
 
+        state->batch_seq++;
         UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
         if (c != NULL) {
+            stamp_batch(state, c, 0, 1);
             c->action = action;
             c->pane = state->active_pane;
             c->source_type = source_type;
@@ -1560,11 +1579,13 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
                 UiPaneState *pending =
                     &state->panes[state->pending_pane];
                 if (state->pending_action == UI_ACTION_PASTE) {
+                    state->batch_seq++;
                     for (int i = 0; i < state->clip_count; ++i) {
                         UiCommand *run = emit(out, max, count,
                                               UI_CMD_RUN_ACTION);
                         if (run == NULL)
                             break;
+                        stamp_batch(state, run, i, state->clip_count);
                         run->action = state->clip_mode == UI_CLIP_MOVE
                                           ? UI_ACTION_MOVE
                                           : UI_ACTION_COPY;
@@ -1583,11 +1604,13 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
                             state->pending_action == UI_ACTION_UPLOAD ||
                             state->pending_action == UI_ACTION_DOWNLOAD) &&
                            pending->mark_count > 0) {
+                    state->batch_seq++;
                     for (int i = 0; i < pending->mark_count; ++i) {
                         UiCommand *run = emit(out, max, count,
                                               UI_CMD_RUN_ACTION);
                         if (run == NULL)
                             break;
+                        stamp_batch(state, run, i, pending->mark_count);
                         run->action = state->pending_action;
                         run->pane = state->pending_pane;
                         run->source_type = pending->marks[i].type;
@@ -1596,9 +1619,11 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
                         fmt_copy(run->path2, sizeof(run->path2), state->pending_dest.text);
                     }
                 } else {
+                    state->batch_seq++;
                     UiCommand *run = emit(out, max, count,
                                           UI_CMD_RUN_ACTION);
                     if (run != NULL) {
+                        stamp_batch(state, run, 0, 1);
                         run->action = state->pending_action;
                         run->pane = state->pending_pane;
                         run->source_type = state->pending_source_type;
@@ -2020,7 +2045,25 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         state->dock.active = 0;
         if (state->dock.focused)
             set_focus(state, UI_FOCUS_LIST);
+        if (event->direction_known)
+            state->dock.direction = (XferDirection)event->direction;
         state->dock.state = UI_DOCK_DONE;
+        state->dock.done = (uint64_t)(event->item_index > 0
+                                          ? event->item_index
+                                          : 0);
+        state->dock.total = (uint64_t)(event->item_total > 0
+                                           ? event->item_total
+                                           : 0);
+        state->dock.item_index = event->item_index;
+        state->dock.item_total = event->item_total;
+        state->dock.skipped = event->batch_skipped;
+        state->dock.failed = event->batch_failed;
+        state->dock.cancelled = event->batch_cancelled;
+        state->dock.rate = event->rate;
+        state->dock.rate_known = event->rate_known;
+        state->dock.elapsed_ms = event->elapsed_ms;
+        state->dock.elapsed_known = event->elapsed_known;
+        state->dock.message[0] = '\0';
         /* D18: a completed batch does not clear marks. */
         break;
     case UI_EVT_SERVER_STATE:
@@ -2071,8 +2114,10 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (state->pending_action_valid) {
             state->pending_action_valid = 0;
             if (event->ok) {
+                state->batch_seq++;
                 UiCommand *c = emit(out, max, &count, UI_CMD_RUN_ACTION);
                 if (c != NULL) {
+                    stamp_batch(state, c, 0, 1);
                     c->action = state->pending_action;
                     c->pane = state->pending_pane;
                     c->source_type = state->pending_source_type;

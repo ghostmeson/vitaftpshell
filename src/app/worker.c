@@ -32,6 +32,24 @@ typedef struct {
     FsOpConflict conflict;
 } PendingWork;
 
+typedef struct {
+    int active;
+    unsigned id;
+    unsigned dropped_id;
+    int total;
+    int index;
+    int done;
+    int skipped;
+    int failed;
+    int cancelled;
+    XferDirection direction;
+    uint64_t started_ms;
+    uint64_t last_ms;
+    uint64_t bytes_done;
+    uint64_t bytes_total;
+    int total_known;
+} LocalBatch;
+
 struct Worker {
     WorkerPorts ports;
     Handoff *handoff;
@@ -88,6 +106,12 @@ struct Worker {
     XferConflict batch_conflict;
     int batch_total;
     int batch_done;
+    int batch_skipped;
+    int batch_failed;
+    XferDirection batch_direction;
+    FsOpConflict local_conflict;
+    int local_conflict_set;
+    LocalBatch local_batch;
     int transfer_active;
     int transfer_cancelled;
     uint64_t transfer_start_ms;
@@ -119,6 +143,7 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command);
 static void pump_queue(Worker *worker);
 static void start_transfer_item(Worker *worker, const XferItem *item);
 static void pump_remote_actions(Worker *worker);
+static void worker_list_local(Worker *worker, const char *path);
 
 static uint64_t now_ms(Worker *worker)
 {
@@ -155,6 +180,149 @@ static void emit_error(Worker *worker, UiPane pane, const char *text,
     emit(worker, &event);
     fmt_copy(worker->last_error, sizeof(worker->last_error), event.detail);
     log_error(worker, pane, event.detail, cause, stage);
+}
+
+static XferDirection action_direction(UiAction action)
+{
+    switch (action) {
+    case UI_ACTION_MOVE:
+        return XFER_DIR_LOCAL_MOVE;
+    case UI_ACTION_DELETE:
+        return XFER_DIR_LOCAL_DELETE;
+    case UI_ACTION_RENAME:
+        return XFER_DIR_LOCAL_RENAME;
+    case UI_ACTION_NEW_FOLDER:
+        return XFER_DIR_LOCAL_MKDIR;
+    default:
+        return XFER_DIR_LOCAL_COPY;
+    }
+}
+
+static void local_batch_begin(Worker *worker, const UiCommand *command,
+                              XferDirection direction)
+{
+    unsigned id = command->batch_id;
+    int total = command->batch_total > 0 ? command->batch_total : 1;
+
+    if (id != 0 && id == worker->local_batch.dropped_id)
+        return;
+    if (worker->local_batch.active && worker->local_batch.id == id) {
+        worker->local_batch.index = command->batch_index;
+        worker->local_batch.last_ms = now_ms(worker);
+        return;
+    }
+
+    memset(&worker->local_batch, 0, sizeof(worker->local_batch));
+    worker->local_batch.active = 1;
+    worker->local_batch.id = id;
+    worker->local_batch.total = total;
+    worker->local_batch.index = command->batch_index;
+    worker->local_batch.direction = direction;
+    worker->local_conflict = FSOP_CONFLICT_ASK;
+    worker->local_conflict_set = 0;
+    worker->local_batch.started_ms = now_ms(worker);
+    worker->local_batch.last_ms = worker->local_batch.started_ms;
+    worker->local_batch.total_known = 1;
+}
+
+static void local_batch_emit_done(Worker *worker)
+{
+    LocalBatch *batch = &worker->local_batch;
+    if (!batch->active)
+        return;
+
+    HandoffEvent done;
+    event_init(&done, HANDOFF_EVT_BATCH_DONE);
+    done.ok = batch->failed == 0 && batch->cancelled == 0;
+    done.direction = batch->direction;
+    done.item_index = batch->done;
+    done.item_total = batch->total;
+    done.batch_skipped = batch->skipped;
+    done.batch_failed = batch->failed;
+    done.batch_cancelled = batch->cancelled;
+    done.bytes = batch->bytes_done;
+    done.total = batch->bytes_total;
+    done.total_known = batch->total_known;
+    uint64_t elapsed = now_ms(worker) - batch->started_ms;
+    done.elapsed_ms = elapsed;
+    done.elapsed_known = elapsed > 0;
+    if (elapsed > 0 && batch->bytes_done > 0) {
+        done.rate = batch->bytes_done * 1000u / elapsed;
+        done.rate_known = 1;
+    }
+    emit(worker, &done);
+
+    unsigned dropped = batch->id;
+    memset(batch, 0, sizeof(*batch));
+    batch->dropped_id = dropped;
+}
+
+static void local_batch_record(Worker *worker, FsOpRunResult result,
+                               const FsOpPlan *plan,
+                               const FsOpProgress *progress)
+{
+    LocalBatch *batch = &worker->local_batch;
+    if (!batch->active || progress == NULL)
+        return;
+
+    if (result == FSOP_RUN_OK) {
+        if (plan != NULL && plan->step_count == 0 &&
+            plan->skipped_count > 0)
+            batch->skipped++;
+        else
+            batch->done++;
+    } else if (result == FSOP_RUN_CANCELLED) {
+        batch->cancelled++;
+    } else {
+        batch->failed++;
+    }
+    batch->bytes_done += progress->bytes_done;
+    batch->bytes_total += progress->bytes_total;
+    if (!progress->total_known)
+        batch->total_known = 0;
+    batch->last_ms = now_ms(worker);
+}
+
+static void local_batch_skip_item(Worker *worker, const UiCommand *command)
+{
+    LocalBatch *batch = &worker->local_batch;
+    if (!batch->active)
+        return;
+    batch->skipped++;
+    batch->last_ms = now_ms(worker);
+    if (command->batch_last || batch->index + 1 >= batch->total) {
+        worker_list_local(worker, worker->local_path);
+        local_batch_emit_done(worker);
+    }
+}
+
+static void local_batch_cancel(Worker *worker)
+{
+    LocalBatch *batch = &worker->local_batch;
+    if (!batch->active)
+        return;
+    int missing = batch->total - batch->done - batch->skipped -
+                  batch->failed - batch->cancelled;
+    if (missing > 0)
+        batch->cancelled += missing;
+    worker_list_local(worker, worker->local_path);
+    local_batch_emit_done(worker);
+    worker->pending_command_count = 0;
+}
+
+static void local_batch_flush(Worker *worker)
+{
+    LocalBatch *batch = &worker->local_batch;
+    if (!batch->active || worker->pending.valid ||
+        worker->pending_command_count > 0)
+        return;
+    if (now_ms(worker) - batch->last_ms < 250)
+        return;
+    int missing = batch->total - batch->done - batch->skipped -
+                  batch->failed - batch->cancelled;
+    if (missing > 0)
+        batch->failed += missing;
+    local_batch_emit_done(worker);
 }
 
 static void emit_session(Worker *worker, int connected, const char *detail)
@@ -273,7 +441,7 @@ static void emit_transfer_done(Worker *worker, XferDirection direction,
     event.total_known = total_known;
     event.cause = cause;
     event.stage = stage;
-    event.item_index = worker->batch_done + 1;
+    event.item_index = worker->batch_done > 0 ? worker->batch_done : 1;
     event.item_total = worker->batch_total > 0 ? worker->batch_total : 1;
     event.rate_known = 0;
     if (start_ms != 0) {
@@ -837,7 +1005,10 @@ static void request_local_conflict(Worker *worker, const UiCommand *command,
     if (request.item_count > WORKER_CONFIRM_ITEMS)
         request.item_count = WORKER_CONFIRM_ITEMS;
     for (int i = 0; i < request.item_count; ++i) {
-        fmt_copy(request.items[i].name, sizeof(request.items[i].name), i < plan->step_count ? fsop_plan_step_dest(plan, i) : "-");
+        fmt_copy(request.items[i].name, sizeof(request.items[i].name),
+                 fsop_plan_existing_dest(plan, i)[0] != '\0'
+                     ? fsop_plan_existing_dest(plan, i)
+                     : "-");
         request.items[i].size_known = 0;
     }
     handoff_confirm_request(worker->handoff, &request);
@@ -979,17 +1150,16 @@ static int build_dest_facts(Worker *worker, const char *source,
 static void run_plan(Worker *worker, const UiCommand *command,
                      const FsOpPlan *plan)
 {
-    XferDirection direction = XFER_DIR_LOCAL_COPY;
-    if (command->action == UI_ACTION_MOVE)
-        direction = XFER_DIR_LOCAL_MOVE;
-    else if (command->action == UI_ACTION_DELETE)
-        direction = XFER_DIR_LOCAL_DELETE;
+    XferDirection direction = action_direction(command->action);
+    LocalBatch *batch = &worker->local_batch;
+    int item_index = batch->active ? batch->index + 1 : 1;
+    int item_total = batch->active ? batch->total : 1;
 
     HandoffEvent started;
     event_init(&started, HANDOFF_EVT_TRANSFER_STARTED);
     fmt_copy(started.detail, sizeof(started.detail), last_name(command->path));
-    started.item_index = 1;
-    started.item_total = 1;
+    started.item_index = item_index;
+    started.item_total = item_total;
     started.total = plan->total_bytes;
     started.total_known = plan->total_known;
     fmt_copy(started.path, sizeof(started.path), command->path);
@@ -1000,6 +1170,8 @@ static void run_plan(Worker *worker, const UiCommand *command,
     FsOpProgress progress;
     FsOpRunResult result = fsop_run(worker->ports.fs, plan, &progress, NULL,
                                     NULL);
+
+    local_batch_record(worker, result, plan, &progress);
 
     if (result == FSOP_RUN_OK) {
         log_event(worker, LOGEV_TRANSFER_DONE, NULL, NULL, command->path,
@@ -1020,12 +1192,17 @@ static void run_plan(Worker *worker, const UiCommand *command,
     done.total_known = progress.total_known;
     done.cause = progress.cause;
     done.stage = progress.stage;
-    done.item_index = 1;
-    done.item_total = 1;
+    done.item_index = item_index;
+    done.item_total = item_total;
+    done.direction = direction;
     fmt_copy(done.path, sizeof(done.path), command->path);
     emit(worker, &done);
 
-    worker_list_local(worker, worker->local_path);
+    if (command->batch_last || !batch->active ||
+        batch->index + 1 >= batch->total) {
+        worker_list_local(worker, worker->local_path);
+        local_batch_emit_done(worker);
+    }
 }
 
 static int same_folder_path(const char *a, const char *b)
@@ -1378,6 +1555,8 @@ static void handle_action(Worker *worker, const UiCommand *command)
         return;
     }
 
+    local_batch_begin(worker, command, action_direction(command->action));
+
     if (worker->transfer_active || xfer_busy(&worker->queue) ||
         ftp_server_busy(worker->server)) {
         emit_error(worker, UI_PANE_LOCAL, "TRANSFER IN PROGRESS",
@@ -1417,14 +1596,22 @@ static void handle_action(Worker *worker, const UiCommand *command)
         }
         UiCommand adjusted = *command;
         fmt_copy(adjusted.path2, sizeof(adjusted.path2), target.text);
-        execute_action(worker, &adjusted, FSOP_CONFLICT_ASK,
+        execute_action(worker, &adjusted,
+                       command->value == 1
+                           ? FSOP_CONFLICT_OVERWRITE
+                           : (worker->local_conflict_set
+                                  ? worker->local_conflict
+                                  : FSOP_CONFLICT_ASK),
                        command->value == 1);
         return;
     }
 
     execute_action(worker, command,
-                   command->value == 1 ? FSOP_CONFLICT_OVERWRITE
-                                       : FSOP_CONFLICT_ASK,
+                   command->value == 1
+                       ? FSOP_CONFLICT_OVERWRITE
+                       : (worker->local_conflict_set
+                              ? worker->local_conflict
+                              : FSOP_CONFLICT_ASK),
                    command->value == 1);
 }
 
@@ -2327,12 +2514,20 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     if (command->choice == UI_CHOICE_CONTINUE)
                         execute_action(worker, &pending.command,
                                        pending.conflict, 1);
+                    else
+                        local_batch_skip_item(worker, &pending.command);
                 } else if (command->choice == UI_CHOICE_OVERWRITE) {
+                    worker->local_conflict = FSOP_CONFLICT_OVERWRITE;
+                    worker->local_conflict_set = 1;
                     execute_action(worker, &pending.command,
                                    FSOP_CONFLICT_OVERWRITE, 0);
                 } else if (command->choice == UI_CHOICE_SKIP) {
+                    worker->local_conflict = FSOP_CONFLICT_SKIP;
+                    worker->local_conflict_set = 1;
                     execute_action(worker, &pending.command,
                                    FSOP_CONFLICT_SKIP, 0);
+                } else {
+                    local_batch_cancel(worker);
                 }
             }
         } else if (command->confirm == UI_CONFIRM_CANCEL_XFER &&
@@ -2602,6 +2797,7 @@ void worker_step(Worker *worker)
     pump_remote_actions(worker);
     pump_queue(worker);
     drain_pending_actions(worker);
+    local_batch_flush(worker);
     publish_site_book(worker);
     save_settings(worker);
 }
