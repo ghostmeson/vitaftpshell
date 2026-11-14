@@ -62,6 +62,10 @@ cmake -S "$ROOT" -B "$ROOT/build" -DCMAKE_BUILD_TYPE=Release \
   -DVITAFTPSHELL_BUILD="$BUILD"
 cmake --build "$ROOT/build" --parallel
 
+# A stack overflow in the worker thread costs a console run and a core dump to
+# find. The host cannot measure the target stack, so check the linked ELF.
+python3 "$ROOT/tools/check_worker_stack.py" "$ROOT/build/vitaftpshell"
+
 EXPECTED="$ROOT/build/vitaftpshell-v${VERSION}-b${BUILD}.vpk"
 
 # Keep exactly one artifact. The VPK is the deliverable; `.vpk.out` and

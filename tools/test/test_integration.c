@@ -1458,6 +1458,47 @@ static void test_local_batch_terminal(void)
     app_destroy(app);
 }
 
+/* A refused item still counts: the terminal must report 2 copied and 1
+ * failed, not three copied. The refusal happens before run_plan, so the
+ * advance step is the only place that can record it. */
+static void test_local_batch_refused_item(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/C.TXT", "C", 1);
+    fake_fs_add_dir("ux0:data/DEST");
+
+    enter_ux0_data(app);
+    select_local_named(app, "A.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    select_local_named(app, "B.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    select_local_named(app, "C.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    enter_local_named(app, "DEST", "ux0:data/DEST");
+    FsPort *fs = fake_fs_port();
+    CHECK(fs->remove(fs->ctx, "ux0:data/B.TXT") == FS_OK);
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 120);
+
+    CHECK(fake_fs_exists("ux0:data/DEST/A.TXT"));
+    CHECK(!fake_fs_exists("ux0:data/DEST/B.TXT"));
+    CHECK(fake_fs_exists("ux0:data/DEST/C.TXT"));
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.item_total == 3);
+    CHECK(app_state(app)->dock.item_index == 2);
+    CHECK(app_state(app)->dock.failed == 1);
+    CHECK(app_state(app)->dock.skipped == 0);
+
+    app_destroy(app);
+}
+
 static void test_local_batch_preflight(void)
 {
     App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
@@ -1575,6 +1616,7 @@ int main(void)
     test_local_batch_terminal();
     test_local_conflict_prompt();
     test_local_batch_preflight();
+    test_local_batch_refused_item();
     test_delete_confirm_fresh();
     test_delete_high_risk_and_protected();
     test_cancel();

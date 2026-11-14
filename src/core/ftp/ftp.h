@@ -94,6 +94,11 @@ int ftp_text_contains(const char *text, const char *needle);
  * stale `.vftp.old` aside is restored when the target is missing and cleared
  * when both exist. Completion syncs, closes, and renames into place, using the
  * aside fallback when the platform cannot replace on rename.
+ *
+ * Only close and rename decide the commit. The sync calls are durability hints:
+ * a platform that refuses sync-by-fd must not turn a fully written file into a
+ * reported failure (D76). `sync_failed` records that the hint was refused so a
+ * caller can log it.
  */
 typedef struct {
     Path target;
@@ -101,10 +106,18 @@ typedef struct {
     Path aside;
     FsFile *file;
     int open;
+    int sync_failed;
 } FtpTempWrite;
 
+typedef enum {
+    FTP_COMMIT_OK = 0,
+    FTP_COMMIT_CLOSE,
+    FTP_COMMIT_RENAME
+} FtpCommitStep;
+
 FsResult ftp_temp_open(FsPort *fs, const char *target, FtpTempWrite *out);
-FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp);
+/* `step` may be NULL; when set it names the failed step on an error. */
+FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp, FtpCommitStep *step);
 void ftp_temp_abort(FsPort *fs, FtpTempWrite *temp);
 
 #endif

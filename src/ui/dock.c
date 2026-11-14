@@ -278,10 +278,15 @@ static void done_dock(const UiState *state, DockPanel *p)
     } else if (cancelled > 0) {
         p->word = "CANCELLED";
         p->word_color = C_WHITE;
+    } else if (done == 0 && failed > 0) {
+        /* Nothing succeeded: the past-tense operation word would claim it did,
+         * and "COPIED" in red next to a failure reads as a contradiction. */
+        p->word = "FAILED";
+        p->word_color = C_RED;
     } else {
         p->word = direction_done_word(d->direction);
         if (failed > 0)
-            p->word_color = (done > 0 || skipped > 0) ? C_YELLOW : C_RED;
+            p->word_color = C_YELLOW;
         else
             p->word_color = C_GREEN;
     }

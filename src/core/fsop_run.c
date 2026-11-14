@@ -178,13 +178,17 @@ static int run_copy_file(FsPort *fs, const FsOpPlan *plan, int step_index,
         progress->bytes_done += got;
     }
 
-    r = ftp_temp_finish(fs, &temp);
+    FtpCommitStep commit = FTP_COMMIT_OK;
+    r = ftp_temp_finish(fs, &temp, &commit);
     if (r != FS_OK) {
         fs->close(fs->ctx, src);
         set_result(progress, OP_CAUSE_STORAGE, OP_STAGE_COMMIT,
-                   "DESTINATION COMMIT FAILED");
+                   commit == FTP_COMMIT_RENAME ? "DESTINATION RENAME FAILED"
+                                               : "DESTINATION CLOSE FAILED");
         return 0;
     }
+    if (temp.sync_failed)
+        progress->sync_skipped = 1;
 
     r = fs->close(fs->ctx, src);
     if (r != FS_OK) {

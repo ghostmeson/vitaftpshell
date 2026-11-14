@@ -29,6 +29,9 @@ typedef struct {
     uint64_t bytes_done;
     uint64_t bytes_total;
     int total_known;
+    /* A transfer completed even though the platform refused the durability
+     * sync. Recorded so the worker can log it; never a failure (D76). */
+    int sync_skipped;
     char message[192];
     OpCause cause;
     OpStage stage;

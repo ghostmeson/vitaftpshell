@@ -246,77 +246,89 @@ FsResult ftp_temp_open(FsPort *fs, const char *target, FtpTempWrite *out)
     return FS_OK;
 }
 
-/* The rename makes the new file visible; sync the file itself before the
- * transfer is reported complete. Directory sync is a separate, deferred gap. */
-static FsResult sync_destination(FsPort *fs, const char *target)
+/* The rename is the commit; syncing the committed file afterwards is a
+ * durability hint whose failure cannot be repaired without destroying a file
+ * the user already sees. Directory sync is a separate, deferred gap (D48).
+ * Returns 0 when the hint was refused, so the caller can record it. */
+static int sync_destination(FsPort *fs, const char *target)
 {
     FsFile *file = NULL;
-    FsResult r = fs->open(fs->ctx, target, FS_OPEN_READ, &file);
-    if (r != FS_OK)
-        return r;
-    FsResult sync = fs->sync(fs->ctx, file);
-    FsResult close = fs->close(fs->ctx, file);
-    if (sync != FS_OK)
-        return sync;
-    return close;
+    if (fs->open(fs->ctx, target, FS_OPEN_READ, &file) != FS_OK)
+        return 0;
+    int synced = fs->sync(fs->ctx, file) == FS_OK;
+    (void)fs->close(fs->ctx, file);
+    return synced;
 }
 
-FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp)
+FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp, FtpCommitStep *step)
 {
+    if (step != NULL)
+        *step = FTP_COMMIT_OK;
     if (fs == NULL || temp == NULL || !temp->open || temp->file == NULL)
         return FS_INVALID;
 
-    FsResult r = fs->sync(fs->ctx, temp->file);
+    /* A refused sync-by-fd is recorded, not fatal: close() still flushes the
+     * data, and removing a fully written file because a durability hint was
+     * refused reports a failure the user cannot act on (D76). */
+    if (fs->sync(fs->ctx, temp->file) != FS_OK)
+        temp->sync_failed = 1;
     FsResult closed = fs->close(fs->ctx, temp->file);
     temp->file = NULL;
     temp->open = 0;
 
-    if (r != FS_OK || closed != FS_OK) {
+    if (closed != FS_OK) {
         fs->remove(fs->ctx, temp->temp.text);
-        return r != FS_OK ? r : closed;
+        if (step != NULL)
+            *step = FTP_COMMIT_CLOSE;
+        return closed;
     }
 
     if (fs->rename_replaces(fs->ctx)) {
-        r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
+        FsResult r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
         if (r != FS_OK) {
             fs->remove(fs->ctx, temp->temp.text);
+            if (step != NULL)
+                *step = FTP_COMMIT_RENAME;
             return r;
         }
-        return sync_destination(fs, temp->target.text);
+        if (!sync_destination(fs, temp->target.text))
+            temp->sync_failed = 1;
+        return FS_OK;
     }
 
     FsEntry entry;
     int target_exists = fs->stat(fs->ctx, temp->target.text, &entry) == FS_OK;
     if (!target_exists) {
-        r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
+        FsResult r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
         if (r != FS_OK) {
             fs->remove(fs->ctx, temp->temp.text);
+            if (step != NULL)
+                *step = FTP_COMMIT_RENAME;
             return r;
         }
-        return sync_destination(fs, temp->target.text);
+        if (!sync_destination(fs, temp->target.text))
+            temp->sync_failed = 1;
+        return FS_OK;
     }
 
     if (fs->rename(fs->ctx, temp->target.text, temp->aside.text) != FS_OK) {
         fs->remove(fs->ctx, temp->temp.text);
+        if (step != NULL)
+            *step = FTP_COMMIT_RENAME;
         return FS_IO;
     }
 
-    r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
+    FsResult r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
     if (r != FS_OK) {
         fs->rename(fs->ctx, temp->aside.text, temp->target.text);
         fs->remove(fs->ctx, temp->temp.text);
+        if (step != NULL)
+            *step = FTP_COMMIT_RENAME;
         return r;
     }
 
-    r = sync_destination(fs, temp->target.text);
-    if (r != FS_OK) {
-        /* The old file is still in the aside; put it back rather than leave a
-         * new file whose contents may not have reached the card. */
-        fs->remove(fs->ctx, temp->target.text);
-        fs->rename(fs->ctx, temp->aside.text, temp->target.text);
-        return r;
-    }
-
+    if (!sync_destination(fs, temp->target.text))
+        temp->sync_failed = 1;
     fs->remove(fs->ctx, temp->aside.text);
     return FS_OK;
 }

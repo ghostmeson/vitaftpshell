@@ -19,10 +19,12 @@
 /*
  * The b20 core shows the worker's default pthread stack at 0x4d2c (19,756
  * bytes) and fsop_run's frame at 0x4c54 (19,540 bytes). A local rename then
- * faulted on the worker stack. Give the worker real headroom; the copy buffer
- * is also kept out of fsop_run's frame (src/core/fsop_run.c).
+ * faulted on the worker stack. b40 repeated the failure at 128 KiB: a 71,680
+ * byte handle_action frame plus a nested call reached 158,472 bytes. The
+ * offending frame is gone (D77), and 192 KiB keeps headroom for the FTP engine
+ * and the recursive folder scan without touching the policy layer.
  */
-#define APP_WORKER_STACK_BYTES (128u * 1024u)
+#define APP_WORKER_STACK_BYTES (192u * 1024u)
 
 struct App {
     AppPorts ports;

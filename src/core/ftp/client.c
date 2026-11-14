@@ -693,11 +693,14 @@ static void client_complete_data(FtpClient *client, int ok, FtpCause cause,
 
     if (ok) {
         if (client->data_kind == CDATA_RETR) {
-            FsResult r = ftp_temp_finish(client->fs, &client->temp);
+            FtpCommitStep step = FTP_COMMIT_OK;
+            FsResult r = ftp_temp_finish(client->fs, &client->temp, &step);
             if (r != FS_OK) {
                 client_command_fail(client, FTP_CAUSE_STORAGE,
                                     FTP_STAGE_TRANSFER,
-                                    "DESTINATION COMMIT FAILED");
+                                    step == FTP_COMMIT_RENAME
+                                        ? "DESTINATION RENAME FAILED"
+                                        : "DESTINATION CLOSE FAILED");
                 return;
             }
         } else if (client->file != NULL) {
