@@ -433,7 +433,10 @@ void dock_draw(const UiState *state)
         idle_dock(state, &p);
 
     static char badge[256];
-    if (state->dock.active && state->local_dock.active && state->local_shown) {
+    int local_full = state->dock_primary == UI_DOCK_LANE_LOCAL &&
+                     state->local_dock.active;
+    if (state->local_shown && !local_full &&
+        (state->local_dock.active || state->local_dock.waiting)) {
         badge_fill(&state->local_dock, badge, sizeof(badge));
         p.badge = badge;
         p.badge_color = badge_color(&state->local_dock);
@@ -448,7 +451,7 @@ void dock_badge_draw(const UiState *state)
         return;
 
     const UiDock *d = &state->local_dock;
-    int running = d->active || d->state == UI_DOCK_DONE ||
+    int running = d->active || d->waiting || d->state == UI_DOCK_DONE ||
                   d->state == UI_DOCK_FAILED;
     if (!running)
         return;

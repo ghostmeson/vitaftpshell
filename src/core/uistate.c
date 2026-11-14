@@ -1804,8 +1804,12 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
             type = choice == UI_CHOICE_CANCEL_NETWORK ? UI_CMD_CANCEL_NETWORK
                                                       : UI_CMD_CANCEL_LOCAL;
         }
-        if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT)
+        if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT) {
+            state->local_shown = 1;
             state->local_dock.waiting = 1;
+            if (!state->dock.active)
+                state->dock_primary = UI_DOCK_LANE_LOCAL;
+        }
         UiCommand *command = emit(out, max, count, type);
         if (command != NULL && type == UI_CMD_CONFIRM) {
             command->confirm = c->kind;
@@ -1846,8 +1850,12 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
             type = choice == UI_CHOICE_CANCEL_NETWORK ? UI_CMD_CANCEL_NETWORK
                                                       : UI_CMD_CANCEL_LOCAL;
         }
-        if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT)
+        if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT) {
+            state->local_shown = 1;
             state->local_dock.waiting = 1;
+            if (!state->dock.active)
+                state->dock_primary = UI_DOCK_LANE_LOCAL;
+        }
         UiCommand *command = emit(out, max, count, type);
         if (command != NULL && type == UI_CMD_CONFIRM) {
             command->confirm = c->kind;

@@ -191,6 +191,8 @@ void handoff_init(Handoff *handoff);
 
 int handoff_command_push(Handoff *handoff, const UiCommand *command);
 int handoff_cancel_pending(const Handoff *handoff);
+/* The queued cancel command type, or UI_CMD_NONE. */
+int handoff_cancel_type(const Handoff *handoff);
 /* Drop a cancel that the local executor already observed by peeking. */
 int handoff_cancel_consume(Handoff *handoff);
 int handoff_command_pop(Handoff *handoff, UiCommand *out);

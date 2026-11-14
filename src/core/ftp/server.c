@@ -1381,9 +1381,14 @@ static void server_handle_rnto(FtpServer *server, const char *arg)
         !is_root) {
         PathRisk risk = PATH_RISK_NORMAL;
         if (path_check_rename(server->rnfr_local, local.text, 1, &risk) ==
-                PATH_OK &&
-            !server_path_held(server, server->rnfr_local, 1, 1, 0) &&
-            !server_path_held(server, local.text, 1, 1, 0)) {
+            PATH_OK) {
+            if (server_path_held(server, server->rnfr_local, 1, 1, 0) ||
+                server_path_held(server, local.text, 1, 1, 0)) {
+                /* The 450 is already on the wire; a second reply would desync
+                 * the client's command/reply pairing. */
+                server->rnfr_valid = 0;
+                return;
+            }
             ok = server->fs->rename(server->fs->ctx, server->rnfr_local,
                                     local.text) == FS_OK;
         }

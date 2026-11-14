@@ -125,6 +125,7 @@ struct Worker {
     uint64_t local_run_started_ms;
     uint64_t local_run_last_bytes;
     int local_cancel_requested;
+    int local_batch_cancel_requested;
     /* U26: reservations between the lanes, and the item waiting on one. */
     Reserve reserve;
     UiCommand busy_command;
@@ -416,8 +417,10 @@ static int local_cancel_requested(void *ctx)
         worker->local_cancel_seen = 1;
         return 1;
     }
-    if (worker->handoff == NULL ||
-        !handoff_cancel_pending(worker->handoff))
+    if (worker->handoff == NULL)
+        return 0;
+    int type = handoff_cancel_type(worker->handoff);
+    if (type != UI_CMD_CANCEL_TRANSFER && type != UI_CMD_CANCEL_LOCAL)
         return 0;
     worker->local_cancel_seen = 1;
     return 1;
@@ -1471,6 +1474,7 @@ static void emit_local_progress(Worker *worker)
     uint64_t elapsed = now_ms(worker) - worker->local_run_started_ms;
     HandoffEvent event;
     event_init(&event, HANDOFF_EVT_PROGRESS);
+    event.direction = action_direction(worker->local_run_command.action);
     event.bytes = progress->bytes_done;
     event.total = progress->bytes_total;
     event.total_known = progress->total_known;
@@ -1529,14 +1533,20 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
     fmt_copy(done.path, sizeof(done.path), command.path);
     emit(worker, &done);
 
-    if (command.batch_last || !batch->active ||
-        batch->index + 1 >= batch->total) {
+    if (worker->local_batch_cancel_requested) {
+        worker->local_batch_cancel_requested = 0;
+        local_batch_cancel(worker);
+    } else if (command.batch_last || !batch->active ||
+               batch->index + 1 >= batch->total) {
         worker_list_local(worker, worker->local_path);
         local_batch_emit_done(worker);
     }
 
-    if (result == FSOP_RUN_CANCELLED)
-        handoff_cancel_consume(worker->handoff);
+    if (result == FSOP_RUN_CANCELLED) {
+        int type = handoff_cancel_type(worker->handoff);
+        if (type == UI_CMD_CANCEL_TRANSFER || type == UI_CMD_CANCEL_LOCAL)
+            handoff_cancel_consume(worker->handoff);
+    }
 
     release_local_reservations(worker);
     fsop_run_destroy(worker->local_run);
@@ -1631,6 +1641,9 @@ static int start_local_plan(Worker *worker, const UiCommand *command,
 static int run_plan_begin(Worker *worker, const UiCommand *command,
                           FsOpPlan *plan)
 {
+    if (worker->local_run != NULL)
+        return 0; /* the lane is already running; never replace it */
+
     FsOpRun *run = fsop_run_create(plan);
     if (run == NULL) {
         emit_error(worker, UI_PANE_LOCAL, "OUT OF MEMORY", OP_CAUSE_APP,
@@ -1645,6 +1658,7 @@ static int run_plan_begin(Worker *worker, const UiCommand *command,
     worker->local_run_last_bytes = 0;
     worker->local_cancel_requested = 0;
     worker->local_cancel_seen = 0;
+    worker->local_batch_cancel_requested = 0;
 
     LocalBatch *batch = &worker->local_batch;
     int item_index = batch->active ? batch->index + 1 : 1;
@@ -2023,6 +2037,14 @@ static void handle_action(Worker *worker, const UiCommand *command)
         command->action != UI_ACTION_RENAME) {
         emit_error(worker, UI_PANE_LOCAL, "ACTION NOT SUPPORTED",
                    OP_CAUSE_APP, OP_STAGE_PLAN);
+        return;
+    }
+
+    /* One local job at a time. A second action must not overwrite the run that
+     * is still copying: the old run, its handle, and its temp would leak. */
+    if (worker->local_run != NULL || worker->busy_plan != NULL) {
+        emit_error(worker, UI_PANE_LOCAL, "LOCAL JOB IN PROGRESS",
+                   OP_CAUSE_APP, OP_STAGE_TRANSFER);
         return;
     }
 
@@ -2870,6 +2892,7 @@ static void cancel_local_lane(Worker *worker)
 {
     if (worker->local_run != NULL) {
         worker->local_cancel_requested = 1;
+        worker->local_batch_cancel_requested = 1;
         return;
     }
     if (worker->local_cancel_seen) {
@@ -3256,6 +3279,7 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
 void worker_destroy(Worker *worker)
 {
     if (worker != NULL) {
+        fsop_run_abort(worker->local_run, worker->ports.fs);
         fsop_run_destroy(worker->local_run);
         free(worker->busy_plan);
         free(worker->local_plan);

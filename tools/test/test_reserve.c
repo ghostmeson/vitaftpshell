@@ -121,6 +121,26 @@ static void test_release(void)
     CHECK(s_reserve.count == 0);
 }
 
+/* Release must reclaim the arena, or a long session eventually fails every
+ * add with a spurious "too large". */
+static void test_release_reclaims_arena(void)
+{
+    reset();
+    char path[PATH_MAX_LEN];
+    for (int round = 0; round < 9; ++round) {
+        for (int i = 0; i < 1000; ++i) {
+            snprintf(path, sizeof(path), "ux0:data/round-%d-file-%04d.bin",
+                     round, i);
+            CHECK(reserve_add(&s_reserve, RESERVE_LANE_LOCAL, RESERVE_WRITE,
+                              path));
+        }
+        reserve_release(&s_reserve, RESERVE_LANE_LOCAL);
+    }
+    CHECK(s_reserve.count == 0);
+    CHECK(reserve_add(&s_reserve, RESERVE_LANE_NETWORK, RESERVE_WRITE,
+                      "ux0:data/final.bin"));
+}
+
 static void test_blocker(void)
 {
     reset();
@@ -139,6 +159,7 @@ int main(void)
     test_server_reads();
     test_sidecars();
     test_release();
+    test_release_reclaims_arena();
     test_blocker();
 
     if (s_failures != 0) {
