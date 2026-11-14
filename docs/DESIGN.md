@@ -130,8 +130,9 @@ allowed outside the hazard band.
   count (`3 ITEMS`) instead of `n OF m`, shows `n SKIPPED` when some were
   skipped, and keeps `n OF m ITEMS` when partial. An all-skipped set is
   `SKIPPED` in dim; a cancelled batch is `CANCELLED` in white. A partial set
-  keeps the operation word in yellow and puts the reason on line three; a total
-  failure or an incomplete set is red. A single item omits the count.
+  keeps the operation word in yellow and puts the reason on line three; a set
+  where nothing succeeded reads `FAILED` in red, never the operation word in
+  red. A single item omits the count.
 - **Failed:** `FAILED` red; filename; `n OF m`; the bar stops at the failure
   point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure ends
   with `X TO RETRY`; a control failure leaves the reconnect to the pane.

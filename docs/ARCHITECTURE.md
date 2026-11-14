@@ -190,11 +190,13 @@ arena.
   whose facts overflow the scan cap rather than planning a subset.
 - A local action command carries a batch id, item index, total, and last flag.
   The worker collects the set, probes each destination once, asks one conflict
-  question naming every existing path, then runs one plan per item. It records
-  done, skipped, failed, and cancelled counts and emits one terminal event
-  before it clears the batch; the pane refreshes once at that terminal. A lost
-  command is flushed after a bounded idle window and reported as incomplete
-  (D71).
+  question naming every existing path, then runs one plan per item. The
+  preflighted items are advanced one per `worker_step` from the step frame, not
+  from inside `handle_action`, so a batch cannot nest worker frames. It records
+  done, skipped, failed, and cancelled counts — including an item refused before
+  its plan ran — and emits one terminal event before it clears the batch; the
+  pane refreshes once at that terminal. A lost command is flushed after a
+  bounded idle window and reported as incomplete (D71, D77).
 - A confirm cancel for a local batch emits `UI_CMD_CANCEL_TRANSFER` on the
   dedicated handoff slot. The executor polls a peek of that slot at every chunk
   and step, removes the temporary file, rolls back, and reports
@@ -202,7 +204,10 @@ arena.
   next job (D75).
 - The b41 build replaces the exclusive slot with canonical-path reservations,
   one local job beside one network transfer, and the WAIT/SKIP/CANCEL collision
-  confirm (D72, D73).
+  confirm (D72, D73). It also enforces the worker stack budget: large
+  per-operation arrays live in the heap-owned `Worker`, the worker stack is
+  192 KiB, and `tools/check_worker_stack.py` reads the linked ELF during
+  `build.sh` and fails a frame that would exhaust it (D77).
 - The app treats a failed site save as `SAVE UNAVAILABLE`, keeps the book in
   memory, and sends the save result and the bulk view on separate events. The
   editor receives a full site (including the password) through the edit-site
@@ -377,11 +382,13 @@ executor walks the plan and reports progress; it makes no policy decisions.
 - Recursion creates parents before children.
 - A copy or move into itself or a descendant is refused.
 - Every file is written under a reserved temporary name in the destination
-  directory, synced, and renamed into place after a successful close (KTD12).
-  Replace-on-rename is a port capability; when it is absent the core uses the
-  aside fallback, and before a destination is written it restores or clears a
-  stale aside left by an interrupted run. The destination file is synced after
-  the rename; directory sync is the documented deferred gap.
+  directory, closed, and renamed into place (KTD12). Replace-on-rename is a port
+  capability; when it is absent the core uses the aside fallback, and before a
+  destination is written it restores or clears a stale aside left by an
+  interrupted run. The temp and the destination are synced as durability hints;
+  a refused sync is recorded and logged, not treated as a commit failure, and
+  only close and rename decide the commit (D76). Directory sync is the
+  documented deferred gap.
 - A copy rollback removes only a destination the plan created. A destination
   that existed and reached commit stays new; an old file is never deleted to
   satisfy a rollback.

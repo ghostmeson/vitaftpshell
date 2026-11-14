@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 nineteen host suites, and `tools/preview/run.sh` renders 36 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b40.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b43.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -34,9 +34,13 @@ MLST send-failure handling. b37 has run on the console (operator report,
 2026-11-13); b38 fixes a regression where the unsafe-name guard refused to open
 the server's own `UX0:`/`UR0:`/`UMA0:` roots; b40 adds cursor COPY/MOVE,
 one batch terminal with past-tense dock words, the batch conflict preflight,
-full local cancel, the cyan cursor slab, the active-pane glow, and red failures.
-b40 is built but not yet tested. No M1–M12 row result has been transcribed, so
-the project is `building`, not `verified`. Do not start coding from this file alone: the plan
+full local cancel, the cyan cursor slab, the active-pane glow, and red failures;
+b40 crashed on the console (worker stack overflow, four cores in `logs/b40/`).
+b43 removes the 64 KiB `handle_action` array and the recursive batch call, adds
+a build-time worker-stack budget check, makes a refused sync a recorded hint,
+counts refused batch items, and reads `FAILED` on a total failure. b43 is built
+but not yet tested. No M1–M13 row result has been transcribed, so the project is
+`building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
 
@@ -213,6 +217,10 @@ run is the only evidence that promotes the project to `verified`.
   screens on the host; `./send.sh <vita-ip>` uploads the current VPK. The app
   target links the real core, gfx, ui, app, and adapters with libvita2d and the
   SDK stubs the adapters call.
+- `build.sh` runs `tools/check_worker_stack.py` against the linked ELF and fails
+  before packaging when `handle_action` or the fixed worker chain exceeds its
+  stack budget (D77). A stack overflow is a console run and a core dump to find,
+  so the build refuses it on the host.
 - Every build emits `vitaftpshell-v<version>-b<build>.vpk`.
 - `send.sh` refuses an artifact whose build number does not match
   `BUILD_NUMBER`, so a failed build cannot upload the previous VPK.
@@ -318,6 +326,7 @@ vitaFTPShell/
     platform/          port headers and the six psp2_* adapters
   sce_sys/             placeholder icon and LiveArea art (U14 replaces)
   tools/
+    check_worker_stack.py  linked-ELF worker stack budget check (build gate)
     test/run.sh        layering guard and host test runner
     fake/              NetPort, FsPort, input, IME, clock, log, and FTP peers
     preview/           software vita2d shim and the 960x544 renderer
@@ -327,7 +336,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D75
+    DECISIONS.md       numbered decisions, D1-D77
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification

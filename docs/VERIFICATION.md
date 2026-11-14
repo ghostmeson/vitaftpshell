@@ -1,15 +1,55 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b40.vpk
-**SHA-256:** 6e2b8149489101df5aba7915fbfe2d41452869a9835b713c8ba2b7b4b02d88f2
-**ELF:** build/vitaftpshell, 514,964 bytes
+**Build:** vitaftpshell-v01.00-b43.vpk
+**SHA-256:** f53d4e210ac549756068a9e2ccad2995f95814213b55d6ed1ca493bf129d0bff
+**ELF:** build/vitaftpshell, 515,156 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-14
-**Status:** b37 hardware-tested (operator report); b40 built, not tested; M1–M12 row transcription pending
+**Status:** b37 hardware-tested (operator report); b40 crashed on the console (four dumps analysed below); b43 built, not tested; M1–M13 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b40 console crash analysis
+
+**Date:** 2026-11-14
+**Build:** `vitaftpshell-v01.00-b40.vpk`
+**Input:** `logs/b40/` — four `psp2dmp` files and `session.log`
+**Result:** every crash is the worker thread exhausting its stack; the copy
+failures are a commit step bug, not a transfer bug.
+
+`THREAD_INFO` in the three complete dumps reports stop reason `0x10006`
+(stack overflow) on the `pthread` worker. The runtime app base differs per boot
+(ASLR): text at `0x81022000`, `0x8102f000`, and `0x81058000`. `THREAD_INFO` gives
+the worker stack at `0x89701000` + `0x20000` (128 KiB); at the dump the worker SP
+was `0x896fa4f8`, 158,472 bytes below the stack top and 27,400 bytes below its
+base. The deepest live frames resolve to `handle_action → execute_action →
+fact_tree → fs_stat`; all three dumps land at the same offset. The truncated
+`.tmp` dump records stop `0x30004` (data abort) at `clock_now_ms` on the worker,
+with r2 holding the Thumb address of the same function: the first `push {r3, lr}`
+of an indirect call hit unmapped stack. Same failure, earlier symptom.
+
+Cause: `local_batch_preflight` in `src/app/worker.c` declared
+`Path existing[UI_CONFIRM_MAX]` — 64 × 1,024 bytes — and the compiler placed it
+in the inlined `handle_action` frame (`sub.w sp, sp, #71680`). A single local
+action therefore used ~100 KiB, and `local_batch_execute` called `handle_action`
+from inside `handle_action`, adding a second 72 KiB frame: 158 KiB against 128 KiB.
+The log's four crash boots end at `run_action` on a folder (`ux0:data/music`), a
+NEW FOLDER (`ur0:data`), and two RENAME commands on the VPK — all consistent with
+the frame size, the folder scan recursion, and the nested batch call.
+
+The other reported failure is not a crash: `transfer_fail ... stage=commit
+cls=storage detail=DESTINATION COMMIT FAILED bytes=253379 total=253379`.
+`ftp_temp_finish` collapsed sync, close, rename, and a post-rename read-only sync
+into one result. The fix (D76) makes sync a recorded hint and distinguishes
+close and rename.
+
+Fixes in b43: `handle_action` is 6,640 bytes (build check), batches advance one
+item per `worker_step`, big arrays live in the `Worker`, the worker stack is
+192 KiB, and `build.sh` refuses a frame over budget (D77). The commit reports
+`DESTINATION CLOSE FAILED` or `DESTINATION RENAME FAILED`, logs `sync skipped`,
+and a refused sync no longer fails or discards a completed file.
 
 ## b40 host run
 
@@ -67,6 +107,7 @@ evidence are recorded here. The project therefore stays `building`.
 | M10 | b40 cursor copy and dock words | COPY/PASTE without a mark; three-item batch ends `COPIED 3 ITEMS`; all-skipped `SKIPPED`; partial yellow; rename and new folder name themselves; no `2 OF 1` | pending | pending | PENDING |
 | M11 | b40 local cancel and conflict prompt | Large local copy stops within 5 s with no partial; one conflict prompt names every existing destination; CANCEL ends the batch; cancelled delete reports `DELETED n OF m` | pending | pending | PENDING |
 | M12 | b41 parallel lanes and collision | Local copy and unrelated download progress; colliding paste asks WAIT/SKIP/CANCEL; WAIT resumes; server `STOR` on a held path gets 450; unrelated `PASV`/`LIST` work | pending | pending | PENDING |
+| M13 | b43 crash pass | Copy a file across every volume pair, copy a folder, rename across the extension, and create a folder while the clipboard is armed; all complete, the dock names the operation, no `.psp2dmp` appears, and a refused sync logs `sync skipped` instead of failing | pending | pending | PENDING |
 
 ## Install and launch
 
