@@ -72,6 +72,21 @@ void ftp_server_stop(FtpServer *server);
 /* U13: the worker's one transfer slot. While an app-side transfer or a local
  * operation owns the slot, data and mutating commands answer 450. */
 void ftp_server_set_external_busy(FtpServer *server, int busy);
+
+/* U26: path arbitration. CHECK asks whether a path is held (1 = held); HOLD
+ * claims a data command's path for the transfer; RELEASE drops the server
+ * lane at the transfer end. A held path answers 450 and disarms PASV. */
+typedef enum {
+    FTP_GUARD_CHECK = 0,
+    FTP_GUARD_HOLD,
+    FTP_GUARD_RELEASE
+} FtpGuardAction;
+
+typedef int (*FtpServerGuardFn)(void *ctx, FtpGuardAction action,
+                                const char *local_path, int write, int tree);
+
+void ftp_server_set_guard(FtpServer *server, FtpServerGuardFn guard,
+                          void *ctx);
 void ftp_server_tick(FtpServer *server);
 
 FtpServerState ftp_server_state(const FtpServer *server);

@@ -385,6 +385,16 @@ number of atomic steps, checks cancel at every copy chunk and before every
 step, and keeps the rollback list as its own phase; the blocking `fsop_run`
 remains a wrapper over it. The worker runs one local slice per `worker_step`
 between network ticks, so a copy no longer blocks the client, server, or queue.
+- The lanes arbitrate with canonical-path reservations (`src/core/reserve.c`):
+  a path and its `.vftp.*` sidecars; equal paths conflict unless both read; a
+  tree delete, rename, or recursive move conflicts with ancestors and
+  descendants; a server read of an ancestor is allowed and the exact held path
+  or a sidecar is refused. A local plan reserves every step at plan time; a
+  download reserves its local destination and an upload its source; a server
+  data or mutating command checks after resolving, answers 450, disarms PASV,
+  and holds the path until its transfer ends. A collision asks WAIT / SKIP /
+  CANCEL; a queued transfer waits without a prompt and resumes when the blocker
+  releases. The containing directory is deliberately not locked (D72).
 
 - Recursion creates parents before children.
 - A copy or move into itself or a descendant is refused.

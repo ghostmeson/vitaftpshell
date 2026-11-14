@@ -186,6 +186,36 @@ static uint64_t now_ms(Worker *worker)
     return worker->ports.clock->now_ms(worker->ports.clock->ctx);
 }
 
+/* U26: the FTP server asks the reservation table before a data or mutating
+ * command. CHECK refuses a held path; HOLD claims the transfer's path;
+ * RELEASE drops the server lane when the transfer ends. */
+static int server_path_guard(void *ctx, FtpGuardAction action,
+                             const char *path, int write, int tree)
+{
+    Worker *worker = ctx;
+    if (worker == NULL)
+        return 0;
+
+    if (action == FTP_GUARD_RELEASE) {
+        reserve_release(&worker->reserve, RESERVE_LANE_SERVER);
+        return 0;
+    }
+    if (path == NULL)
+        return 0;
+
+    ReserveKind kind =
+        tree ? RESERVE_TREE : (write ? RESERVE_WRITE : RESERVE_READ);
+    if (action == FTP_GUARD_HOLD) {
+        return reserve_add(&worker->reserve, RESERVE_LANE_SERVER, kind, path)
+                   ? 0
+                   : 1;
+    }
+
+    char blocker[PATH_MAX_LEN];
+    return reserve_conflict(&worker->reserve, kind, path, blocker,
+                            sizeof(blocker));
+}
+
 static UiRow *rows_for(Worker *worker, UiPane pane, int slot)
 {
     return &worker->rows[((int)pane * HANDOFF_LIST_GENS + slot) *
@@ -2189,6 +2219,27 @@ static void batch_finish(Worker *worker)
 
 static void start_transfer_item(Worker *worker, const XferItem *item)
 {
+    /* A queued item waits for a held local path; it does not prompt. The
+     * queue keeps the item active and retries on the next step. */
+    ReserveKind kind = item->direction == XFER_DIR_DOWNLOAD ? RESERVE_WRITE
+                                                            : RESERVE_READ;
+    const char *local = item->direction == XFER_DIR_DOWNLOAD
+                            ? item->destination.text
+                            : item->source.text;
+    char blocker[PATH_MAX_LEN];
+    if (reserve_conflict(&worker->reserve, kind, local, blocker,
+                         sizeof(blocker)))
+        return;
+    if (!reserve_add(&worker->reserve, RESERVE_LANE_NETWORK, kind, local)) {
+        emit_error(worker, UI_PANE_REMOTE, "TRANSFER TOO LARGE", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
+        xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
+                     OP_STAGE_TRANSFER, NULL);
+        worker->batch_done++;
+        batch_finish(worker);
+        return;
+    }
+
     FtpClientResult result;
     worker->transfer_start_ms = now_ms(worker);
     worker->transfer_last_bytes = 0;
@@ -2217,6 +2268,7 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
         memset(&next, 0, sizeof(next));
         xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
                      OP_STAGE_TRANSFER, &next);
+        reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
         emit_error(worker, UI_PANE_REMOTE, "TRANSFER REFUSED", OP_CAUSE_APP,
                    OP_STAGE_TRANSFER);
         worker->batch_done++;
@@ -2537,6 +2589,7 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
         outcome = XFER_ITEM_FAILED;
 
     xfer_release(&worker->queue, outcome, event->cause, event->stage, NULL);
+    reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
     worker->transfer_active = 0;
     worker->transfer_cancelled = 0;
     worker->batch_done++;
@@ -2656,6 +2709,7 @@ static void client_event(void *ctx, const FtpClientEvent *event)
                 (void)xfer_active(&worker->queue, &item);
                 xfer_release(&worker->queue, XFER_ITEM_FAILED,
                              event->cause, event->stage, NULL);
+                reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
                 worker->transfer_active = 0;
                 emit_transfer_done(worker, item.direction, item.source.text, 0,
                                    event->bytes, event->total,
@@ -3160,6 +3214,8 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
                                        client_event, worker);
     worker->server = ftp_server_create(ports->net, ports->fs, ports->clock,
                                        server_event, worker);
+    if (worker->server != NULL)
+        ftp_server_set_guard(worker->server, server_path_guard, worker);
     if (worker->client == NULL || worker->server == NULL) {
         ftp_client_destroy(worker->client);
         ftp_server_destroy(worker->server);
