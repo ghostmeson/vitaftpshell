@@ -247,6 +247,103 @@ static void test_open_close_failures(void)
 /* D76: a refused sync-by-fd is a durability hint, not a commit condition. A
  * fully written file must not be reported failed (or deleted) because the
  * platform would not sync it. */
+/* U25: the stepped executor must resume a copy across calls and produce the
+ * same result as the blocking wrapper. */
+static void test_stepped_copy(void)
+{
+    static unsigned char data[8192];
+    for (size_t i = 0; i < sizeof(data); ++i)
+        data[i] = (unsigned char)(i * 31u + 7u);
+
+    setup();
+    fake_fs_seed_file("ux0:data/src/a.bin", data, sizeof(data));
+    facts_reset();
+    fact("ux0:data/src/a.bin", FS_ENTRY_FILE, sizeof(data), 1);
+    fact("ux0:data/dst", FS_ENTRY_DIR, 0, 1);
+
+    CHECK(build_copy("ux0:data/src/a.bin", "ux0:data/dst",
+                     FSOP_CONFLICT_OVERWRITE) == 1);
+
+    FsOpRun *run = fsop_run_create(&s_plan);
+    CHECK(run != NULL);
+    if (run == NULL)
+        return;
+
+    FsPort *fs = fake_fs_port();
+    int steps = 0;
+    int saw_partial = 0;
+    while (!fsop_run_finished(run) && steps < 64) {
+        fsop_run_step(run, fs, 1024, NULL, NULL);
+        steps++;
+        if (!fsop_run_finished(run)) {
+            if (fake_fs_exists("ux0:data/dst/a.bin.vftp.part"))
+                saw_partial = 1;
+            const FsOpProgress *live = fsop_run_progress(run);
+            CHECK(live->bytes_done <= sizeof(data));
+        }
+    }
+
+    CHECK(steps > 1);
+    CHECK(saw_partial);
+    CHECK(fsop_run_finished(run));
+    CHECK(fsop_run_step(run, fs, 1024, NULL, NULL) == FSOP_RUN_OK);
+
+    const FsOpProgress *progress = fsop_run_progress(run);
+    CHECK(progress->bytes_done == sizeof(data));
+    CHECK(progress->files_done == 1);
+    CHECK(!fake_fs_exists("ux0:data/dst/a.bin.vftp.part"));
+
+    static unsigned char out[8192];
+    size_t got = fake_fs_read_file("ux0:data/dst/a.bin", out, sizeof(out));
+    CHECK(got == sizeof(data));
+    CHECK(memcmp(out, data, sizeof(data)) == 0);
+
+    fsop_run_destroy(run);
+}
+
+/* U25: cancel is observed at a chunk boundary inside a stepped copy and the
+ * partial file is removed before the run reports CANCELLED. */
+static int s_cancel_checks;
+
+static int cancel_after_two_checks(void *ctx)
+{
+    (void)ctx;
+    s_cancel_checks++;
+    return s_cancel_checks >= 3;
+}
+
+static void test_stepped_cancel(void)
+{
+    setup();
+    unsigned char data[4096];
+    memset(data, 0x5A, sizeof(data));
+    fake_fs_seed_file("ux0:data/src/a.bin", data, sizeof(data));
+    facts_reset();
+    fact("ux0:data/src/a.bin", FS_ENTRY_FILE, sizeof(data), 1);
+    fact("ux0:data/dst", FS_ENTRY_DIR, 0, 1);
+
+    CHECK(build_copy("ux0:data/src/a.bin", "ux0:data/dst",
+                     FSOP_CONFLICT_OVERWRITE) == 1);
+
+    FsOpRun *run = fsop_run_create(&s_plan);
+    CHECK(run != NULL);
+    if (run == NULL)
+        return;
+
+    s_cancel_checks = 0;
+    FsPort *fs = fake_fs_port();
+    FsOpRunResult result = FSOP_RUN_OK;
+    for (int i = 0; i < 16 && !fsop_run_finished(run); ++i)
+        result = fsop_run_step(run, fs, 1024, cancel_after_two_checks, NULL);
+
+    CHECK(fsop_run_finished(run));
+    CHECK(result == FSOP_RUN_CANCELLED);
+    CHECK(!fake_fs_exists("ux0:data/dst/a.bin"));
+    CHECK(!fake_fs_exists("ux0:data/dst/a.bin.vftp.part"));
+
+    fsop_run_destroy(run);
+}
+
 static void test_sync_is_best_effort(void)
 {
     setup();
@@ -578,6 +675,8 @@ int main(void)
     test_copy_aside_real();
     test_stale_aside();
     test_cancel_copy();
+    test_stepped_copy();
+    test_stepped_cancel();
     test_write_failure();
     test_open_close_failures();
     test_sync_is_best_effort();
