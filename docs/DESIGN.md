@@ -144,6 +144,18 @@ allowed outside the hazard band.
   the last row enters it; the 1 px outline turns white; the legend becomes
   `[X] CANCEL  [O] TO LIST`; Cross opens the cancel CONFIRM; Circle returns to
   the last row. The dock’s state colours do not change.
+- **Two lanes:** one local job may run beside one network transfer. The
+  network lane keeps the word, bar, bytes, and rate; the local lane becomes a
+  compact badge on line three, right-aligned, with the rate moved left. Badge
+  colours: cyan running, yellow waiting on a held path, white `CANCELLING`,
+  red failed, dim on a clean terminal. When the local lane is alone it takes the
+  full dock with its own word, bar, bytes, and terminal, and that terminal
+  persists until the next local item. The badge is drawn over every screen that
+  draws the dock. A focused dock with both lanes asks `KEEP`, `CANCEL NETWORK`,
+  `CANCEL LOCAL` (KEEP focused first); a single lane keeps the two-choice
+  cancel. A server-mode transfer is not cancelled here; it ends through the
+  server-stop confirm, so a server transfer plus a local job offers only KEEP
+  and CANCEL LOCAL.
 - The terminal state stays until the next transfer starts (R67). The dock is
   never modal and never covers a row.
 

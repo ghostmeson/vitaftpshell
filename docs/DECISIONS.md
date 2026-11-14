@@ -1703,3 +1703,28 @@ before a VPK exists.
 **Consequences:** The b40 crash class is caught on the host build, not by a
 console run and a core dump. A future local buffer that would cost more than a
 few KiB has to be a `Worker` member and is visible in one place.
+
+## D78. The dock shows both lanes, network first
+
+**Date:** 2026-11-14
+**Status:** accepted; b48 (b41 stage).
+
+**Context:** U25 lets a local job and a network transfer run together, but the
+dock had one set of slots. A progress event from the local copy overwrote the
+network transfer, and the cancel confirm could not say which lane to stop.
+
+**Decision:** `UiState` keeps a network dock and a local dock. While both run,
+the network lane keeps the word, bar, bytes, and rate, and the local lane is a
+compact badge on line three (cyan running, yellow waiting, white `CANCELLING`,
+red failed, dim terminal). When only one lane runs it owns the full dock; the
+local terminal persists until the next local item. Events route by their
+direction (`XFER_DIR_LOCAL_*` is the local lane). A focused dock with both lanes
+asks `KEEP / CANCEL NETWORK / CANCEL LOCAL`, KEEP focused first; a single lane
+keeps the two-choice confirm. A server-mode transfer is never cancelled from the
+dock: it ends through the server-stop confirm, so when a server transfer and a
+local job run together the prompt offers only KEEP and CANCEL LOCAL.
+
+**Consequences:** Both lanes are visible without stealing focus or blanking each
+other. `UI_CMD_CANCEL_NETWORK` and `UI_CMD_CANCEL_LOCAL` target one lane; the
+old `UI_CMD_CANCEL_TRANSFER` still means "the running lane" for the two-choice
+prompt.

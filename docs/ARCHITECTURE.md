@@ -385,6 +385,12 @@ number of atomic steps, checks cancel at every copy chunk and before every
 step, and keeps the rollback list as its own phase; the blocking `fsop_run`
 remains a wrapper over it. The worker runs one local slice per `worker_step`
 between network ticks, so a copy no longer blocks the client, server, or queue.
+- `UiState` keeps one dock per lane. Events route by direction
+  (`XFER_DIR_LOCAL_*` is the local lane); while both run the network lane stays
+  full and the local lane renders as a badge, and the focused-dock confirm
+  offers KEEP / CANCEL NETWORK / CANCEL LOCAL (D78). `UI_CMD_CANCEL_NETWORK`
+  and `UI_CMD_CANCEL_LOCAL` target one lane; the single-lane confirm keeps
+  `UI_CMD_CANCEL_TRANSFER`.
 - The lanes arbitrate with canonical-path reservations (`src/core/reserve.c`):
   a path and its `.vftp.*` sidecars; equal paths conflict unless both read; a
   tree delete, rename, or recursive move conflicts with ancestors and
