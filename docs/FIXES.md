@@ -27,11 +27,11 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b48.vpk`, 260,852 bytes,
-  SHA-256 `830cbe973b5a29fe66b4534d155d6229cd09572d77a2a0bfa2d7a28f4edb361c`.
+- **Current artifact:** `vitaftpshell-v01.00-b49.vpk`, 261,213 bytes,
+  SHA-256 `e2dabba0406d6cf314ff4150df4bb98ce0da8141f19e912a509467061eec43cb`.
 - **Last hardware-observed build:** b43 (operator report, 2026-11-14): copy,
   paste, new folder, rename, and download work and the dock words read correctly.
-  b48 adds the b41 parallel lanes and is built, not tested. b40 crashed; its four
+  b49 adds the b41 parallel lanes, is built, and is host-tested, not tested on hardware. b40 crashed; its four
   core dumps are analysed in `VERIFICATION.md`. b28, b32, b36, b38, and b39 were
   not separately tested.
 - **Latest hardware evidence:** b37 operator report (no log pulled yet);
@@ -119,15 +119,28 @@ matrix passes.
 
 
 
-## b41 parallel lanes (b48)
+## b49 review pass
+
+| Build | Defect | Fix | Evidence | Status |
+|---|---|---|---|---|
+| b49 | A second local action overwrote the live run, leaking its temp and handle | Refuse a local action while a run or a WAIT item owns the lane; `run_plan_begin` refuses a non-empty lane | `test_local_batch_refused_item`, integration suite | `HOST b49` |
+| b49 | Local progress and item terminals painted the network dock | Carry the direction on local progress and on the done/failed event; route by lane | `test_two_lane_dock` | `HOST b49` |
+| b49 | CANCEL NETWORK could cancel the local run, and a peeked cancel could be swallowed | The cancel slot reports its command type; only a local cancel stops the local run; consume only a local one | reducer and worker suites | `HOST b49` |
+| b49 | Cancelling a local batch stopped only the current item | A cancel request ends the batch once the current item rolls back | `test_cancel_copy`, `test_local_batch_terminal` | `HOST b49` |
+| b49 | A held RNTO sent 450 then 550 | Return after the guard's 450 and clear RNFR | `test_held_rename` | `HOST b49` |
+| b49 | The WAITING badge never rendered | Show it before the first byte and clear it on the next lane event | render suite, waiting case | `HOST b49` |
+| b49 | QUIT freed an in-flight run without aborting its temp | `fsop_run_abort` closes the source and removes the temp before destroy | executor suite | `HOST b49` |
+| b49 | The reservation arena was never reclaimed | Compact the surviving paths on release | `test_release_reclaims_arena` | `HOST b49` |
+
+## b41 parallel lanes (b49)
 
 | Build | Change | Evidence | Status |
 |---|---|---|---|
-| b48 | The local executor is resumable: a heap-owned run state and `fsop_run_step` advance by a byte budget, the worker interleaves a local slice between client/server/queue ticks, and `fsop_run` remains the blocking wrapper (U25) | `test_stepped_copy`, `test_stepped_cancel`, the existing executor suite | `HOST b48` |
-| b48 | Canonical-path reservations: a local plan reserves every step, a download its destination, an upload its source; equal paths conflict unless both read, tree operations conflict with ancestors/descendants, sidecars are covered, and the containing directory is not locked (U26, D72) | `test_reserve` | `HOST b48` |
-| b48 | A collision asks WAIT / SKIP / CANCEL; WAIT is head-of-line and retries. A server data or mutating command on a held path answers 450, disarms PASV, and holds the path until the transfer ends (U26) | `test_held_path`, `test_path_busy_prompt` | `HOST b48` |
-| b48 | A paste with duplicate destination names is refused and a move source inside another is skipped before any command (U26) | `test_paste_guards` | `HOST b48` |
-| b48 | The dock has a network and a local lane: the network stays full, the local lane is a badge, the local lane alone takes the dock, and the focused cancel offers KEEP / CANCEL NETWORK / CANCEL LOCAL (U27, D78) | `test_two_lane_dock`, the two-lane cases in `test_render_workspace`, preview 39 states | `HOST b48` |
+| b49 | The local executor is resumable: a heap-owned run state and `fsop_run_step` advance by a byte budget, the worker interleaves a local slice between client/server/queue ticks, and `fsop_run` remains the blocking wrapper (U25) | `test_stepped_copy`, `test_stepped_cancel`, the existing executor suite | `HOST b49` |
+| b49 | Canonical-path reservations: a local plan reserves every step, a download its destination, an upload its source; equal paths conflict unless both read, tree operations conflict with ancestors/descendants, sidecars are covered, and the containing directory is not locked (U26, D72) | `test_reserve` | `HOST b49` |
+| b49 | A collision asks WAIT / SKIP / CANCEL; WAIT is head-of-line and retries. A server data or mutating command on a held path answers 450, disarms PASV, and holds the path until the transfer ends (U26) | `test_held_path`, `test_path_busy_prompt` | `HOST b49` |
+| b49 | A paste with duplicate destination names is refused and a move source inside another is skipped before any command (U26) | `test_paste_guards` | `HOST b49` |
+| b49 | The dock has a network and a local lane: the network stays full, the local lane is a badge, the local lane alone takes the dock, and the focused cancel offers KEEP / CANCEL NETWORK / CANCEL LOCAL (U27, D78) | `test_two_lane_dock`, the two-lane cases in `test_render_workspace`, preview 39 states | `HOST b49` |
 
 ## b40 crash pass (b41/b43)
 

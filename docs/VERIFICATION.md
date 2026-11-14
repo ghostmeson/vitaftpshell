@@ -1,21 +1,21 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b48.vpk
-**SHA-256:** 830cbe973b5a29fe66b4534d155d6229cd09572d77a2a0bfa2d7a28f4edb361c
-**ELF:** build/vitaftpshell, 530,680 bytes
+**Build:** vitaftpshell-v01.00-b49.vpk
+**SHA-256:** e2dabba0406d6cf314ff4150df4bb98ce0da8141f19e912a509467061eec43cb
+**ELF:** build/vitaftpshell, 530,916 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-14
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b48 adds the b41 parallel lanes, built and host-tested, not yet on hardware; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b49 adds the b41 parallel lanes, built and host-tested, not yet on hardware; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
 
-## b48 host run (b41 parallel lanes)
+## b49 host run (b41 parallel lanes)
 
 **Date:** 2026-11-14
-**Build:** `vitaftpshell-v01.00-b48.vpk`
-**SHA-256:** `830cbe973b5a29fe66b4534d155d6229cd09572d77a2a0bfa2d7a28f4edb361c`
+**Build:** `vitaftpshell-v01.00-b49.vpk`
+**SHA-256:** `e2dabba0406d6cf314ff4150df4bb98ce0da8141f19e912a509467061eec43cb`
 
 The U25-U27 stage is implemented and host-verified. Twenty suites pass with
 zero warnings, the preview renders 39 states, the integration suite is clean
@@ -23,8 +23,16 @@ under ASan/UBSan, and the worker-stack gate reports `handle_action` 6,640 B and
 a fixed chain of 20,452 B. New host coverage: stepped copy and mid-copy cancel;
 the reservation predicate; the WAIT/SKIP/CANCEL prompt; a server `STOR` on a
 held path answering 450, disarming PASV, and a sibling succeeding; the paste
-guards; and the two-lane dock and cancel choices. M12 stays `PENDING` until the
-console run.
+guards; and the two-lane dock and cancel choices.
+
+An independent review of `2cd12c4..HEAD` found eight defects before hardware:
+a second local action overwrote a live run; local progress and item terminals
+lost their direction and painted the network dock; the cancel latch ignored the
+targeted lane; cancelling a local batch stopped only the current item; a held
+RNTO sent a second 550 after its 450; the WAITING badge could not render; QUIT
+freed an in-flight run without aborting its temp; and the reservation arena was
+never reclaimed. All eight are fixed and covered by the added tests. M12 stays
+`PENDING` until the console run.
 
 ## b43 hardware run
 

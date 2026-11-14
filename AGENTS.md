@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 twenty host suites, and `tools/preview/run.sh` renders 39 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b48.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b49.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -40,7 +40,7 @@ b43 removes the 64 KiB `handle_action` array and the recursive batch call, adds
 a build-time worker-stack budget check, makes a refused sync a recorded hint,
 counts refused batch items, and reads `FAILED` on a total failure. b43 has run
 on the console (operator report, 2026-11-14): copy, paste, new folder, rename,
-and download work, and the dock words read correctly in green. b48 adds the
+and download work, and the dock words read correctly in green. b49 adds the
 parallel lanes (resumable executor, reservations, server 450, two-lane dock),
 is built and host-tested, and is not yet on hardware. M13 and M10 are partly
 observed; M1–M9, M11, and M12 are pending, so the project is `building`, not
