@@ -29,10 +29,10 @@ matrix passes.
 
 - **Current artifact:** `vitaftpshell-v01.00-b43.vpk`, 253,376 bytes,
   SHA-256 `f53d4e210ac549756068a9e2ccad2995f95814213b55d6ed1ca493bf129d0bff`.
-- **Last hardware-observed build:** b37 (operator report, 2026-11-13). b40 was
-  installed and crashed; its four core dumps are analysed in `VERIFICATION.md`.
-  b43 is built but not hardware-tested. b28, b32, b36, b38, and b39 were not
-  separately tested.
+- **Last hardware-observed build:** b43 (operator report, 2026-11-14): copy,
+  paste, new folder, rename, and download work and the dock words read correctly.
+  b40 was installed and crashed; its four core dumps are analysed in
+  `VERIFICATION.md`. b28, b32, b36, b38, and b39 were not separately tested.
 - **Latest hardware evidence:** b37 operator report (no log pulled yet);
   `logs/session-b27.log` (local actions, server start, localhost control/login,
   PASV data refusal); `logs/b20/` (complete worker-stack core); `logs/b18/`
@@ -121,8 +121,8 @@ matrix passes.
 
 | Build | Symptom → cause | Fix | Evidence | Status |
 |---|---|---|---|---|
-| b41 | Local folder copy, a clipboard batch, NEW FOLDER, and RENAME crashed the app | `local_batch_preflight`'s `Path[64]` made `handle_action` reserve 71,680 bytes; `local_batch_execute` called `handle_action` recursively; the worker used 158,472 of 128 KiB (stop `0x10006`) | Big arrays moved to the `Worker`; batches advance one item per `worker_step`; stack raised to 192 KiB; `tools/check_worker_stack.py` fails a frame over budget in `build.sh` | core analysis in `VERIFICATION.md`, `test_local_batch_terminal`, `test_local_batch_preflight` | `HOST b43` |
-| b43 | Every local copy ended `DESTINATION COMMIT FAILED` after all bytes moved; the dock said `COPIED` in red | `ftp_temp_finish` treated both syncs, close, and rename as one commit condition | Sync is a recorded durability hint; close and rename decide the commit; the message names `CLOSE` or `RENAME`; `sync skipped` is logged | `test_sync_is_best_effort`, `test_rename_failures` | `HOST b43` |
+| b41 | Local folder copy, a clipboard batch, NEW FOLDER, and RENAME crashed the app | `local_batch_preflight`'s `Path[64]` made `handle_action` reserve 71,680 bytes; `local_batch_execute` called `handle_action` recursively; the worker used 158,472 of 128 KiB (stop `0x10006`) | Big arrays moved to the `Worker`; batches advance one item per `worker_step`; stack raised to 192 KiB; `tools/check_worker_stack.py` fails a frame over budget in `build.sh` | core analysis in `VERIFICATION.md`, `test_local_batch_terminal`, `test_local_batch_preflight`; b43 operator report: copy/paste/new folder/rename all complete | `HW b43` |
+| b43 | Every local copy ended `DESTINATION COMMIT FAILED` after all bytes moved; the dock said `COPIED` in red | `ftp_temp_finish` treated both syncs, close, and rename as one commit condition | Sync is a recorded durability hint; close and rename decide the commit; the message names `CLOSE` or `RENAME`; `sync skipped` is logged | `test_sync_is_best_effort`, `test_rename_failures`; b43 operator report: copies and downloads complete | `HW b43` |
 | b43 | A batch with a refused item could end green | Refused items never reached `run_plan`, so they were never counted | `local_batch_advance` counts an item that neither ran nor raised a prompt as failed | `test_local_batch_refused_item` | `HOST b43` |
 | b43 | A total failure read `COPIED` in red | `done_dock` always used the past-tense operation word | Nothing succeeded reads `FAILED` in red; a partial batch keeps the word in yellow | `test_render_workspace` (done/failed dock) | `HOST b43` |
 

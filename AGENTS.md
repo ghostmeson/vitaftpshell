@@ -38,9 +38,11 @@ full local cancel, the cyan cursor slab, the active-pane glow, and red failures;
 b40 crashed on the console (worker stack overflow, four cores in `logs/b40/`).
 b43 removes the 64 KiB `handle_action` array and the recursive batch call, adds
 a build-time worker-stack budget check, makes a refused sync a recorded hint,
-counts refused batch items, and reads `FAILED` on a total failure. b43 is built
-but not yet tested. No M1–M13 row result has been transcribed, so the project is
-`building`, not `verified`. Do not start coding from this file alone: the plan
+counts refused batch items, and reads `FAILED` on a total failure. b43 has run
+on the console (operator report, 2026-11-14): copy, paste, new folder, rename,
+and download work, and the dock words read correctly in green. M13 and M10 are
+partly observed; M1–M9, M11, and M12 are pending, so the project is `building`,
+not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
 
