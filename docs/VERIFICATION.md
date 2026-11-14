@@ -1,15 +1,30 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b43.vpk
-**SHA-256:** f53d4e210ac549756068a9e2ccad2995f95814213b55d6ed1ca493bf129d0bff
-**ELF:** build/vitaftpshell, 515,156 bytes
+**Build:** vitaftpshell-v01.00-b48.vpk
+**SHA-256:** 830cbe973b5a29fe66b4534d155d6229cd09572d77a2a0bfa2d7a28f4edb361c
+**ELF:** build/vitaftpshell, 530,680 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-14
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b48 adds the b41 parallel lanes, built and host-tested, not yet on hardware; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b48 host run (b41 parallel lanes)
+
+**Date:** 2026-11-14
+**Build:** `vitaftpshell-v01.00-b48.vpk`
+**SHA-256:** `830cbe973b5a29fe66b4534d155d6229cd09572d77a2a0bfa2d7a28f4edb361c`
+
+The U25-U27 stage is implemented and host-verified. Twenty suites pass with
+zero warnings, the preview renders 39 states, the integration suite is clean
+under ASan/UBSan, and the worker-stack gate reports `handle_action` 6,640 B and
+a fixed chain of 20,452 B. New host coverage: stepped copy and mid-copy cancel;
+the reservation predicate; the WAIT/SKIP/CANCEL prompt; a server `STOR` on a
+held path answering 450, disarming PASV, and a sibling succeeding; the paste
+guards; and the two-lane dock and cancel choices. M12 stays `PENDING` until the
+console run.
 
 ## b43 hardware run
 
@@ -73,7 +88,7 @@ and a refused sync no longer fails or discards a completed file.
 **SHA-256:** `6e2b8149489101df5aba7915fbfe2d41452869a9835b713c8ba2b7b4b02d88f2`
 
 The correction pass is implemented and verified on the host, not yet on the
-console. Nineteen host suites pass with zero warnings, the preview renders 36
+console. Twenty host suites pass with zero warnings, the preview renders 36
 states, and the integration suite is clean under ASan/UBSan. The b40 rows cover
 cursor COPY/MOVE, one batch terminal, the batch conflict preflight, local
 cancel, the cursor slab, the pane glow, and red failures. M9–M11 remain

@@ -27,12 +27,13 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b43.vpk`, 253,376 bytes,
-  SHA-256 `f53d4e210ac549756068a9e2ccad2995f95814213b55d6ed1ca493bf129d0bff`.
+- **Current artifact:** `vitaftpshell-v01.00-b48.vpk`, 260,852 bytes,
+  SHA-256 `830cbe973b5a29fe66b4534d155d6229cd09572d77a2a0bfa2d7a28f4edb361c`.
 - **Last hardware-observed build:** b43 (operator report, 2026-11-14): copy,
   paste, new folder, rename, and download work and the dock words read correctly.
-  b40 was installed and crashed; its four core dumps are analysed in
-  `VERIFICATION.md`. b28, b32, b36, b38, and b39 were not separately tested.
+  b48 adds the b41 parallel lanes and is built, not tested. b40 crashed; its four
+  core dumps are analysed in `VERIFICATION.md`. b28, b32, b36, b38, and b39 were
+  not separately tested.
 - **Latest hardware evidence:** b37 operator report (no log pulled yet);
   `logs/session-b27.log` (local actions, server start, localhost control/login,
   PASV data refusal); `logs/b20/` (complete worker-stack core); `logs/b18/`
@@ -116,6 +117,17 @@ matrix passes.
 | b32 | A selected row could be read while the listing arena was being written | The reducer read `rows[selected]` even when `loading` | Row access returns `NULL` while loading; Cross/Square are refused | `test_remote_actions_availability` | `PENDING b32` |
 
 
+
+
+## b41 parallel lanes (b48)
+
+| Build | Change | Evidence | Status |
+|---|---|---|---|
+| b48 | The local executor is resumable: a heap-owned run state and `fsop_run_step` advance by a byte budget, the worker interleaves a local slice between client/server/queue ticks, and `fsop_run` remains the blocking wrapper (U25) | `test_stepped_copy`, `test_stepped_cancel`, the existing executor suite | `HOST b48` |
+| b48 | Canonical-path reservations: a local plan reserves every step, a download its destination, an upload its source; equal paths conflict unless both read, tree operations conflict with ancestors/descendants, sidecars are covered, and the containing directory is not locked (U26, D72) | `test_reserve` | `HOST b48` |
+| b48 | A collision asks WAIT / SKIP / CANCEL; WAIT is head-of-line and retries. A server data or mutating command on a held path answers 450, disarms PASV, and holds the path until the transfer ends (U26) | `test_held_path`, `test_path_busy_prompt` | `HOST b48` |
+| b48 | A paste with duplicate destination names is refused and a move source inside another is skipped before any command (U26) | `test_paste_guards` | `HOST b48` |
+| b48 | The dock has a network and a local lane: the network stays full, the local lane is a badge, the local lane alone takes the dock, and the focused cancel offers KEEP / CANCEL NETWORK / CANCEL LOCAL (U27, D78) | `test_two_lane_dock`, the two-lane cases in `test_render_workspace`, preview 39 states | `HOST b48` |
 
 ## b40 crash pass (b41/b43)
 
