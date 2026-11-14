@@ -110,6 +110,14 @@ static void body_draw(const UiConfirm *confirm)
         font_text("OVERWRITE REPLACES THEM.", CONFIRM_ITEM_X, y + 48.0f,
                   PX_LABEL, C_DIM);
         break;
+    case UI_CONFIRM_PATH_BUSY:
+        font_text("THE PATH IS HELD BY ANOTHER OPERATION.", CONFIRM_ITEM_X, y,
+                  PX_LABEL, C_WHITE);
+        font_text("WAIT RESUMES IT WHEN FREE.", CONFIRM_ITEM_X, y + 24.0f,
+                  PX_LABEL, C_DIM);
+        font_text("SKIP DROPS THIS ITEM; CANCEL ENDS THE SET.", CONFIRM_ITEM_X,
+                  y + 48.0f, PX_LABEL, C_DIM);
+        break;
     case UI_CONFIRM_CANCEL_XFER:
         snprintf(line, sizeof(line), "%s",
                  confirm->context[0] != '\0' ? confirm->context
@@ -198,6 +206,10 @@ static void options_draw(const UiConfirm *confirm)
             break;
         case UI_CHOICE_STOP:
             label = "STOP SERVER";
+            primary = 1;
+            break;
+        case UI_CHOICE_WAIT:
+            label = "WAIT";
             primary = 1;
             break;
         case UI_CHOICE_SKIP:

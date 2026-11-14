@@ -832,6 +832,47 @@ static void test_confirm_busy_guard(void)
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
 }
 
+static void test_path_busy_prompt(void)
+{
+    reset();
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_CONFIRM_REQUEST;
+    event.confirm = UI_CONFIRM_PATH_BUSY;
+    event.items = s_confirm_items;
+    event.item_count = 1;
+    s_confirm_items[0].name = "ux0:data/a.bin";
+    send_event(&event);
+
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_PATH_BUSY);
+    CHECK(s_state.confirm.choices[0] == UI_CHOICE_WAIT);
+    CHECK(s_state.confirm.choices[1] == UI_CHOICE_SKIP);
+    CHECK(s_state.confirm.choices[2] == UI_CHOICE_CANCEL);
+    CHECK(s_state.confirm.choice_focus == 0);
+
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CONFIRM) != NULL);
+    CHECK(command(UI_CMD_CONFIRM)->confirm == UI_CONFIRM_PATH_BUSY);
+    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_WAIT);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+
+    reset();
+    send_event(&event);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CONFIRM) != NULL);
+    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_SKIP);
+
+    reset();
+    send_event(&event);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CONFIRM) != NULL);
+    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_CANCEL);
+}
+
 static void test_dock_cancel_and_site_delete(void)
 {
     reset();
@@ -1398,6 +1439,7 @@ int main(void)
     test_delete_confirm_items();
     test_sites_scroll();
     test_confirm_busy_guard();
+    test_path_busy_prompt();
     test_dock_cancel_and_site_delete();
     test_listing_and_dock();
     test_remote_volume_marks();
