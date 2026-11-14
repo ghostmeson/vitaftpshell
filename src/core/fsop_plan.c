@@ -245,6 +245,17 @@ static void plan_file_copy(FsOpPlan *plan, const char *source,
 static void plan_tree(FsOpPlan *plan, const char *source, const char *dest,
                       const FsOpFacts *facts, FsOpConflict conflict, int move);
 
+static void record_existing(FsOpPlan *plan, const char *dest)
+{
+    plan->existing_count++;
+    if (plan->existing_named < FSOP_CONFLICT_NAMES) {
+        snprintf(plan->existing_dest[plan->existing_named].text,
+                 sizeof(plan->existing_dest[plan->existing_named].text),
+                 "%s", dest);
+        plan->existing_named++;
+    }
+}
+
 static void plan_file_move(FsOpPlan *plan, const char *source, const char *dest,
                            const FsOpFact *source_fact, const FsOpFacts *facts,
                            FsOpConflict conflict)
@@ -259,11 +270,13 @@ static void plan_file_move(FsOpPlan *plan, const char *source, const char *dest,
         }
         if (conflict == FSOP_CONFLICT_ASK) {
             plan->needs_conflict = 1;
-            plan->existing_count++;
+            record_existing(plan, dest);
             return;
         }
-        if (conflict == FSOP_CONFLICT_SKIP)
+        if (conflict == FSOP_CONFLICT_SKIP) {
+            plan->skipped_count++;
             return;
+        }
     }
 
     PathRisk risk = PATH_RISK_NORMAL;
@@ -308,11 +321,13 @@ static void plan_file_copy(FsOpPlan *plan, const char *source,
         }
         if (conflict == FSOP_CONFLICT_ASK) {
             plan->needs_conflict = 1;
-            plan->existing_count++;
+            record_existing(plan, dest);
             return;
         }
-        if (conflict == FSOP_CONFLICT_SKIP)
+        if (conflict == FSOP_CONFLICT_SKIP) {
+            plan->skipped_count++;
             return;
+        }
     }
 
     PathRisk risk = PATH_RISK_NORMAL;
@@ -765,6 +780,13 @@ const char *fsop_plan_step_dest(const FsOpPlan *plan, int step)
     if (plan == NULL || step < 0 || step >= plan->step_count)
         return "";
     return get_path(plan, plan->steps[step].dest_off);
+}
+
+const char *fsop_plan_existing_dest(const FsOpPlan *plan, int index)
+{
+    if (plan == NULL || index < 0 || index >= plan->existing_named)
+        return "";
+    return plan->existing_dest[index].text;
 }
 
 const char *fsop_plan_rollback_from(const FsOpPlan *plan, int rollback)

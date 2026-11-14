@@ -104,6 +104,9 @@ typedef struct {
     int elapsed_known;
     uint64_t rate;
     int rate_known;
+    int skipped;
+    int failed;
+    int cancelled;
 } UiDock;
 
 typedef struct {
@@ -245,6 +248,7 @@ typedef struct {
 
     UiPaneState panes[UI_PANE_COUNT];
     UiDock dock;
+    unsigned batch_seq;
     UiConfirm confirm;
     UiSiteList sites;
     UiEditor editor;
@@ -341,6 +345,9 @@ typedef struct {
     int direction;
     int direction_known;
     int existing_count;
+    int batch_skipped;
+    int batch_failed;
+    int batch_cancelled;
     Site edit_site;
 } UiStateEvent;
 

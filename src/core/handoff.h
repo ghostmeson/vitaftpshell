@@ -45,6 +45,7 @@ typedef enum {
     HANDOFF_EVT_SITE_BOOK,
     HANDOFF_EVT_SERVER_CLIENT,
     HANDOFF_EVT_TRANSFER_CANCELLED,
+    HANDOFF_EVT_BATCH_DONE,
     HANDOFF_EVT_EDIT_SITE
 } HandoffEventKind;
 
@@ -67,6 +68,9 @@ typedef struct {
     char op[32];
     int item_index;
     int item_total;
+    int batch_skipped;
+    int batch_failed;
+    int batch_cancelled;
     uint64_t rate;
     int rate_known;
     uint64_t elapsed_ms;

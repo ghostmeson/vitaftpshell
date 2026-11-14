@@ -237,6 +237,8 @@ static UiPane pane_for_direction(XferDirection direction)
     case XFER_DIR_LOCAL_COPY:
     case XFER_DIR_LOCAL_MOVE:
     case XFER_DIR_LOCAL_DELETE:
+    case XFER_DIR_LOCAL_RENAME:
+    case XFER_DIR_LOCAL_MKDIR:
         return UI_PANE_LOCAL;
     default:
         return UI_PANE_REMOTE;
@@ -296,6 +298,26 @@ static void drain_events(App *app)
             break;
         case HANDOFF_EVT_TRANSFER_CANCELLED:
             ui.kind = UI_EVT_TRANSFER_CANCELLED;
+            feed(app, &ui);
+            break;
+        case HANDOFF_EVT_BATCH_DONE:
+            ui.kind = UI_EVT_BATCH_DONE;
+            ui.pane = pane_for_direction(event.direction);
+            ui.direction = (int)event.direction;
+            ui.direction_known = 1;
+            ui.ok = event.ok;
+            ui.bytes = event.bytes;
+            ui.total = event.total;
+            ui.total_known = event.total_known;
+            ui.item_index = event.item_index;
+            ui.item_total = event.item_total;
+            ui.batch_skipped = event.batch_skipped;
+            ui.batch_failed = event.batch_failed;
+            ui.batch_cancelled = event.batch_cancelled;
+            ui.rate = event.rate;
+            ui.rate_known = event.rate_known;
+            ui.elapsed_ms = event.elapsed_ms;
+            ui.elapsed_known = event.elapsed_known;
             feed(app, &ui);
             break;
         case HANDOFF_EVT_SERVER_STATE:
