@@ -1498,3 +1498,143 @@ session keeps its centered detail; neither is cleared by a key.
 **Consequences:** The user sees the reason next to the rows they acted on
 instead of guessing. The path is temporarily hidden while the notice is up; the
 dock status and the next successful listing restore it.
+
+## D69. COPY and MOVE use the marked set or the cursor row
+
+**Date:** 2026-11-14
+**Status:** accepted; b40.
+
+**Context:** COPY and MOVE were enabled only after a Square mark, while DELETE,
+UPLOAD, and DOWNLOAD already fell back to the cursor row. With nothing marked,
+the local ACTIONS list showed COPY and MOVE unavailable with `MARK TO COPY` /
+`MARK TO MOVE`, which read as a connection or permission fault. R29 already
+covers one item or a multi-selection.
+
+**Decision:** When the marked set is non-empty it is the source; otherwise the
+row under the cursor is the single source. Marks still win when the cursor is
+elsewhere. A folder under the cursor is a valid COPY or MOVE source. The root,
+protected-path, and no-selection refusals stay.
+
+**Consequences:** One item no longer needs a mark before it can be copied or
+moved, and UPLOAD is the only local action gated on the remote session.
+
+## D70. Cyan cursor, yellow activity and risk, red failure
+
+**Date:** 2026-11-14
+**Status:** accepted; b40. Supersedes the palette sentence in D68 and the
+"red is not an alert" rule.
+
+**Context:** The report asked for a prominent selection. A yellow row with
+white text would have about 1.1:1 contrast on this palette, and yellow already
+means activity, marks, risk, and warnings. The theme already defined `C_RED`
+without using it.
+
+**Decision:** The active cursor row is a cyan slab with near-black text. The
+mark square and risk diamond stay yellow behind a 1 px dark keyline. Yellow
+continues to mean network activity, risk, warnings, and a waiting local job;
+red means a failure or a refusal. Neutral messages such as `CANCELLED`,
+`DISCONNECTED`, and `READING` stay white or dim. Failures and refusals use red
+in the pane band, the dock failed state, the editor, SERVER, SITES, and the text
+entry notice. Risk and destructive warnings stay yellow.
+
+**Consequences:** Selection and failure no longer compete for the same colour.
+The inactive pane keeps its thin bar and faint wash so only the driven pane
+shows the slab.
+
+## D71. The dock names the operation and reports one terminal per batch
+
+**Date:** 2026-11-14
+**Status:** accepted; b40.
+
+**Context:** The dock hard-coded `DONE`, RENAME and NEW FOLDER reported as COPY,
+and local multi-item work ran as `1 OF 1` per item. A batch with a failed middle
+item could end green on the last item.
+
+**Decision:** The terminal word is the past tense of the operation. A batch
+reports once, with its item count, skipped count, and cancelled count. A clean
+or mixed-but-successful set is green; an all-skipped or cancelled set is
+neutral; a partial failure is yellow with the reason; a total failure or an app
+shortfall is red. A single item omits the count and never shows `1 OF 1`. The
+local pane refreshes once at the terminal.
+
+**Consequences:** The dock answers "what happened" instead of "something ended".
+The batch protocol carries a batch id, item index, total, and last flag so the
+terminal can be emitted once.
+
+## D72. One local job may run beside one network transfer
+
+**Date:** 2026-11-14
+**Status:** accepted; b41 implementation pending.
+
+**Context:** R38 and D9 gave one slot to the client, the server, and local work.
+A local copy therefore stalled or was refused while a transfer ran, although the
+two usually touch different files.
+
+**Decision:** One network transfer and one local filesystem job may run at once
+when their canonical paths do not overlap. Two network transfers, two local
+jobs, and any overlapping read/write pair still serialize. A reservation covers
+the path and its temp/aside siblings; an ancestor/descendant conflict applies to
+a tree delete, rename, or recursive move, not to a directory listing. The server
+answers 450 on a held path, or while an app transfer occupies the network lane,
+and disarms the data connection. The worker interleaves the local executor with
+the client, server, and queue; there is no second worker thread.
+
+**Consequences:** Unrelated local work no longer waits for a transfer. The
+single-slot sentence in `AGENTS.md` and `docs/PROJECT.md` is superseded; the
+reservation table owns mutual exclusion.
+
+## D73. A path collision is a confirm, not a silent refusal
+
+**Date:** 2026-11-14
+**Status:** accepted; b41 implementation pending. Supersedes the R67 interrupt
+list.
+
+**Context:** With two lanes, a later operation can target a path the first one
+holds. A plain refusal loses the batch; continuing would risk data loss.
+
+**Decision:** The later operation asks once per batch with WAIT, SKIP, or
+CANCEL, naming the blocker. WAIT holds it head-of-line and resumes when the
+blocker releases, re-applying the existing-destination rule if a destination
+appeared. A server client cannot answer a prompt, so it receives 450 and the
+data connection is disarmed. Destructive confirms, a path collision, and
+unrecoverable errors are the only interrupts.
+
+**Consequences:** A recoverable collision joins the interrupt set. The confirm
+is once per batch, not once per item.
+
+## D74. The active pane glows
+
+**Date:** 2026-11-14
+**Status:** accepted; b40. Supersedes the "only the wordmark glows" restraint.
+
+**Context:** The active pane was a 2 px left edge and a yellow title; with the
+cursor row now cyan, the pane needed a stronger cue that did not rely on the
+row.
+
+**Decision:** The active pane draws a full yellow outline that follows the chamfer
+plus a static additive bloom just outside it. Only the lost pane loses its
+bloom; a healthy active pane keeps it. The inactive pane keeps its dim cyan
+outline and 2.5 % wash.
+
+**Consequences:** Yellow now identifies the pane being driven as well as network
+activity and risk. The glow is static; no pulse or animation is added.
+
+## D75. A local batch can be cancelled mid-file
+
+**Date:** 2026-11-14
+**Status:** accepted; b40.
+
+**Context:** R35 requires local operations to be cancellable, but the worker
+passed `NULL` as the executor's cancel callback. The dock offered CANCEL while
+the worker was blocked inside the copy, so the command could not arrive until
+the operation finished.
+
+**Decision:** The cancel confirm emits `UI_CMD_CANCEL_TRANSFER` on the dedicated
+cancel slot. The executor polls a peek of that slot at every chunk and step; it
+removes the partial and rolls back. The popped command is consumed once and
+does not reach the next job. A between-item cancel ends the batch. The terminal
+is `CANCELLED n OF m`; completed items stay.
+
+**Consequences:** CANCEL now stops a local copy at the next chunk. A single
+slow filesystem call can still delay the stop; the 5 s ceiling is measured on
+hardware in M11.

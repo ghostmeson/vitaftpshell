@@ -1,15 +1,28 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b39.vpk
-**SHA-256:** acc6457ce2fc171ac3ce602b2473c12d53e880594eb4e2eb6ff86e3a71b08fe3
-**ELF:** build/vitaftpshell, 509,264 bytes
+**Build:** vitaftpshell-v01.00-b40.vpk
+**SHA-256:** 6e2b8149489101df5aba7915fbfe2d41452869a9835b713c8ba2b7b4b02d88f2
+**ELF:** build/vitaftpshell, 514,964 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
-**Date:** 2026-11-13
-**Status:** b37 hardware-tested (operator report); b39 built, not tested; M1–M8 row transcription pending
+**Date:** 2026-11-14
+**Status:** b37 hardware-tested (operator report); b40 built, not tested; M1–M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b40 host run
+
+**Date:** 2026-11-14
+**Build:** `vitaftpshell-v01.00-b40.vpk`
+**SHA-256:** `6e2b8149489101df5aba7915fbfe2d41452869a9835b713c8ba2b7b4b02d88f2`
+
+The correction pass is implemented and verified on the host, not yet on the
+console. Nineteen host suites pass with zero warnings, the preview renders 36
+states, and the integration suite is clean under ASan/UBSan. The b40 rows cover
+cursor COPY/MOVE, one batch terminal, the batch conflict preflight, local
+cancel, the cursor slab, the pane glow, and red failures. M9–M11 remain
+`PENDING` until the console run; M12 belongs to the b41 parallel build.
 
 ## b37 hardware run
 
@@ -50,6 +63,10 @@ evidence are recorded here. The project therefore stays `building`.
 | M6 | Denials through the server | `boot_config.txt`, `ux0:tai` upload, volume-root delete all refuse, and nothing is created | pending | pending | PENDING |
 | M7 | Second client and stop-during-write | 450 to the second client; stop during a write confirms and leaves no partial | pending | pending | PENDING |
 | M8 | Network loss and cancel | Server stops and reports; cancel takes effect within 5 s; no crash dump | pending | pending | PENDING |
+| M9 | b40 selection and palette | Cursor slab legible in both panes, ACTIONS, and SITES; marks and risk stay visible; active pane outline and bloom; confirm list unchanged; failures red, neutral notices not | pending | pending | PENDING |
+| M10 | b40 cursor copy and dock words | COPY/PASTE without a mark; three-item batch ends `COPIED 3 ITEMS`; all-skipped `SKIPPED`; partial yellow; rename and new folder name themselves; no `2 OF 1` | pending | pending | PENDING |
+| M11 | b40 local cancel and conflict prompt | Large local copy stops within 5 s with no partial; one conflict prompt names every existing destination; CANCEL ends the batch; cancelled delete reports `DELETED n OF m` | pending | pending | PENDING |
+| M12 | b41 parallel lanes and collision | Local copy and unrelated download progress; colliding paste asks WAIT/SKIP/CANCEL; WAIT resumes; server `STOR` on a held path gets 450; unrelated `PASV`/`LIST` work | pending | pending | PENDING |
 
 ## Install and launch
 
@@ -625,7 +642,7 @@ executor, and fake filesystem:
 
 Hardware pass steps:
 
-1. Install `build/vitaftpshell-v01.00-b39.vpk`.
+1. Install `build/vitaftpshell-v01.00-b40.vpk`.
 2. Launch; confirm `ALL DRIVES` lists `ux0:`, `ur0:`, and `uma0:` when mounted.
 3. Enter `ux0:`, then `ux0:data`. Confirm the rows and that Circle returns to
    `ALL DRIVES` from the volume root.
