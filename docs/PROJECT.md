@@ -21,7 +21,7 @@ server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime exist. `tools/test/run.sh` passes nineteen
 host suites, `tools/preview/run.sh` renders 36 settled states, and `build.sh`
-emits `vitaftpshell-v01.00-b40.vpk` with the real app linked. b16 and b18 have
+emits `vitaftpshell-v01.00-b43.vpk` with the real app linked. b16 and b18 have
 run on the console: b18 proved the drive browser, pinned the IME as the
 new-folder/rename blocker, showed the client failing at TCP connect, and showed
 the server with no client. b20 opened the IME and reached a rename, then the
@@ -44,9 +44,13 @@ send-failure handling. b37 has run on the console (operator report,
 2026-11-13); b38 fixes the unsafe-name guard refusing to open the server's own
 `UX0:`/`UR0:`/`UMA0:` roots; b40 adds cursor COPY/MOVE, one batch terminal
 with past-tense dock words, the batch conflict preflight, full local cancel, the
-cyan cursor slab, the active-pane glow, and red failures. b40 is built but not
-tested. No M1–M12 row result has been transcribed; the project stays `building`
-until every row has a recorded PASS.
+cyan cursor slab, the active-pane glow, and red failures; b40 crashed on the
+console and its four worker-stack cores are analysed in `VERIFICATION.md`. b43
+removes the 64 KiB `handle_action` array and the recursive batch call, enforces
+a worker-stack budget in `build.sh`, turns a refused sync into a recorded hint,
+counts refused batch items, and reads `FAILED` on a total failure. b43 is built
+but not tested. No M1–M13 row result has been transcribed; the project stays
+`building` until every row has a recorded PASS.
 
 ## Users
 
@@ -94,7 +98,7 @@ requirements R1-R70.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | b37 hardware-tested (operator report); b40 built, not tested; M1–M12 evidence transcription pending |
+| Phase 6: Hardware verification | b37 hardware-tested (operator report); b40 crashed, four cores analysed; b43 built, not tested; M1–M13 evidence transcription pending |
 
 ## Failure policy
 

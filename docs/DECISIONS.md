@@ -1561,6 +1561,11 @@ local pane refreshes once at the terminal.
 The batch protocol carries a batch id, item index, total, and last flag so the
 terminal can be emitted once.
 
+**Amended 2026-11-14 (b41):** a terminal with no success at all reads `FAILED`,
+not the past-tense operation word in red. `COPIED` in red beside a failure reason
+claims the opposite of what line three says. A partial batch keeps the operation
+word, in yellow.
+
 ## D72. One local job may run beside one network transfer
 
 **Date:** 2026-11-14
@@ -1638,3 +1643,55 @@ is `CANCELLED n OF m`; completed items stay.
 **Consequences:** CANCEL now stops a local copy at the next chunk. A single
 slow filesystem call can still delay the stop; the 5 s ceiling is measured on
 hardware in M11.
+
+## D76. A refused sync is not a failed commit
+
+**Date:** 2026-11-14
+**Status:** accepted; b43. Refines KTD12.
+
+**Context:** b40's local copy reported `DESTINATION COMMIT FAILED` after all
+253,379 bytes had been written. `ftp_temp_finish` treated the durability sync of
+the temp file and the post-rename sync of the destination as commit conditions,
+collapsing sync, close, and rename into one message. The post-rename sync opens
+the committed file read-only and calls `sceIoSyncByFd`; nothing in the operation
+needs that call to succeed, and the file is already visible under its final name.
+Failing the whole copy at that point leaves a correct file reported as failed
+and invites the user to retry a completed operation.
+
+**Decision:** The temp data is still synced before the close and the destination
+is still synced after the rename, but a refused sync is recorded (`sync_failed`,
+logged as `sync skipped`) and does not fail the operation. `close` and `rename`
+decide the commit. A close failure removes the temp; a rename failure keeps or
+restores the previous destination. `ftp_temp_finish` reports which of those two
+steps failed so the dock names it.
+
+**Consequences:** A platform that refuses sync-by-fd no longer breaks every copy,
+download, and upload. The durability property is "old or new, never neither"
+against a process kill; power-loss durability still needs the directory-sync gap
+in D48 closed. A genuine close or rename failure is now distinguishable in the
+dock and the log.
+
+## D77. The worker stack is a build-enforced budget
+
+**Date:** 2026-11-14
+**Status:** accepted; b43. Supersedes the b21 stack-size note.
+
+**Context:** b20 overflowed the worker stack on a rename; b21 raised the stack to
+128 KiB and moved the copy buffer out of `fsop_run`. b40 reintroduced the class:
+`local_batch_preflight` declared `Path existing[UI_CONFIRM_MAX]` (64 × 1024
+bytes), which the compiler folded into `handle_action` for a 71,680-byte frame,
+and `local_batch_execute` called `handle_action` recursively. The b40 core dumps
+show the worker at 158,472 bytes of a 128 KiB stack (stop `0x10006`, stack
+overflow), deepest chain `handle_action → execute_action → fact_tree → fs_stat`.
+
+**Decision:** Large per-operation arrays live in the heap-owned `Worker`, never
+in a worker-path stack frame. A batch preflights once, then advances exactly one
+item per `worker_step`; `handle_action` never calls itself. The worker stack is
+192 KiB, and `build.sh` runs `tools/check_worker_stack.py` against the linked ELF:
+`handle_action` must stay under 16 KiB, the fixed copy chain under 64 KiB, and
+`handle_action` must not branch to itself. A build that breaks the budget fails
+before a VPK exists.
+
+**Consequences:** The b40 crash class is caught on the host build, not by a
+console run and a core dump. A future local buffer that would cost more than a
+few KiB has to be a `Worker` member and is visible in one place.

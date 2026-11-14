@@ -8,7 +8,7 @@ This file is an **index**, not the full evidence record:
 - [`VERIFICATION.md`](VERIFICATION.md) owns the hardware matrix, the logs, the
   core-dump analysis, and the host-test evidence.
 - [`DECISIONS.md`](DECISIONS.md) owns the numbered product and architecture
-  choices (D53–D75 for this period).
+  choices (D53–D77 for this period).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the layering and port rules.
 - [`DESIGN.md`](DESIGN.md) owns the settled layout, states, and input.
 
@@ -22,17 +22,17 @@ This file is an **index**, not the full evidence record:
 | `PART` | One part is hardware-observed; the named remainder is not. |
 
 Do not promote a `HOST` or `PENDING` row to `HW` without a console observation
-recorded in `VERIFICATION.md`. The project stays `building` until the M1–M8
+recorded in `VERIFICATION.md`. The project stays `building` until the M1–M13
 matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b40.vpk`, 253,379 bytes,
-  SHA-256 `6e2b8149489101df5aba7915fbfe2d41452869a9835b713c8ba2b7b4b02d88f2`.
-- **Last hardware-observed build:** b37 (operator report, 2026-11-13). The
-  report did not enumerate the M1–M8 rows, so those stay `PENDING`. b40 is built
-  but not hardware-tested. b28, b32, b36, b38, and b39 were not separately
-  tested.
+- **Current artifact:** `vitaftpshell-v01.00-b43.vpk`, 253,376 bytes,
+  SHA-256 `f53d4e210ac549756068a9e2ccad2995f95814213b55d6ed1ca493bf129d0bff`.
+- **Last hardware-observed build:** b37 (operator report, 2026-11-13). b40 was
+  installed and crashed; its four core dumps are analysed in `VERIFICATION.md`.
+  b43 is built but not hardware-tested. b28, b32, b36, b38, and b39 were not
+  separately tested.
 - **Latest hardware evidence:** b37 operator report (no log pulled yet);
   `logs/session-b27.log` (local actions, server start, localhost control/login,
   PASV data refusal); `logs/b20/` (complete worker-stack core); `logs/b18/`
@@ -115,6 +115,16 @@ matrix passes.
 | b32 | A pane-less error could write `panes[-1]` | `UI_EVT_ERROR` checked only the upper bound; the command-queue error passes `-1` | `UiStateEvent.pane` is an `int`; all pane accesses check both bounds | host suites | `PENDING b32` |
 | b32 | A selected row could be read while the listing arena was being written | The reducer read `rows[selected]` even when `loading` | Row access returns `NULL` while loading; Cross/Square are refused | `test_remote_actions_availability` | `PENDING b32` |
 
+
+
+## b40 crash pass (b41/b43)
+
+| Build | Symptom → cause | Fix | Evidence | Status |
+|---|---|---|---|---|
+| b41 | Local folder copy, a clipboard batch, NEW FOLDER, and RENAME crashed the app | `local_batch_preflight`'s `Path[64]` made `handle_action` reserve 71,680 bytes; `local_batch_execute` called `handle_action` recursively; the worker used 158,472 of 128 KiB (stop `0x10006`) | Big arrays moved to the `Worker`; batches advance one item per `worker_step`; stack raised to 192 KiB; `tools/check_worker_stack.py` fails a frame over budget in `build.sh` | core analysis in `VERIFICATION.md`, `test_local_batch_terminal`, `test_local_batch_preflight` | `HOST b43` |
+| b43 | Every local copy ended `DESTINATION COMMIT FAILED` after all bytes moved; the dock said `COPIED` in red | `ftp_temp_finish` treated both syncs, close, and rename as one commit condition | Sync is a recorded durability hint; close and rename decide the commit; the message names `CLOSE` or `RENAME`; `sync skipped` is logged | `test_sync_is_best_effort`, `test_rename_failures` | `HOST b43` |
+| b43 | A batch with a refused item could end green | Refused items never reached `run_plan`, so they were never counted | `local_batch_advance` counts an item that neither ran nor raised a prompt as failed | `test_local_batch_refused_item` | `HOST b43` |
+| b43 | A total failure read `COPIED` in red | `done_dock` always used the past-tense operation word | Nothing succeeded reads `FAILED` in red; a partial batch keeps the word in yellow | `test_render_workspace` (done/failed dock) | `HOST b43` |
 
 ## b40 correction pass
 
