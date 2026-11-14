@@ -262,7 +262,7 @@ static void done_dock(const UiState *state, DockPanel *p)
 {
     const UiDock *d = &state->dock;
     static char subject[64];
-    static char line[96];
+    static char line[192];
     static char rate[40];
     static char skipped_text[32];
 
