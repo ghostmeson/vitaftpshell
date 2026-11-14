@@ -287,6 +287,30 @@ static void workspace_states(void)
     save_state("workspace-failed", &state);
 
     base(&state);
+    state.active_pane = UI_PANE_REMOTE;
+    state.dock.active = 1;
+    state.dock.state = UI_DOCK_ACTIVE;
+    state.dock.direction = XFER_DIR_DOWNLOAD;
+    snprintf(state.dock.name, sizeof(state.dock.name), "EMACS-29.4.TAR.XZ");
+    state.dock.done = 52219084;
+    state.dock.total = 124465971;
+    state.dock.total_known = 1;
+    state.dock.item_index = 1;
+    state.dock.item_total = 2;
+    state.dock.rate = 1887437;
+    state.dock.rate_known = 1;
+    state.local_dock.active = 1;
+    state.local_dock.state = UI_DOCK_ACTIVE;
+    state.local_dock.direction = XFER_DIR_LOCAL_COPY;
+    snprintf(state.local_dock.name, sizeof(state.local_dock.name),
+             "GBS/TRACKS");
+    state.local_dock.item_index = 2;
+    state.local_dock.item_total = 6;
+    state.local_shown = 1;
+    state.dock_primary = UI_DOCK_LANE_NETWORK;
+    save_state("workspace-two-lanes", &state);
+
+    base(&state);
     state.active_pane = UI_PANE_LOCAL;
     state.panes[UI_PANE_LOCAL].empty = 1;
     state.panes[UI_PANE_LOCAL].row_count = 0;
@@ -602,6 +626,28 @@ static void confirm_states(void)
     state.confirm.choices[0] = UI_CHOICE_KEEP;
     state.confirm.choices[1] = UI_CHOICE_CANCEL;
     save_state("confirm-cancel-transfer", &state);
+
+    confirm_state(&state, UI_CONFIRM_CANCEL_LANES, "CANCEL WHICH TRANSFER",
+                  "EMACS-29.4.TAR.XZ  +  GBS/TRACKS",
+                  "THE CANCELLED PARTIAL FILE IS REMOVED.");
+    state.confirm.choices[0] = UI_CHOICE_KEEP;
+    state.confirm.choices[1] = UI_CHOICE_CANCEL_NETWORK;
+    state.confirm.choices[2] = UI_CHOICE_CANCEL_LOCAL;
+    state.confirm.choice_count = 3;
+    save_state("confirm-cancel-lanes", &state);
+
+    confirm_state(&state, UI_CONFIRM_PATH_BUSY, "PATH IN USE", "", "");
+    state.confirm.choices[0] = UI_CHOICE_WAIT;
+    state.confirm.choices[1] = UI_CHOICE_SKIP;
+    state.confirm.choices[2] = UI_CHOICE_CANCEL;
+    state.confirm.choice_count = 3;
+    state.confirm.item_count = 1;
+    {
+        static const UiConfirmItem item = {
+            .name = "ux0:data/GBS/TRACKS/01.VGM", .size = 0, .size_known = 0};
+        state.confirm.items = &item;
+    }
+    save_state("confirm-path-busy", &state);
 
     confirm_state(&state, UI_CONFIRM_STOP_SERVER, "STOP THE SERVER",
                   "1 CLIENT", "THE PARTIAL FILE IS REMOVED.");

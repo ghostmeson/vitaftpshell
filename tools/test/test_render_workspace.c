@@ -275,6 +275,46 @@ static void test_dock_states(void)
                               font_width("NO PARTIAL KEPT", PX_MICRO),
                               483.0f, C_DIM));
 
+    /* Both lanes: the network lane keeps the full dock and the local lane is a
+     * cyan badge on line three. */
+    memset(&s_state.dock, 0, sizeof(s_state.dock));
+    s_state.dock.active = 1;
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    s_state.dock.direction = XFER_DIR_DOWNLOAD;
+    snprintf(s_state.dock.name, sizeof(s_state.dock.name), "REMOTE.BIN");
+    s_state.dock.total = 100;
+    s_state.dock.total_known = 1;
+    memset(&s_state.local_dock, 0, sizeof(s_state.local_dock));
+    s_state.local_dock.active = 1;
+    s_state.local_dock.state = UI_DOCK_ACTIVE;
+    s_state.local_dock.direction = XFER_DIR_LOCAL_COPY;
+    snprintf(s_state.local_dock.name, sizeof(s_state.local_dock.name),
+             "LOCAL.BIN");
+    s_state.local_dock.item_index = 1;
+    s_state.local_dock.item_total = 2;
+    s_state.local_shown = 1;
+    s_state.dock_primary = UI_DOCK_LANE_NETWORK;
+    render();
+    CHECK(trace_text_at_color("DOWNLOAD", 32.0f, 450.0f, C_YELLOW));
+    CHECK(trace_has_text("LOCAL 1/2 LOCAL.BIN"));
+    CHECK(trace_has_text_color("LOCAL 1/2 LOCAL.BIN", C_CYAN));
+
+    /* The local lane alone takes the full dock. */
+    s_state.dock.active = 0;
+    s_state.dock.state = UI_DOCK_IDLE;
+    s_state.dock_primary = UI_DOCK_LANE_LOCAL;
+    render();
+    CHECK(trace_text_at_color("COPY", 32.0f, 450.0f, C_YELLOW));
+    CHECK(!trace_has_text("LOCAL 1/2 LOCAL.BIN"));
+
+    /* Its terminal persists with its own word. */
+    s_state.local_dock.active = 0;
+    s_state.local_dock.state = UI_DOCK_DONE;
+    s_state.local_dock.item_index = 2;
+    s_state.local_dock.failed = 0;
+    render();
+    CHECK(trace_text_at_color("COPIED", 32.0f, 450.0f, C_GREEN));
+
     setup();
     s_state.panes[UI_PANE_REMOTE].connected = 0;
     s_state.dock.state = UI_DOCK_IDLE;

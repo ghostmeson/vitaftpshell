@@ -1449,11 +1449,12 @@ static void test_local_batch_terminal(void)
     CHECK(fake_fs_exists("ux0:data/DEST/A.TXT"));
     CHECK(fake_fs_exists("ux0:data/DEST/B.TXT"));
     CHECK(fake_fs_exists("ux0:data/DEST/C.TXT"));
-    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
-    CHECK(app_state(app)->dock.item_total == 3);
-    CHECK(app_state(app)->dock.item_index == 3);
-    CHECK(app_state(app)->dock.skipped == 0);
-    CHECK(app_state(app)->dock.failed == 0);
+    CHECK(app_state(app)->local_dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->local_dock.item_total == 3);
+    CHECK(app_state(app)->local_dock.item_index == 3);
+    CHECK(app_state(app)->local_dock.skipped == 0);
+    CHECK(app_state(app)->local_dock.failed == 0);
+    CHECK(app_state(app)->dock_primary == UI_DOCK_LANE_LOCAL);
 
     app_destroy(app);
 }
@@ -1490,11 +1491,11 @@ static void test_local_batch_refused_item(void)
     CHECK(fake_fs_exists("ux0:data/DEST/A.TXT"));
     CHECK(!fake_fs_exists("ux0:data/DEST/B.TXT"));
     CHECK(fake_fs_exists("ux0:data/DEST/C.TXT"));
-    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
-    CHECK(app_state(app)->dock.item_total == 3);
-    CHECK(app_state(app)->dock.item_index == 2);
-    CHECK(app_state(app)->dock.failed == 1);
-    CHECK(app_state(app)->dock.skipped == 0);
+    CHECK(app_state(app)->local_dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->local_dock.item_total == 3);
+    CHECK(app_state(app)->local_dock.item_index == 2);
+    CHECK(app_state(app)->local_dock.failed == 1);
+    CHECK(app_state(app)->local_dock.skipped == 0);
 
     app_destroy(app);
 }
@@ -1545,10 +1546,10 @@ static void test_local_batch_preflight(void)
     CHECK(content_is("ux0:data/DEST/A.TXT", "OLD-A"));
     CHECK(content_is("ux0:data/DEST/B.TXT", "OLD-B"));
     CHECK(fake_fs_exists("ux0:data/DEST/C.TXT"));
-    CHECK(app_state(app)->dock.item_total == 3);
-    CHECK(app_state(app)->dock.item_index == 1);
-    CHECK(app_state(app)->dock.skipped == 2);
-    CHECK(app_state(app)->dock.failed == 0);
+    CHECK(app_state(app)->local_dock.item_total == 3);
+    CHECK(app_state(app)->local_dock.item_index == 1);
+    CHECK(app_state(app)->local_dock.skipped == 2);
+    CHECK(app_state(app)->local_dock.failed == 0);
 
     app_destroy(app);
 }
@@ -1587,9 +1588,9 @@ static void test_local_conflict_prompt(void)
     pump(app, NULL, 40);
 
     CHECK(content_is("ux0:data/DEST/A.TXT", "OLD"));
-    CHECK(app_state(app)->dock.item_total == 1);
-    CHECK(app_state(app)->dock.skipped == 1);
-    CHECK(app_state(app)->dock.failed == 0);
+    CHECK(app_state(app)->local_dock.item_total == 1);
+    CHECK(app_state(app)->local_dock.skipped == 1);
+    CHECK(app_state(app)->local_dock.failed == 0);
 
     app_destroy(app);
 }

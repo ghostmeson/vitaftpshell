@@ -87,10 +87,16 @@ typedef enum {
     UI_DOCK_FAILED
 } UiDockState;
 
+typedef enum {
+    UI_DOCK_LANE_NETWORK = 0,
+    UI_DOCK_LANE_LOCAL
+} UiDockLane;
+
 typedef struct {
     int active;
     int queued;
     int focused;
+    int waiting;
     UiDockState state;
     XferDirection direction;
     char name[PATH_NAME_MAX];
@@ -248,6 +254,11 @@ typedef struct {
 
     UiPaneState panes[UI_PANE_COUNT];
     UiDock dock;
+    /* The local lane is background: it takes the full dock when it is alone and
+     * collapses to a badge while the network lane runs (D72, KTD22). */
+    UiDock local_dock;
+    int local_shown;
+    UiDockLane dock_primary;
     unsigned batch_seq;
     UiConfirm confirm;
     UiSiteList sites;

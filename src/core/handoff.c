@@ -34,7 +34,9 @@ int handoff_command_push(Handoff *handoff, const UiCommand *command)
         STORE_REL(&handoff->critical_stop_valid, 1);
         return 1;
     }
-    if (command->type == UI_CMD_CANCEL_TRANSFER) {
+    if (command->type == UI_CMD_CANCEL_TRANSFER ||
+        command->type == UI_CMD_CANCEL_NETWORK ||
+        command->type == UI_CMD_CANCEL_LOCAL) {
         handoff->critical_cancel.command = *command;
         handoff->critical_cancel.seq = ++handoff->cmd_seq;
         STORE_REL(&handoff->critical_cancel_valid, 1);

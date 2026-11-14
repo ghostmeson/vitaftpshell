@@ -110,6 +110,12 @@ static void body_draw(const UiConfirm *confirm)
         font_text("OVERWRITE REPLACES THEM.", CONFIRM_ITEM_X, y + 48.0f,
                   PX_LABEL, C_DIM);
         break;
+    case UI_CONFIRM_CANCEL_LANES:
+        font_text("THE NETWORK TRANSFER AND THE LOCAL JOB BOTH RUN.",
+                  CONFIRM_ITEM_X, y, PX_LABEL, C_WHITE);
+        font_text("KEEP LEAVES BOTH RUNNING.", CONFIRM_ITEM_X, y + 24.0f,
+                  PX_LABEL, C_DIM);
+        break;
     case UI_CONFIRM_PATH_BUSY:
         font_text("THE PATH IS HELD BY ANOTHER OPERATION.", CONFIRM_ITEM_X, y,
                   PX_LABEL, C_WHITE);
@@ -171,11 +177,25 @@ static void options_draw(const UiConfirm *confirm)
             case UI_CHOICE_OVERWRITE:
                 label = "OVERWRITE ALL";
                 break;
+            case UI_CHOICE_WAIT:
+                label = "WAIT";
+                break;
+            case UI_CHOICE_KEEP:
+                label = "KEEP";
+                break;
+            case UI_CHOICE_CANCEL_NETWORK:
+                label = "CANCEL NETWORK";
+                break;
+            case UI_CHOICE_CANCEL_LOCAL:
+                label = "CANCEL LOCAL";
+                break;
             default:
                 break;
             }
-            ui_slab(xs[i], 366.0f, 170.0f, 40.0f, label,
-                    confirm->choices[i] == UI_CHOICE_OVERWRITE,
+            int primary = confirm->choices[i] == UI_CHOICE_OVERWRITE ||
+                          confirm->choices[i] == UI_CHOICE_WAIT ||
+                          confirm->choices[i] == UI_CHOICE_KEEP;
+            ui_slab(xs[i], 366.0f, 170.0f, 40.0f, label, primary,
                     confirm->choice_focus == i, PX_MICRO);
         }
         return;
@@ -211,6 +231,12 @@ static void options_draw(const UiConfirm *confirm)
         case UI_CHOICE_WAIT:
             label = "WAIT";
             primary = 1;
+            break;
+        case UI_CHOICE_CANCEL_NETWORK:
+            label = "CANCEL NETWORK";
+            break;
+        case UI_CHOICE_CANCEL_LOCAL:
+            label = "CANCEL LOCAL";
             break;
         case UI_CHOICE_SKIP:
             label = "SKIP";

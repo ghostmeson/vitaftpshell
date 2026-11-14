@@ -100,8 +100,15 @@ void dock_panel_draw(const DockPanel *p)
             font_text(p->left2, lx, DOCK_LINE3_Y, PX_MICRO, C_WHITE);
         }
     }
+    float right = DOCK_RIGHT;
+    if (p->badge != NULL && p->badge[0] != '\0') {
+        float bw = font_width(p->badge, PX_MICRO);
+        font_text_right(p->badge, DOCK_RIGHT, DOCK_LINE3_Y, PX_MICRO,
+                        p->badge_color);
+        right -= bw + 16.0f;
+    }
     if (p->right_text != NULL && p->right_text[0] != '\0')
-        font_text_right(p->right_text, DOCK_RIGHT, DOCK_LINE3_Y, PX_MICRO,
+        font_text_right(p->right_text, right, DOCK_LINE3_Y, PX_MICRO,
                         p->right_text_color);
 }
 
@@ -219,9 +226,8 @@ static void idle_dock(const UiState *state, DockPanel *p)
     }
 }
 
-static void active_dock(const UiState *state, DockPanel *p)
+static void active_dock(const UiDock *d, DockPanel *p)
 {
-    const UiDock *d = &state->dock;
     static char total_text[96];
     static char percent[16];
     static char rate[32];
@@ -258,9 +264,8 @@ static void active_dock(const UiState *state, DockPanel *p)
     p->right_text_color = C_WHITE;
 }
 
-static void done_dock(const UiState *state, DockPanel *p)
+static void done_dock(const UiDock *d, DockPanel *p)
 {
-    const UiDock *d = &state->dock;
     static char subject[64];
     static char line[192];
     static char rate[40];
@@ -336,9 +341,8 @@ static void done_dock(const UiState *state, DockPanel *p)
     }
 }
 
-static void failed_dock(const UiState *state, DockPanel *p)
+static void failed_dock(const UiDock *d, DockPanel *p)
 {
-    const UiDock *d = &state->dock;
     static char line[192];
     static char index[32];
 
@@ -365,23 +369,92 @@ static void failed_dock(const UiState *state, DockPanel *p)
     p->right_text_color = C_DIM;
 }
 
+static void badge_fill(const UiDock *d, char *out, size_t cap)
+{
+    out[0] = '\0';
+    if (d->waiting) {
+        snprintf(out, cap, "LOCAL WAITING");
+        return;
+    }
+    if (d->cancelled) {
+        snprintf(out, cap, "LOCAL CANCELLING");
+        return;
+    }
+    if (!d->active && d->state == UI_DOCK_FAILED) {
+        snprintf(out, cap, "LOCAL FAILED");
+        return;
+    }
+    if (!d->active) {
+        snprintf(out, cap, "LOCAL DONE");
+        return;
+    }
+    char name[128];
+    font_fit(d->name, PX_MICRO, 160.0f, name, sizeof(name));
+    if (d->item_total > 0)
+        snprintf(out, cap, "LOCAL %d/%d %s", d->item_index, d->item_total,
+                 name);
+    else
+        snprintf(out, cap, "LOCAL %s", name);
+}
+
+static uint32_t badge_color(const UiDock *d)
+{
+    if (d->waiting)
+        return C_YELLOW;
+    if (d->cancelled)
+        return C_WHITE;
+    if (!d->active && d->state == UI_DOCK_FAILED)
+        return C_RED;
+    if (d->active)
+        return C_CYAN;
+    return C_DIM;
+}
+
 void dock_draw(const UiState *state)
 {
     if (state == NULL)
         return;
 
+    const UiDock *full = &state->dock;
+    if (state->dock_primary == UI_DOCK_LANE_LOCAL && state->local_shown)
+        full = &state->local_dock;
+
     DockPanel p;
     memset(&p, 0, sizeof(p));
     p.focused = state->dock.focused;
 
-    if (state->dock.state == UI_DOCK_ACTIVE && state->dock.active)
-        active_dock(state, &p);
-    else if (state->dock.state == UI_DOCK_DONE)
-        done_dock(state, &p);
-    else if (state->dock.state == UI_DOCK_FAILED)
-        failed_dock(state, &p);
+    if (full->state == UI_DOCK_ACTIVE && full->active)
+        active_dock(full, &p);
+    else if (full->state == UI_DOCK_DONE)
+        done_dock(full, &p);
+    else if (full->state == UI_DOCK_FAILED)
+        failed_dock(full, &p);
     else
         idle_dock(state, &p);
 
+    static char badge[256];
+    if (state->dock.active && state->local_dock.active && state->local_shown) {
+        badge_fill(&state->local_dock, badge, sizeof(badge));
+        p.badge = badge;
+        p.badge_color = badge_color(&state->local_dock);
+    }
+
     dock_panel_draw(&p);
+}
+
+void dock_badge_draw(const UiState *state)
+{
+    if (state == NULL || !state->local_shown)
+        return;
+
+    const UiDock *d = &state->local_dock;
+    int running = d->active || d->state == UI_DOCK_DONE ||
+                  d->state == UI_DOCK_FAILED;
+    if (!running)
+        return;
+
+    static char badge[256];
+    badge_fill(d, badge, sizeof(badge));
+    font_text_right(badge, DOCK_RIGHT, DOCK_LINE3_Y, PX_MICRO,
+                    badge_color(d));
 }

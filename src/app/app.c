@@ -259,6 +259,14 @@ static void drain_events(App *app)
         switch (event.kind) {
         case HANDOFF_EVT_PROGRESS:
             ui.kind = UI_EVT_TRANSFER_PROGRESS;
+            ui.direction = (int)event.direction;
+            ui.direction_known =
+                event.direction == XFER_DIR_DOWNLOAD ||
+                event.direction == XFER_DIR_UPLOAD ||
+                (event.direction >= XFER_DIR_LOCAL_COPY &&
+                 event.direction <= XFER_DIR_LOCAL_MKDIR) ||
+                event.direction == XFER_DIR_SERVER_DOWNLOAD ||
+                event.direction == XFER_DIR_SERVER_UPLOAD;
             ui.bytes = event.bytes;
             ui.total = event.total;
             ui.total_known = event.total_known;

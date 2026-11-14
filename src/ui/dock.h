@@ -28,6 +28,10 @@ typedef struct {
     const char *left2;
     const char *right_text;
     uint32_t right_text_color;
+    /* A compact local-lane badge on line three while the network lane is the
+     * full dock (KTD22). It reserves its width from the right. */
+    const char *badge;
+    uint32_t badge_color;
 
     float progress; /* 0..1; ignored when progress_valid is 0 */
     int progress_valid;
@@ -37,5 +41,7 @@ typedef struct {
 
 void dock_panel_draw(const DockPanel *panel);
 void dock_draw(const UiState *state);
+/* Draw the local-lane badge over another screen's own dock panel. */
+void dock_badge_draw(const UiState *state);
 
 #endif
