@@ -242,9 +242,9 @@ static void test_actions(void)
     CHECK(trace_text_at("ux0:data/FILE.BIN", 32.0f, 102.0f));
     CHECK(trace_text_right("1 ITEM", 556.0f, 86.0f, PX_MICRO, C_DIM));
     CHECK(trace_text_at("COPY", 50.0f, 130.0f));
-    CHECK(trace_text_at("MARK TO COPY", 50.0f, 147.0f));
+    CHECK(trace_text_at("TO CLIPBOARD", 50.0f, 147.0f));
     CHECK(trace_text_at("MOVE", 50.0f, 174.0f));
-    CHECK(trace_text_at("MARK TO MOVE", 50.0f, 191.0f));
+    CHECK(trace_text_at("TO CLIPBOARD", 50.0f, 191.0f));
     CHECK(trace_text_at("DELETE", 50.0f, 350.0f));
     CHECK(trace_text_at_color("CANNOT BE UNDONE", 50.0f, 367.0f, C_YELLOW));
     CHECK(trace_text_at("TARGET", 596.0f, 84.0f));

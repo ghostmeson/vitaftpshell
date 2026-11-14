@@ -76,9 +76,9 @@ static const char *action_consequence(UiAction action, UiClipMode clip)
 {
     switch (action) {
     case UI_ACTION_COPY:
-        return "PUTS THE MARKS ON THE CLIPBOARD. NAVIGATE, THEN PASTE.";
+        return "PUTS THE MARKS OR THIS ITEM ON THE CLIPBOARD. NAVIGATE, THEN PASTE.";
     case UI_ACTION_MOVE:
-        return "PUTS THE MARKS ON THE CLIPBOARD. NAVIGATE, THEN PASTE.";
+        return "PUTS THE MARKS OR THIS ITEM ON THE CLIPBOARD. NAVIGATE, THEN PASTE.";
     case UI_ACTION_PASTE:
         return clip == UI_CLIP_MOVE
                    ? "MOVES THE CLIPBOARD INTO THIS FOLDER."

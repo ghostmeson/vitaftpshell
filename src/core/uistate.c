@@ -537,10 +537,6 @@ void ui_actions_prepare(UiState *state)
     }
 
     if (pane_index == UI_PANE_LOCAL) {
-        if (pane->mark_count == 0) {
-            disable(actions, UI_ACTION_COPY, "MARK TO COPY");
-            disable(actions, UI_ACTION_MOVE, "MARK TO MOVE");
-        }
         if (!has_selection) {
             disable(actions, UI_ACTION_COPY, "NO SELECTION");
             disable(actions, UI_ACTION_MOVE, "NO SELECTION");
@@ -1199,19 +1195,32 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                 : state->actions.dest;
 
         /* COPY and MOVE arm the clipboard. Nothing is touched until PASTE,
-         * after the user has navigated to the destination folder. */
+         * after the user has navigated to the destination folder. The marked
+         * set wins; with no marks the row under the cursor is the source. */
         if (action == UI_ACTION_COPY || action == UI_ACTION_MOVE) {
-            if (pane->mark_count <= 0) {
-                set_status(state, "MARK ITEMS FIRST");
+            int count = pane->mark_count;
+            if (count <= 0) {
+                if (!state->actions.has_selection ||
+                    state->actions.path[0] == '\0') {
+                    set_status(state, "NO SELECTION");
+                    return;
+                }
+                state->clip_mode =
+                    action == UI_ACTION_COPY ? UI_CLIP_COPY : UI_CLIP_MOVE;
+                state->clip_count = 1;
+                fmt_copy(state->clip_paths[0].text,
+                         sizeof(state->clip_paths[0].text),
+                         state->actions.path);
+                leave_screen(state);
                 return;
             }
-            if (pane->mark_count > UI_CLIP_MAX) {
+            if (count > UI_CLIP_MAX) {
                 set_status(state, "TOO MANY ITEMS");
                 return;
             }
             state->clip_mode =
                 action == UI_ACTION_COPY ? UI_CLIP_COPY : UI_CLIP_MOVE;
-            state->clip_count = pane->mark_count;
+            state->clip_count = count;
             for (int i = 0; i < state->clip_count; ++i)
                 state->clip_paths[i] = pane->marks[i].path;
             leave_screen(state);
