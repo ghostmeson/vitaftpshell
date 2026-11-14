@@ -5,11 +5,26 @@
 **ELF:** build/vitaftpshell, 515,156 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-14
-**Status:** b37 hardware-tested (operator report); b40 crashed on the console (four dumps analysed below); b43 built, not tested; M1–M13 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b43 hardware run
+
+**Date:** 2026-11-14
+**Build:** `vitaftpshell-v01.00-b43.vpk`
+**SHA-256:** `f53d4e210ac549756068a9e2ccad2995f95814213b55d6ed1ca493bf129d0bff`
+**Report:** The operator exercised the build and reported: "Everything works.
+Copy/Paste/NewFolder/Rename/Download/Dock Actions in Proper Color (like DELETED,
+MOVED, EDITED etc shown in GREEN)."
+
+This moves the crash-pass fix rows in `FIXES.md` from `HOST` to `HW` and records
+M13's user-facing operations and M10's dock words as observed. The report did not
+name the exact volume pairs, the batch skip/partial cases, or the cancel and
+conflict prompts, and the session log was not pulled, so those rows stay
+`PENDING` or `PART`. The project therefore stays `building`.
 
 ## b40 console crash analysis
 
@@ -104,10 +119,10 @@ evidence are recorded here. The project therefore stays `building`.
 | M7 | Second client and stop-during-write | 450 to the second client; stop during a write confirms and leaves no partial | pending | pending | PENDING |
 | M8 | Network loss and cancel | Server stops and reports; cancel takes effect within 5 s; no crash dump | pending | pending | PENDING |
 | M9 | b40 selection and palette | Cursor slab legible in both panes, ACTIONS, and SITES; marks and risk stay visible; active pane outline and bloom; confirm list unchanged; failures red, neutral notices not | pending | pending | PENDING |
-| M10 | b40 cursor copy and dock words | COPY/PASTE without a mark; three-item batch ends `COPIED 3 ITEMS`; all-skipped `SKIPPED`; partial yellow; rename and new folder name themselves; no `2 OF 1` | pending | pending | PENDING |
+| M10 | b40 cursor copy and dock words | COPY/PASTE without a mark; three-item batch ends `COPIED 3 ITEMS`; all-skipped `SKIPPED`; partial yellow; rename and new folder name themselves; no `2 OF 1` | COPY/PASTE and RENAME/NEW FOLDER work without marks; dock words read correctly in green (`COPIED`, `MOVED`, `DELETED`, `RENAMED`, `FOLDER CREATED`, `DOWNLOADED`) | b43 operator report 2026-11-14 | PART |
 | M11 | b40 local cancel and conflict prompt | Large local copy stops within 5 s with no partial; one conflict prompt names every existing destination; CANCEL ends the batch; cancelled delete reports `DELETED n OF m` | pending | pending | PENDING |
 | M12 | b41 parallel lanes and collision | Local copy and unrelated download progress; colliding paste asks WAIT/SKIP/CANCEL; WAIT resumes; server `STOR` on a held path gets 450; unrelated `PASV`/`LIST` work | pending | pending | PENDING |
-| M13 | b43 crash pass | Copy a file across every volume pair, copy a folder, rename across the extension, and create a folder while the clipboard is armed; all complete, the dock names the operation, no `.psp2dmp` appears, and a refused sync logs `sync skipped` instead of failing | pending | pending | PENDING |
+| M13 | b43 crash pass | Copy a file across every volume pair, copy a folder, rename across the extension, and create a folder while the clipboard is armed; all complete, the dock names the operation, no `.psp2dmp` appears, and a refused sync logs `sync skipped` instead of failing | Copy, paste, folder copy, rename, new folder with the clipboard armed, and download all complete; no crash observed | b43 operator report 2026-11-14; session log not pulled | PART |
 
 ## Install and launch
 
