@@ -188,6 +188,21 @@ arena.
   owns the one slot, so a PC data command answers 450 (D51). A local action
   refuses while a transfer or server data command is active, and refuses a plan
   whose facts overflow the scan cap rather than planning a subset.
+- A local action command carries a batch id, item index, total, and last flag.
+  The worker collects the set, probes each destination once, asks one conflict
+  question naming every existing path, then runs one plan per item. It records
+  done, skipped, failed, and cancelled counts and emits one terminal event
+  before it clears the batch; the pane refreshes once at that terminal. A lost
+  command is flushed after a bounded idle window and reported as incomplete
+  (D71).
+- A confirm cancel for a local batch emits `UI_CMD_CANCEL_TRANSFER` on the
+  dedicated handoff slot. The executor polls a peek of that slot at every chunk
+  and step, removes the temporary file, rolls back, and reports
+  `CANCELLED n OF m`; the popped command is consumed once so it cannot reach the
+  next job (D75).
+- The b41 build replaces the exclusive slot with canonical-path reservations,
+  one local job beside one network transfer, and the WAIT/SKIP/CANCEL collision
+  confirm (D72, D73).
 - The app treats a failed site save as `SAVE UNAVAILABLE`, keeps the book in
   memory, and sends the save result and the bulk view on separate events. The
   editor receives a full site (including the password) through the edit-site

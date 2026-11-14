@@ -8,7 +8,7 @@ This file is an **index**, not the full evidence record:
 - [`VERIFICATION.md`](VERIFICATION.md) owns the hardware matrix, the logs, the
   core-dump analysis, and the host-test evidence.
 - [`DECISIONS.md`](DECISIONS.md) owns the numbered product and architecture
-  choices (D53–D68 for this period).
+  choices (D53–D75 for this period).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the layering and port rules.
 - [`DESIGN.md`](DESIGN.md) owns the settled layout, states, and input.
 
@@ -27,11 +27,11 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b39.vpk`, 248,828 bytes,
-  SHA-256 `acc6457ce2fc171ac3ce602b2473c12d53e880594eb4e2eb6ff86e3a71b08fe3`.
+- **Current artifact:** `vitaftpshell-v01.00-b40.vpk`, 253,379 bytes,
+  SHA-256 `6e2b8149489101df5aba7915fbfe2d41452869a9835b713c8ba2b7b4b02d88f2`.
 - **Last hardware-observed build:** b37 (operator report, 2026-11-13). The
-  report did not enumerate the M1–M8 rows, so those stay `PENDING`. b38 and b39
-  are built but not hardware-tested. b28, b32, and b36 were not separately
+  report did not enumerate the M1–M8 rows, so those stay `PENDING`. b40 is built
+  but not hardware-tested. b28, b32, b36, b38, and b39 were not separately
   tested.
 - **Latest hardware evidence:** b37 operator report (no log pulled yet);
   `logs/session-b27.log` (local actions, server start, localhost control/login,
@@ -114,6 +114,21 @@ matrix passes.
 | b32 | Multi-mark DOWNLOAD/UPLOAD handled only the first mark | The source list expanded marks only for DELETE | Expand marks for DELETE, DOWNLOAD, and UPLOAD | `test_remote_multi_download` | `PENDING b32` |
 | b32 | A pane-less error could write `panes[-1]` | `UI_EVT_ERROR` checked only the upper bound; the command-queue error passes `-1` | `UiStateEvent.pane` is an `int`; all pane accesses check both bounds | host suites | `PENDING b32` |
 | b32 | A selected row could be read while the listing arena was being written | The reducer read `rows[selected]` even when `loading` | Row access returns `NULL` while loading; Cross/Square are refused | `test_remote_actions_availability` | `PENDING b32` |
+
+
+## b40 correction pass
+
+| Build | Symptom → cause | Fix | Evidence | Status |
+|---|---|---|---|---|
+| b40 | With nothing marked, COPY and MOVE were unavailable | The local action gate required `mark_count > 0`; DELETE, UPLOAD, and DOWNLOAD already fell back to the cursor | Use the marked set when present, otherwise the cursor row; keep the root and protected refusals | `test_cursor_copy_folder`, `test_clipboard_copy`, reducer suite | `HOST b40` |
+| b40 | The dock always said `DONE`; RENAME and NEW FOLDER reported as COPY | `done_dock` hard-coded the word and `run_plan` defaulted to the copy direction | Past-tense word per operation, one terminal per batch, skipped and cancelled counts, partial yellow, failure red | `test_render_workspace`, `test_local_batch_terminal`, `test_local_batch_preflight` | `HOST b40` |
+| b40 | A local batch showed `1 OF 1` per item and could end green after a failed item | The worker had one shared network counter and no local batch | Batch id, index, total, and last flag on every command; a worker-owned local batch with one terminal; one pane refresh | `test_local_batch_terminal`, `test_local_batch_preflight` | `HOST b40` |
+| b40 | The local conflict prompt named blank rows and its CANCEL continued the batch | The planner cleared its step table before the prompt read it, and the confirm had no batch branch | Store the existing destinations on the plan; prompt once for the whole batch with the real paths; CANCEL ends the batch | `test_local_conflict_prompt`, `test_local_batch_preflight` | `HOST b40` |
+| b40 | CANCEL could not stop a local copy | The worker passed `NULL` as the executor callback; the confirm emitted a normal command the blocked worker could not read | Dedicated cancel slot, a callback that peeks it at every chunk, a one-shot consume, and a between-item cancel | `test_cancel_copy`, reducer cancel test | `HOST b40` |
+| b40 | The cursor row was a thin bar over a faint wash | The selection was a 2 px bar and 6 % wash | Cyan slab with near-black text in the workspace, ACTIONS, and SITES; yellow glyphs behind a dark keyline; inactive bar unchanged | `test_active_pane`, render suites, preview | `HOST b40` |
+| b40 | The active pane was only a 2 px yellow left edge | The design allowed a glow only on the wordmark | Full yellow outline following the chamfer plus a static additive bloom; the lost pane loses the bloom | `test_active_pane`, render suite, preview | `HOST b40` |
+| b40 | Failures and refusals were yellow, like selection and risk | `C_RED` was defined but unused | Red for the pane band, listing failure, dock failed word, editor, SERVER, SITES, and text entry; risk warnings stay yellow | `test_pane_error`, render suites, preview | `HOST b40` |
+| b40 | A one-item transfer ended as `2 OF 1` | The terminal index was `batch_done + 1` after the increment | Use the incremented 1-based count; omit the count for a single item | integration suite | `HOST b40` |
 
 ## Visible action errors (b39)
 

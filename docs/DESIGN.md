@@ -19,8 +19,9 @@ settled value is a design change and needs a numbered decision.
 - **Screen:** 960×544, no scaling. The Vita's display is the only target.
 - **Field:** true black `C_FIELD`. Panels use `C_PANEL`.
 - **Palette:** `C_FIELD`, `C_PANEL`, `C_HAIR`, `C_DIM`, `C_WHITE`, `C_YELLOW`,
-  `C_CYAN`, `C_GREEN`, `C_GREEN_DIM`, `C_RED`. Yellow is the alert channel.
-  Red is not an alert.
+  `C_CYAN`, `C_GREEN`, `C_GREEN_DIM`, `C_RED`. Yellow marks network activity,
+  risk, warnings, and waiting local work; cyan marks the cursor row and a
+  running local job; red marks a failure or a refusal.
 - **Type:** the hand-built 5×7 bitmap face. Uppercase, ASCII labels, `..` for
   truncation. Sizes come from the COCKPIT ladder; do not invent a size between
   steps. The face has no `?` or `!`; a UI title is a statement (`DELETE 3 ITEMS`,
@@ -30,8 +31,8 @@ settled value is a design change and needs a numbered decision.
 - **Panel language:** satellite panels get one chamfer; the hero treatment is
   reserved for the workspace's primary region. Brackets mark the hero only.
 - **Restraint:** no icon that encodes nothing, no second alert colour, no glow
-  except the wordmark and hazard band, no animation beyond progress, scrolling,
-  and a running-state cue.
+  except the wordmark, the hazard band, and the active pane, no animation beyond
+  progress, scrolling, and a running-state cue.
 - **Numbers:** a metric or size the platform cannot report renders `--`. A readout
   is never a guess.
 
@@ -66,9 +67,12 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
   at `y+43`; rows from `y+48`.
 - **Row:** 30 px pitch; ten visible. Name at `x+40` (px 2). Type or size
   right-aligned at `x+w-14` (px 1.5): `DIR`, `UP`, a size, or `--`. The mark
-  square is 6×6 at `x+19`; the risk diamond is 6×6 at `x+27`; the cursor bar is
-  2 px at `x+8`; the scrollbar is 2 px at `x+w-6`. The name column starts at
-  `x+40` on every row so names stay aligned when a risk mark appears.
+  square is 6×6 at `x+19`; the risk diamond is 6×6 at `x+27`; the scrollbar is
+  2 px at `x+w-6`. The name column starts at `x+40` on every row so names stay
+  aligned when a risk mark appears. The active cursor row is a cyan slab from
+  `x+1` to `x+w-1`, with near-black name and value text. On the slab the mark
+  square and risk diamond stay yellow behind a 1 px dark keyline. The inactive
+  cursor keeps a 2 px `C_HAIR` bar at `x+8` and a 2.5 % wash.
 - **Risk mark:** a path the shared risk table classifies high draws a 6×6 yellow
   diamond at `x+27` (D31). It marks the `tai` folders and their contents, volume
   roots, the `ur0:data` and `ux0:data` folders themselves, and the files that
@@ -76,11 +80,13 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
 - **Truncated listing:** a directory longer than the 2000-row cap shows
   `FIRST 2000` in yellow on the band, left of the mark count. The rows shown are
   the first 2000 in the source's order.
-- **Values:** a known size is white; `--`, `DIR`, and `UP` are dim. A size the
-  source does not report is never shown as zero.
-- **Active pane:** a 2 px yellow left edge and a yellow title. The inactive pane
-  keeps a dim title, a `C_CYAN_DIM` path, a `C_HAIR` cursor bar, and a 2.5 %
-  wash. The active cursor is a 2 px white bar over a 6 % wash.
+- **Values:** a known size is white; `--`, `DIR`, and `UP` are dim. On the
+  active cursor slab the name and value are near-black. A size the source does
+  not report is never shown as zero.
+- **Active pane:** a full yellow outline that follows the pane chamfer, plus a
+  static additive bloom just outside it; the title is yellow. The bloom is
+  suppressed on a lost session. The inactive pane keeps a dim title, a
+  `C_CYAN_DIM` path, a `C_HAIR` cursor bar, and a 2.5 % wash.
 - **Marks:** pane-scoped. The band shows the count in yellow and the total known
   size in white. Marks survive directory changes, L/R, and a completed batch
   (D18); they clear when the pane's connection or volume root changes, or when
@@ -88,7 +94,7 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
 - **Identity:** the remote band shows the site and path; the local band shows
   the path and free space. The site identity also stays in the header (D19).
 - **Action failure:** a refused or failed action replaces the path with the
-  error in yellow, fitted with `..`; it clears on the next workspace key or a
+  error in red, fitted with `..`; it clears on the next workspace key or a
   successful listing. A failed listing keeps its centered `LISTING FAILED`; a
   lost session keeps its centered detail (D68).
 - **Truncation:** names and paths end in `..`. A path too deep for the band is
@@ -118,15 +124,21 @@ allowed outside the hazard band.
   continuous bar; transferred and total bytes, percentage, and rate. A download
   total comes from the listing row and is visible before the first byte. When
   the total is unknown, the total and percentage render `--`.
-- **Done:** `DONE` green; filename; `n OF m`; a full yellow bar; size and elapsed
-  time; average rate.
-- **Failed:** `FAILED` yellow; filename; `n OF m`; the bar stops at the failure
+- **Done:** the past-tense operation word — `COPIED`, `MOVED`, `DELETED`,
+  `RENAMED`, `FOLDER CREATED`, `UPLOADED`, `DOWNLOADED` — green; filename; a
+  full yellow bar; size and elapsed time; average rate. A batch names its item
+  count (`3 ITEMS`) instead of `n OF m`, shows `n SKIPPED` when some were
+  skipped, and keeps `n OF m ITEMS` when partial. An all-skipped set is
+  `SKIPPED` in dim; a cancelled batch is `CANCELLED` in white. A partial set
+  keeps the operation word in yellow and puts the reason on line three; a total
+  failure or an incomplete set is red. A single item omits the count.
+- **Failed:** `FAILED` red; filename; `n OF m`; the bar stops at the failure
   point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure ends
   with `X TO RETRY`; a control failure leaves the reconnect to the pane.
 - **No session:** `IDLE` dim; `REMOTE`; `NO MARKS`; `NO SELECTION`.
-- **Status:** a status message (`ACTION UNAVAILABLE`, a failed operation, a
-  refused path) replaces the idle hint on line three in yellow until the next
-  key. The rest of the idle dock does not change.
+- **Status:** a status message replaces the idle hint on line three until the
+  next key: red for a failure or refusal, yellow for a warning. The rest of the
+  idle dock does not change.
 - **Focused dock:** only focusable when a transfer is active or queued. Down from
   the last row enters it; the 1 px outline turns white; the legend becomes
   `[X] CANCEL  [O] TO LIST`; Cross opens the cancel CONFIRM; Circle returns to
@@ -194,7 +206,7 @@ five states are in
   130; the value right-aligned at 928. Values are px 2 and white.
 - Footer at 160: a login site says `PASSWORDS ARE STORED UNENCRYPTED`; an
   anonymous site says `NO PASSWORD STORED`; a failed login says
-  `LOGIN FAILED  -  <reply>` in yellow. `SQUARE TO EDIT` is right-aligned on the
+  `LOGIN FAILED  -  <reply>` in red. `SQUARE TO EDIT` is right-aligned on the
   same line.
 - The card is a preview; editing happens on SITE EDITOR.
 
@@ -205,8 +217,8 @@ five states are in
 - A hairline at 241; six 30 px rows from 246.
 - Each row: name at `x+32` (px 2, white), host:port at `x+300` (micro,
   `C_CYAN_DIM`), `ANON` (dim) or `LOGIN` (cyan) right-aligned at `x+w-14`. The
-  selected row gets a 2 px white bar and a 6 % wash. A scrollbar appears only
-  when the book exceeds six rows.
+  selected row is a cyan slab with near-black name, host, and badge. A
+  scrollbar appears only when the book exceeds six rows.
 - Long names and hosts end in `..`; the editor holds the full values.
 
 ### States
@@ -400,9 +412,10 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
   `PROTECTED PATH`.
 - A hairline at 119; rows from 124 at 44 px, six maximum.
 - Each row: label at 50 (px 2), description at 50 (micro, `y+23`). Disabled rows
-  are dim and carry the reason (`MARK TO COPY`, `PROTECTED PATH`, `VOLUME ROOT`).
+  are dim and carry the reason (`NO SELECTION`, `PROTECTED PATH`, `VOLUME ROOT`).
   A destructive row’s description is yellow (`CANNOT BE UNDONE`). The selected
-  row gets a 2 px white bar and a 6 % wash.
+  row is a cyan slab from `x+1` to `x+w-1`; its label, description, and disabled
+  reason are near-black.
 
 ### Target panel
 
@@ -426,9 +439,9 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
   upload, rename, and delete are dim with `NO SELECTION`; the target panel says
   `NO SELECTION`. New folder is the only live action and creates in the current
   folder. Marks count as a selection for copy, move, and delete.
-- **Local single, no marks:** copy and move are dim (`MARK TO COPY`,
-  `MARK TO MOVE`); upload, new folder, rename, and delete use the cursor; the
-  upload destination is the remote pane.
+- **Local single, no marks:** copy and move use the cursor row; upload, new
+  folder, rename, and delete use the cursor; the upload destination is the
+  remote pane.
 - **Local multi:** copy and move put the marks on the clipboard (`TO
   CLIPBOARD`); rename is dim (`ONE ITEM ONLY`); delete is flagged; the marks
   stay after the operation (D18).
