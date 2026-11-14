@@ -1584,6 +1584,14 @@ answers 450 on a held path, or while an app transfer occupies the network lane,
 and disarms the data connection. The worker interleaves the local executor with
 the client, server, and queue; there is no second worker thread.
 
+**Amended 2026-11-14:** the containing directory is deliberately **not** reserved
+by a file transfer. While `ux0:data/big.iso` transfers, copy, move, delete, and
+rename of unrelated files in `ux0:data`, and NEW FOLDER inside it, all remain
+allowed. Deleting, renaming, or moving `ux0:data` itself conflicts only because
+it is an ancestor of a held path — that is the existing ancestor/descendant rule,
+not a folder lock. A folder-wide lock was considered and rejected: it would
+freeze the pane the user is most likely working in and disable unrelated work.
+
 **Consequences:** Unrelated local work no longer waits for a transfer. The
 single-slot sentence in `AGENTS.md` and `docs/PROJECT.md` is superseded; the
 reservation table owns mutual exclusion.
