@@ -114,9 +114,15 @@ struct Worker {
     int local_cancel_seen;
     LocalBatch local_batch;
     UiCommand batch_preflight[UI_CLIP_MAX];
+    /* Existing destinations named by the one prompt the batch may ask. Kept in
+     * the heap-owned Worker: a Path is PATH_MAX_LEN bytes, and a local array of
+     * them made handle_action reserve 71,680 bytes of the 128 KiB worker stack
+     * (b40 crash). All paths stay in the Worker so a prompt never truncates. */
+    Path batch_existing[WORKER_CONFIRM_ITEMS];
     int batch_preflight_count;
     unsigned batch_preflight_id;
     int batch_executing;
+    int batch_execute_index;
     int transfer_active;
     int transfer_cancelled;
     uint64_t transfer_start_ms;
@@ -152,6 +158,7 @@ static void worker_list_local(Worker *worker, const char *path);
 static const char *last_name(const char *path);
 static int same_folder_path(const char *a, const char *b);
 static void queue_pending_action(Worker *worker, const UiCommand *command);
+static void local_batch_advance(Worker *worker);
 
 static uint64_t now_ms(Worker *worker)
 {
@@ -229,6 +236,7 @@ static void local_batch_begin(Worker *worker, const UiCommand *command,
     worker->local_conflict = FSOP_CONFLICT_ASK;
     worker->local_conflict_set = 0;
     worker->batch_executing = 0;
+    worker->batch_execute_index = 0;
     worker->batch_preflight_count = 0;
     worker->batch_preflight_id = 0;
     worker->local_batch.started_ms = now_ms(worker);
@@ -268,6 +276,7 @@ static void local_batch_emit_done(Worker *worker)
     memset(batch, 0, sizeof(*batch));
     batch->dropped_id = dropped;
     worker->batch_executing = 0;
+    worker->batch_execute_index = 0;
     worker->batch_preflight_count = 0;
     worker->batch_preflight_id = 0;
 }
@@ -323,6 +332,7 @@ static void local_batch_cancel(Worker *worker)
     worker_list_local(worker, worker->local_path);
     local_batch_emit_done(worker);
     worker->pending_command_count = 0;
+    worker->batch_execute_index = 0;
     worker->batch_preflight_count = 0;
     worker->batch_executing = 0;
 }
@@ -331,7 +341,7 @@ static void local_batch_flush(Worker *worker)
 {
     LocalBatch *batch = &worker->local_batch;
     if (!batch->active || worker->pending.valid ||
-        worker->pending_command_count > 0)
+        worker->pending_command_count > 0 || worker->batch_executing)
         return;
     if (now_ms(worker) - batch->last_ms < 250)
         return;
@@ -370,22 +380,51 @@ static int preflight_dest(const UiCommand *command, Path *dest)
 
 static void local_batch_execute(Worker *worker)
 {
+    /* Hand the preflighted items to worker_step. Each runs from the step frame;
+     * nesting a second handle_action frame is what overflowed the worker stack
+     * in b40 (D77). */
     worker->batch_executing = 1;
-    for (int i = 0; i < worker->batch_preflight_count; ++i) {
-            if (worker->pending.valid) {
-            for (int j = i; j < worker->batch_preflight_count; ++j)
-                queue_pending_action(worker, &worker->batch_preflight[j]);
-            worker->batch_preflight_count = 0;
-            return;
+    worker->batch_execute_index = 0;
+}
+
+/* Run one preflighted item per worker step, from the step frame rather than
+ * from inside another handle_action call. */
+static void local_batch_advance(Worker *worker)
+{
+    LocalBatch *batch = &worker->local_batch;
+    if (!batch->active || !worker->batch_executing)
+        return;
+    if (worker->pending.valid || worker->pending_command_count > 0)
+        return;
+    if (worker->batch_execute_index >= worker->batch_preflight_count) {
+        worker->batch_executing = 0;
+        worker->batch_execute_index = 0;
+        worker->batch_preflight_count = 0;
+        /* A refused item never reaches run_plan and therefore never records
+         * itself; flush the batch here instead of waiting for the idle timer. */
+        if (batch->active) {
+            worker_list_local(worker, worker->local_path);
+            local_batch_emit_done(worker);
         }
-        handle_action(worker, &worker->batch_preflight[i]);
+        return;
     }
-    worker->batch_preflight_count = 0;
+
+    int before = batch->done + batch->skipped + batch->failed + batch->cancelled;
+    UiCommand command = worker->batch_preflight[worker->batch_execute_index++];
+    handle_action(worker, &command);
+
+    /* No plan ran and no prompt is waiting: the item was refused before it
+     * could execute (busy slot, bad name, plan refused). Count it so the
+     * terminal reports the batch honestly. A pending prompt records the item
+     * when it is answered. */
+    if (batch->active && !worker->pending.valid &&
+        before == batch->done + batch->skipped + batch->failed +
+                      batch->cancelled)
+        batch->failed++;
 }
 
 static void local_batch_preflight(Worker *worker)
 {
-    Path existing[UI_CONFIRM_MAX];
     int existing_count = 0;
 
     for (int i = 0; i < worker->batch_preflight_count; ++i) {
@@ -400,13 +439,13 @@ static void local_batch_preflight(Worker *worker)
             continue;
         int duplicate = 0;
         for (int j = 0; j < existing_count; ++j) {
-            if (strcmp(existing[j].text, dest.text) == 0) {
+            if (strcmp(worker->batch_existing[j].text, dest.text) == 0) {
                 duplicate = 1;
                 break;
             }
         }
-        if (!duplicate && existing_count < UI_CONFIRM_MAX)
-            existing[existing_count++] = dest;
+        if (!duplicate && existing_count < WORKER_CONFIRM_ITEMS)
+            worker->batch_existing[existing_count++] = dest;
     }
 
     if (existing_count == 0) {
@@ -421,11 +460,9 @@ static void local_batch_preflight(Worker *worker)
     fmt_copy(request.context, sizeof(request.context), "TRANSFER");
     request.item_count = existing_count;
     request.existing_count = existing_count;
-    if (request.item_count > HANDOFF_CONFIRM_ITEMS)
-        request.item_count = HANDOFF_CONFIRM_ITEMS;
-    for (int i = 0; i < request.item_count; ++i)
+    for (int i = 0; i < existing_count; ++i)
         fmt_copy(request.items[i].name, sizeof(request.items[i].name),
-                 existing[i].text);
+                 worker->batch_existing[i].text);
     handoff_confirm_request(worker->handoff, &request);
 
     worker->pending.valid = 1;
@@ -1183,6 +1220,19 @@ static void fact_stat(Worker *worker, const char *path)
              result == FS_OK ? entry.size_known : 0);
 }
 
+/* The planner compares canonical paths, so a one-off fact must be stored under
+ * the same form the plan will build. */
+static void fact_stat_canonical(Worker *worker, const char *path)
+{
+    if (path == NULL)
+        return;
+    Path canon;
+    if (path_canonicalize(path, &canon) == PATH_OK)
+        fact_stat(worker, canon.text);
+    else
+        fact_stat(worker, path);
+}
+
 static void fact_tree(Worker *worker, const char *path, int depth)
 {
     if (depth > WORKER_REMOTE_DEPTH || worker->fact_count >= WORKER_FACTS_MAX) {
@@ -1278,6 +1328,8 @@ static void run_plan(Worker *worker, const UiCommand *command,
     FsOpRunResult result = fsop_run(worker->ports.fs, plan, &progress,
                                     local_cancel_requested, worker);
 
+    if (progress.sync_skipped)
+        log_detail(worker, LOGEV_LOG, "sync skipped");
     local_batch_record(worker, result, plan, &progress);
 
     if (result == FSOP_RUN_OK) {
@@ -1424,7 +1476,19 @@ static void execute_action(Worker *worker, const UiCommand *command,
     }
 
     facts_reset(worker);
-    fact_tree(worker, source, 0);
+    if (kind == FSOP_MKDIR) {
+        /* plan_mkdir reads the destination fact and nothing else. Scanning the
+         * current folder's whole tree here was both wasted work and, under the
+         * b40 frame, a stack-overflow trigger on ur0:data. */
+        fact_stat_canonical(worker, destination);
+    } else if (kind == FSOP_RENAME) {
+        /* plan_rename reads the source and destination facts; a folder source
+         * does not need its children. */
+        fact_stat_canonical(worker, source);
+        fact_stat_canonical(worker, destination);
+    } else {
+        fact_tree(worker, source, 0);
+    }
     if (worker->fact_count == 0 || worker->facts_truncated) {
         emit_error(worker, UI_PANE_LOCAL,
                    worker->facts_truncated ? "PLAN TOO LARGE"
@@ -2944,6 +3008,7 @@ void worker_step(Worker *worker)
     pump_remote_actions(worker);
     pump_queue(worker);
     drain_pending_actions(worker);
+    local_batch_advance(worker);
     local_batch_flush(worker);
     publish_site_book(worker);
     save_settings(worker);

@@ -244,7 +244,10 @@ static void test_open_close_failures(void)
     CHECK(!fake_fs_exists("ux0:data/dst/a.bin.vftp.part"));
 }
 
-static void test_sync_failures(void)
+/* D76: a refused sync-by-fd is a durability hint, not a commit condition. A
+ * fully written file must not be reported failed (or deleted) because the
+ * platform would not sync it. */
+static void test_sync_is_best_effort(void)
 {
     setup();
     seed("ux0:data/src/a.bin", "NEW");
@@ -258,8 +261,9 @@ static void test_sync_failures(void)
     fake_fs_set_rename_replaces(1);
     fake_fs_fail_sync_at(0);
     FsOpProgress p = run(NULL, NULL);
-    CHECK(p.cause == OP_CAUSE_STORAGE);
-    CHECK(content_is("ux0:data/dst/a.bin", "OLD"));
+    CHECK(p.cause == OP_CAUSE_APP);
+    CHECK(p.sync_skipped == 1);
+    CHECK(content_is("ux0:data/dst/a.bin", "NEW"));
     CHECK(!fake_fs_exists("ux0:data/dst/a.bin.vftp.part"));
 
     fake_fs_reset();
@@ -272,7 +276,8 @@ static void test_sync_failures(void)
     fake_fs_set_rename_replaces(1);
     fake_fs_fail_sync_at(1);
     FsOpProgress after = run(NULL, NULL);
-    CHECK(after.cause == OP_CAUSE_STORAGE);
+    CHECK(after.cause == OP_CAUSE_APP);
+    CHECK(after.sync_skipped == 1);
     CHECK(content_is("ux0:data/dst/a.bin", "NEW"));
     CHECK(!fake_fs_exists("ux0:data/dst/a.bin.vftp.part"));
 }
@@ -292,6 +297,7 @@ static void test_rename_failures(void)
     fake_fs_fail_rename_at(0);
     FsOpProgress p = run(NULL, NULL);
     CHECK(p.cause == OP_CAUSE_STORAGE);
+    CHECK(strcmp(p.message, "DESTINATION RENAME FAILED") == 0);
     CHECK(content_is("ux0:data/dst/a.bin", "OLD"));
     CHECK(!fake_fs_exists("ux0:data/dst/a.bin.vftp.part"));
 
@@ -574,7 +580,7 @@ int main(void)
     test_cancel_copy();
     test_write_failure();
     test_open_close_failures();
-    test_sync_failures();
+    test_sync_is_best_effort();
     test_rename_failures();
     test_move_success();
     test_move_delete_failure();

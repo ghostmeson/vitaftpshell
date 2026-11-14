@@ -767,12 +767,15 @@ static void server_finish_data(FtpServer *server, int ok, FtpCause cause,
 
     if (server->data_kind == SDATA_STOR) {
         if (ok && server->temp.open) {
-            FsResult r = ftp_temp_finish(server->fs, &server->temp);
+            FtpCommitStep step = FTP_COMMIT_OK;
+            FsResult r = ftp_temp_finish(server->fs, &server->temp, &step);
             if (r != FS_OK) {
                 server_close_transfer(server);
                 server_reply(server, 451, "Storage write failed.");
                 server_transfer_event(server, 0, FTP_CAUSE_STORAGE,
-                                      "DESTINATION COMMIT FAILED");
+                                      step == FTP_COMMIT_RENAME
+                                          ? "DESTINATION RENAME FAILED"
+                                          : "DESTINATION CLOSE FAILED");
                 return;
             }
         } else if (server->temp.open) {

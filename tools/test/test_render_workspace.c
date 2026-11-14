@@ -241,6 +241,25 @@ static void test_dock_states(void)
     CHECK(trace_has_text("1.0 KB/S AVG"));
 
     memset(&s_state.dock, 0, sizeof(s_state.dock));
+    s_state.dock.state = UI_DOCK_DONE;
+    s_state.dock.direction = XFER_DIR_LOCAL_COPY;
+    snprintf(s_state.dock.name, sizeof(s_state.dock.name), "FILE.BIN");
+    snprintf(s_state.dock.message, sizeof(s_state.dock.message),
+             "DESTINATION RENAME FAILED");
+    s_state.dock.item_total = 3;
+    s_state.dock.failed = 1;
+    render();
+    CHECK(trace_text_at_color("FAILED", 32.0f, 450.0f, C_RED));
+    CHECK(!trace_has_text("COPIED"));
+    CHECK(trace_has_text("DESTINATION RENAME FAILED"));
+
+    /* A partial batch keeps the operation word, in yellow. */
+    s_state.dock.item_index = 2;
+    render();
+    CHECK(trace_text_at_color("COPIED", 32.0f, 450.0f, C_YELLOW));
+    CHECK(trace_has_text("2 OF 3 ITEMS"));
+
+    memset(&s_state.dock, 0, sizeof(s_state.dock));
     s_state.dock.state = UI_DOCK_FAILED;
     s_state.dock.direction = XFER_DIR_DOWNLOAD;
     snprintf(s_state.dock.name, sizeof(s_state.dock.name), "FILE.BIN");
