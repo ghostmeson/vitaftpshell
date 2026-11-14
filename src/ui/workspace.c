@@ -21,27 +21,38 @@
 #define PANE_CHAMFER 14.0f
 #define ROW_MARK_Y 12.0f
 
-static void pane_frame(const LayoutRect *r, int active)
+static void pane_outline(const LayoutRect *r, uint32_t color, float offset)
+{
+    float x = (float)r->x + offset;
+    float y = (float)r->y + offset;
+    float right = (float)(r->x + r->w) + offset;
+    float bottom = (float)(r->y + r->h) + offset;
+
+    draw_line(x, y, right - PANE_CHAMFER, y, color);
+    draw_line(right - PANE_CHAMFER, y, right, y + PANE_CHAMFER, color);
+    draw_line(right, y + PANE_CHAMFER, right, bottom, color);
+    draw_line(right, bottom, x, bottom, color);
+    draw_line(x, bottom, x, y, color);
+}
+
+static void pane_frame(const UiPaneState *p, const LayoutRect *r, int active)
 {
     draw_rect((float)r->x, (float)r->y, (float)r->w, (float)r->h, C_PANEL);
     draw_tri((float)(r->x + r->w) - PANE_CHAMFER, (float)r->y, (float)(r->x + r->w),
              (float)r->y + PANE_CHAMFER, (float)(r->x + r->w), (float)r->y,
              C_FIELD);
 
-    uint32_t outline = draw_dim(C_CYAN, 0.45f);
-    draw_line((float)r->x, (float)r->y,
-              (float)(r->x + r->w) - PANE_CHAMFER, (float)r->y, outline);
-    draw_line((float)(r->x + r->w) - PANE_CHAMFER, (float)r->y,
-              (float)(r->x + r->w), (float)r->y + PANE_CHAMFER, outline);
-    draw_line((float)(r->x + r->w), (float)r->y + PANE_CHAMFER,
-              (float)(r->x + r->w), (float)(r->y + r->h), outline);
-    draw_line((float)(r->x + r->w), (float)(r->y + r->h), (float)r->x,
-              (float)(r->y + r->h), outline);
-    draw_line((float)r->x, (float)(r->y + r->h), (float)r->x, (float)r->y,
-              outline);
+    pane_outline(r, draw_dim(C_CYAN, 0.45f), 0.0f);
 
     if (active) {
-        draw_rect((float)r->x, (float)r->y, 2.0f, (float)r->h, C_YELLOW);
+        pane_outline(r, C_YELLOW, 0.0f);
+        pane_outline(r, C_YELLOW, 1.0f);
+        if (!p->session_lost) {
+            draw_set_additive(1);
+            pane_outline(r, draw_dim(C_YELLOW, 0.22f), -2.0f);
+            pane_outline(r, draw_dim(C_YELLOW, 0.14f), -1.0f);
+            draw_set_additive(0);
+        }
     } else {
         ui_wash((float)r->x + 2.0f, (float)r->y + PANE_RULE_Y + 1.0f,
                 (float)r->w - 4.0f, (float)r->h - PANE_RULE_Y - 1.0f, 0.025f);
@@ -132,7 +143,7 @@ static void band(const UiState *state, UiPane pane, const LayoutRect *r)
         font_fit(p->error, PX_MICRO, (float)r->w - 2.0f * PANE_INSET, fitted,
                  sizeof(fitted));
         font_text(fitted, (float)r->x + PANE_INSET,
-                  (float)r->y + PANE_PATH_Y, PX_MICRO, C_YELLOW);
+                  (float)r->y + PANE_PATH_Y, PX_MICRO, C_RED);
     } else if (pane == UI_PANE_LOCAL) {
         const char *path_text = strcmp(p->path, "*") == 0 ? "ALL DRIVES"
                                                           : p->path;
@@ -183,22 +194,39 @@ static void row_draw(const UiState *state, UiPane pane, const LayoutRect *r,
     float row_y = (float)r->y + PANE_ROWS_Y +
                   (float)(index - p->scroll) * (float)LAYOUT_ROW_H;
 
-    if (selected) {
+    int slab = selected && active;
+    if (slab) {
+        ui_row_select((float)r->x + 1.0f, row_y, (float)r->w - 2.0f,
+                      (float)LAYOUT_ROW_H);
+    } else if (selected) {
         ui_wash((float)r->x + 1.0f, row_y, (float)r->w - 2.0f,
-                (float)LAYOUT_ROW_H, active ? 0.06f : 0.025f);
+                (float)LAYOUT_ROW_H, 0.025f);
         draw_rect((float)r->x + LAYOUT_ROW_CURSOR_X, row_y, 2.0f,
-                  (float)LAYOUT_ROW_H, active ? C_WHITE : C_HAIR);
+                  (float)LAYOUT_ROW_H, C_HAIR);
     }
 
-    if (marked)
+    if (marked) {
+        if (slab)
+            draw_rect((float)r->x + LAYOUT_ROW_MARK_X - 1.0f,
+                      row_y + ROW_MARK_Y - 1.0f, 8.0f, 8.0f, C_FIELD);
         draw_rect((float)r->x + LAYOUT_ROW_MARK_X, row_y + ROW_MARK_Y, 6.0f,
                   6.0f, C_YELLOW);
-    if (pane_risk(row))
+    }
+    if (pane_risk(row)) {
+        if (slab) {
+            float x = (float)r->x + LAYOUT_ROW_RISK_X;
+            float y = row_y + ROW_MARK_Y;
+            draw_tri(x + 3.0f, y - 1.0f, x + 7.0f, y + 3.0f, x - 1.0f,
+                     y + 3.0f, C_FIELD);
+            draw_tri(x - 1.0f, y + 3.0f, x + 7.0f, y + 3.0f, x + 3.0f,
+                     y + 7.0f, C_FIELD);
+        }
         risk_diamond((float)r->x + LAYOUT_ROW_RISK_X, row_y + ROW_MARK_Y);
+    }
 
     float value_right = (float)(r->x + r->w) - PANE_INSET;
     char value[32];
-    uint32_t value_color = C_DIM;
+    uint32_t value_color = slab ? C_FIELD : C_DIM;
     if (row->type == UI_ROW_UP) {
         snprintf(value, sizeof(value), "UP");
     } else if (row->type == UI_ROW_DIR) {
@@ -219,7 +247,7 @@ static void row_draw(const UiState *state, UiPane pane, const LayoutRect *r,
     font_fit(row->name, PX_LABEL, name_max, fitted, sizeof(fitted));
 
     uint32_t name_color =
-        row->type == UI_ROW_UP ? C_DIM : C_WHITE;
+        slab ? C_FIELD : (row->type == UI_ROW_UP ? C_DIM : C_WHITE);
     font_text(fitted, name_x, row_y + 8.0f, PX_LABEL, name_color);
     font_text_right(value, value_right, row_y + 11.5f, PX_MICRO, value_color);
 }
@@ -264,7 +292,7 @@ static void centered_state(const UiState *state, UiPane pane,
     float bottom = (float)(r->y + r->h);
     float y = top + (bottom - top) * 0.5f - 20.0f;
 
-    ui_center("SESSION LOST", x, w, y, PX_LABEL, C_YELLOW);
+    ui_center("SESSION LOST", x, w, y, PX_LABEL, C_RED);
 
     char fitted[128];
     const char *detail = p->error[0] != '\0'
@@ -303,7 +331,7 @@ static void pane_draw(const UiState *state, UiPane pane, const LayoutRect *r)
     const UiPaneState *p = &state->panes[pane];
     int active = state->active_pane == pane;
 
-    pane_frame(r, active);
+    pane_frame(p, r, active);
     band(state, pane, r);
 
     if (p->session_lost) {
@@ -315,7 +343,7 @@ static void pane_draw(const UiState *state, UiPane pane, const LayoutRect *r)
                   (float)r->y + 180.0f, PX_LABEL, C_WHITE);
     } else if (p->empty && p->error[0] != '\0') {
         ui_center("LISTING FAILED", (float)r->x, (float)r->w,
-                  (float)r->y + 170.0f, PX_LABEL, C_YELLOW);
+                  (float)r->y + 170.0f, PX_LABEL, C_RED);
         font_text(p->error, (float)r->x + PANE_INSET,
                   (float)r->y + 210.0f, PX_MICRO, C_DIM);
     } else if (p->empty) {

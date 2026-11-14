@@ -29,6 +29,9 @@ void ui_slab(float x, float y, float w, float h, const char *label, int primary,
 /* A white wash over a panel; alpha is 0..1. */
 void ui_wash(float x, float y, float w, float h, float alpha);
 
+/* The cursor row: a cyan slab with near-black content. */
+void ui_row_select(float x, float y, float w, float h);
+
 /* Centre a string in [x, x + w]. */
 void ui_center(const char *s, float x, float w, float y, float px,
                uint32_t color);

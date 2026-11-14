@@ -76,9 +76,9 @@ static const char *action_consequence(UiAction action, UiClipMode clip)
 {
     switch (action) {
     case UI_ACTION_COPY:
-        return "PUTS THE MARKS OR THIS ITEM ON THE CLIPBOARD. NAVIGATE, THEN PASTE.";
+        return "MARKS OR THIS ITEM TO CLIPBOARD. THEN PASTE.";
     case UI_ACTION_MOVE:
-        return "PUTS THE MARKS OR THIS ITEM ON THE CLIPBOARD. NAVIGATE, THEN PASTE.";
+        return "MARKS OR THIS ITEM TO CLIPBOARD. THEN PASTE.";
     case UI_ACTION_PASTE:
         return clip == UI_CLIP_MOVE
                    ? "MOVES THE CLIPBOARD INTO THIS FOLDER."
@@ -172,21 +172,20 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
         int selected = action == (UiAction)actions->selected;
         int enabled = actions->enabled[action];
 
-        if (selected) {
-            ui_wash((float)r->x + 1.0f, y, (float)r->w - 2.0f, 44.0f, 0.06f);
-            draw_rect((float)r->x + 8.0f, y, 2.0f, 44.0f, C_WHITE);
-        }
+        if (selected)
+            ui_row_select((float)r->x + 1.0f, y, (float)r->w - 2.0f, 44.0f);
 
         font_text(action_label(action), 50.0f, y + 6.0f, PX_LABEL,
-                  enabled ? C_WHITE : C_DIM);
+                  selected ? C_FIELD : (enabled ? C_WHITE : C_DIM));
 
         const char *desc =
             enabled ? action_desc(action, state->clip_mode)
                     : actions->reason[action];
-        uint32_t desc_color = enabled
-                                  ? (action == UI_ACTION_DELETE ? C_YELLOW
-                                                                : C_DIM)
-                                  : C_DIM;
+        uint32_t desc_color =
+            selected ? C_FIELD
+                     : (enabled
+                            ? (action == UI_ACTION_DELETE ? C_YELLOW : C_DIM)
+                            : C_DIM);
         font_text(desc != NULL && desc[0] != '\0'
                       ? desc
                       : action_desc(action, state->clip_mode),
@@ -289,8 +288,10 @@ static void target_draw(const UiState *state, const LayoutRect *r)
     font_text_right(destination, 928.0f, 224.0f, PX_MICRO, C_CYAN);
 
     font_text(action_label(selected), 596.0f, 300.0f, PX_LABEL, C_WHITE);
-    font_text(action_consequence(selected, state->clip_mode), 596.0f, 320.0f,
-              PX_MICRO, C_DIM);
+    char consequence[128];
+    font_fit(action_consequence(selected, state->clip_mode), PX_MICRO,
+             344.0f, consequence, sizeof(consequence));
+    font_text(consequence, 596.0f, 320.0f, PX_MICRO, C_DIM);
 
     if (actions->marked > 1)
         font_text("MARKS STAY AFTER THE OPERATION", 596.0f, 400.0f, PX_MICRO,

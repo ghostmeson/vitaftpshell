@@ -1636,8 +1636,13 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
             close_confirm(state, 0);
             return;
         }
-        UiCommand *command = emit(out, max, count, UI_CMD_CONFIRM);
-        if (command != NULL) {
+        UiCommandType type =
+            (c->kind == UI_CONFIRM_CANCEL_XFER &&
+             choice == UI_CHOICE_CANCEL)
+                ? UI_CMD_CANCEL_TRANSFER
+                : UI_CMD_CONFIRM;
+        UiCommand *command = emit(out, max, count, type);
+        if (command != NULL && type == UI_CMD_CONFIRM) {
             command->confirm = c->kind;
             command->choice = choice;
             command->index = state->sites.selected;
@@ -1664,8 +1669,13 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
             c->kind == UI_CONFIRM_CANCEL_XFER ||
             c->kind == UI_CONFIRM_STOP_SERVER)
             choice = UI_CHOICE_KEEP;
-        UiCommand *command = emit(out, max, count, UI_CMD_CONFIRM);
-        if (command != NULL) {
+        UiCommandType type =
+            (c->kind == UI_CONFIRM_CANCEL_XFER &&
+             choice == UI_CHOICE_CANCEL)
+                ? UI_CMD_CANCEL_TRANSFER
+                : UI_CMD_CONFIRM;
+        UiCommand *command = emit(out, max, count, type);
+        if (command != NULL && type == UI_CMD_CONFIRM) {
             command->confirm = c->kind;
             command->choice = choice;
             command->index = state->sites.selected;
@@ -2048,12 +2058,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (event->direction_known)
             state->dock.direction = (XferDirection)event->direction;
         state->dock.state = UI_DOCK_DONE;
-        state->dock.done = (uint64_t)(event->item_index > 0
-                                          ? event->item_index
-                                          : 0);
-        state->dock.total = (uint64_t)(event->item_total > 0
-                                           ? event->item_total
-                                           : 0);
+        state->dock.done = event->bytes;
+        state->dock.total = event->total;
+        state->dock.total_known = event->total_known;
         state->dock.item_index = event->item_index;
         state->dock.item_total = event->item_total;
         state->dock.skipped = event->batch_skipped;
@@ -2063,7 +2070,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         state->dock.rate_known = event->rate_known;
         state->dock.elapsed_ms = event->elapsed_ms;
         state->dock.elapsed_known = event->elapsed_known;
-        state->dock.message[0] = '\0';
+        if (event->text[0] != '\0')
+            fmt_copy(state->dock.message, sizeof(state->dock.message),
+                     event->text);
         /* D18: a completed batch does not clear marks. */
         break;
     case UI_EVT_SERVER_STATE:

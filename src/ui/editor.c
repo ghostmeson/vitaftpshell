@@ -60,10 +60,10 @@ static void card_draw(const UiState *state, const LayoutRect *r)
     font_text_right(password, 928.0f, 130.0f, PX_LABEL, C_WHITE);
 
     if (editor->error[0] != '\0') {
-        font_text(editor->error, 32.0f, 160.0f, PX_MICRO, C_YELLOW);
+        font_text(editor->error, 32.0f, 160.0f, PX_MICRO, C_RED);
     } else if (!editor->anonymous && editor->dirty && editor->password_set) {
         font_text("PASSWORDS ARE STORED UNENCRYPTED", 32.0f, 160.0f,
-                  PX_MICRO, C_YELLOW);
+                  PX_MICRO, C_RED);
     } else if (!editor->anonymous && !editor->password_set) {
         font_text("NO PASSWORD STORED", 32.0f, 160.0f, PX_MICRO, C_DIM);
     } else if (editor->anonymous) {
@@ -146,7 +146,7 @@ static void fields_draw(const UiState *state, const LayoutRect *r)
             draw_rect(26.0f, y, 2.0f, 30.0f, C_WHITE);
         }
 
-        uint32_t label_color = error ? C_YELLOW : (focused ? C_WHITE : C_DIM);
+        uint32_t label_color = error ? C_RED : (focused ? C_WHITE : C_DIM);
         font_text(field_labels[i], 50.0f, y + 8.0f, PX_LABEL, label_color);
 
         char value[256];
@@ -154,7 +154,7 @@ static void fields_draw(const UiState *state, const LayoutRect *r)
         field_value(editor, i, value, sizeof(value), &valid);
         uint32_t value_color;
         if (error)
-            value_color = C_YELLOW;
+            value_color = C_RED;
         else if ((UiField)i == UI_FIELD_ANONYMOUS)
             value_color = editor->anonymous ? C_GREEN : C_DIM;
         else

@@ -66,6 +66,11 @@ void ui_slab(float x, float y, float w, float h, const char *label, int primary,
     ui_center(label, x, w, y + (h - 7.0f * px) * 0.5f, px, text_color);
 }
 
+void ui_row_select(float x, float y, float w, float h)
+{
+    draw_rect(x, y, w, h, C_CYAN);
+}
+
 void ui_wash(float x, float y, float w, float h, float alpha)
 {
     if (alpha <= 0.0f || w <= 0.0f || h <= 0.0f)

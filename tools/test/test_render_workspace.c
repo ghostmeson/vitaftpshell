@@ -135,15 +135,19 @@ static void test_active_pane(void)
     setup();
     s_state.active_pane = UI_PANE_LOCAL;
     render();
-    CHECK(trace_has_rect(18.0f, 76.0f, 2.0f, 352.0f, C_YELLOW));
-    CHECK(!trace_has_rect(486.0f, 76.0f, 2.0f, 352.0f, C_YELLOW));
+    CHECK(trace_has_line(18.0f, 76.0f, 18.0f + 456.0f - 14.0f, 76.0f,
+                         C_YELLOW));
+    CHECK(!trace_has_line(486.0f, 76.0f, 486.0f + 456.0f - 14.0f, 76.0f,
+                          C_YELLOW));
     CHECK(trace_text_at_color("LOCAL", 32.0f, 84.0f, C_YELLOW));
     CHECK(trace_text_at_color("REMOTE", 500.0f, 84.0f, C_DIM));
 
     s_state.active_pane = UI_PANE_REMOTE;
     render();
-    CHECK(trace_has_rect(486.0f, 76.0f, 2.0f, 352.0f, C_YELLOW));
-    CHECK(!trace_has_rect(18.0f, 76.0f, 2.0f, 352.0f, C_YELLOW));
+    CHECK(trace_has_line(486.0f, 76.0f, 486.0f + 456.0f - 14.0f, 76.0f,
+                         C_YELLOW));
+    CHECK(!trace_has_line(18.0f, 76.0f, 18.0f + 456.0f - 14.0f, 76.0f,
+                          C_YELLOW));
     CHECK(trace_text_at_color("REMOTE", 500.0f, 84.0f, C_YELLOW));
     CHECK(trace_text_at_color("LOCAL", 32.0f, 84.0f, C_DIM));
 }
@@ -231,7 +235,8 @@ static void test_dock_states(void)
     s_state.dock.rate = 1024;
     s_state.dock.rate_known = 1;
     render();
-    CHECK(trace_text_at_color("DONE", 32.0f, 450.0f, C_GREEN));
+    CHECK(trace_text_at_color("DOWNLOADED", 32.0f, 450.0f, C_GREEN));
+    CHECK(trace_has_text("2 ITEMS"));
     CHECK(trace_has_text("1.0 KB IN 00:01:04"));
     CHECK(trace_has_text("1.0 KB/S AVG"));
 
@@ -245,7 +250,7 @@ static void test_dock_states(void)
     s_state.dock.total = 100;
     s_state.dock.total_known = 1;
     render();
-    CHECK(trace_text_at_color("FAILED", 32.0f, 450.0f, C_YELLOW));
+    CHECK(trace_text_at_color("FAILED", 32.0f, 450.0f, C_RED));
     CHECK(trace_has_text("DATA CONNECTION TIMED OUT"));
     CHECK(trace_text_at_color("NO PARTIAL KEPT", 928.0f -
                               font_width("NO PARTIAL KEPT", PX_MICRO),
@@ -320,7 +325,7 @@ static void test_pane_error(void)
              sizeof(s_state.panes[UI_PANE_REMOTE].error), "CWD FAILED");
     render();
 
-    CHECK(trace_text_at_color("CWD FAILED", 500.0f, 102.0f, C_YELLOW));
+    CHECK(trace_text_at_color("CWD FAILED", 500.0f, 102.0f, C_RED));
     CHECK(!trace_text_at("/GNU/", 500.0f, 102.0f));
 }
 
