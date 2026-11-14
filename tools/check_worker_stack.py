@@ -22,16 +22,16 @@ HANDLE_ACTION_MAX = 16 * 1024
 # The non-recursive part of the copy/rename chain. The folder scan recurses
 # separately (WORKER_REMOTE_DEPTH * its own frame) and is checked by name below.
 FIXED_CHAIN_MAX = 64 * 1024
+# Functions the compiler keeps separate at -O2. State that moved into the heap
+# run still costs stack when inlined, so each owner below is measured at the
+# frame it actually reserves: worker_step owns local_run_pump/finish_local_run,
+# handle_action owns run_plan_begin/execute_action/fact_tree, and fsop_run_step
+# owns copy_pump and the copy loop.
 FIXED_CHAIN = (
     "worker_step",
     "handle_action",
-    "execute_action",
-    "fact_tree",
-    "run_plan",
-    "fsop_run",
-    "run_copy_file",
+    "fsop_run_step",
     "logev_emit",
-    "worker_list_local",
     "local_batch_emit_done",
 )
 

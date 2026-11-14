@@ -22,6 +22,10 @@
 
 #define WORKER_CMD_BUDGET 8
 #define WORKER_REMOTE_DEPTH 32
+/* One local slice per worker step; the network engine ticks before it. */
+#define WORKER_LOCAL_BYTES_PER_STEP (64u * 1024u)
+#define WORKER_LOCAL_SLICE_MS 6
+#define WORKER_LOCAL_STEPS_MAX 16
 #define WORKER_CONFIRM_ITEMS HANDOFF_CONFIRM_ITEMS
 
 typedef struct {
@@ -112,6 +116,14 @@ struct Worker {
     FsOpConflict local_conflict;
     int local_conflict_set;
     int local_cancel_seen;
+    /* The resumable local job (U25): the run, its owned plan, and the command
+     * that started it survive across worker steps. */
+    FsOpRun *local_run;
+    FsOpPlan *local_plan;
+    UiCommand local_run_command;
+    uint64_t local_run_started_ms;
+    uint64_t local_run_last_bytes;
+    int local_cancel_requested;
     LocalBatch local_batch;
     UiCommand batch_preflight[UI_CLIP_MAX];
     /* Existing destinations named by the one prompt the batch may ask. Kept in
@@ -341,7 +353,8 @@ static void local_batch_flush(Worker *worker)
 {
     LocalBatch *batch = &worker->local_batch;
     if (!batch->active || worker->pending.valid ||
-        worker->pending_command_count > 0 || worker->batch_executing)
+        worker->pending_command_count > 0 || worker->batch_executing ||
+        worker->local_run != NULL)
         return;
     if (now_ms(worker) - batch->last_ms < 250)
         return;
@@ -355,9 +368,14 @@ static void local_batch_flush(Worker *worker)
 static int local_cancel_requested(void *ctx)
 {
     Worker *worker = ctx;
-    if (worker == NULL || worker->handoff == NULL)
+    if (worker == NULL)
         return 0;
-    if (!handoff_cancel_pending(worker->handoff))
+    if (worker->local_cancel_requested) {
+        worker->local_cancel_seen = 1;
+        return 1;
+    }
+    if (worker->handoff == NULL ||
+        !handoff_cancel_pending(worker->handoff))
         return 0;
     worker->local_cancel_seen = 1;
     return 1;
@@ -394,6 +412,8 @@ static void local_batch_advance(Worker *worker)
     LocalBatch *batch = &worker->local_batch;
     if (!batch->active || !worker->batch_executing)
         return;
+    if (worker->local_run != NULL)
+        return;
     if (worker->pending.valid || worker->pending_command_count > 0)
         return;
     if (worker->batch_execute_index >= worker->batch_preflight_count) {
@@ -417,6 +437,8 @@ static void local_batch_advance(Worker *worker)
      * could execute (busy slot, bad name, plan refused). Count it so the
      * terminal reports the batch honestly. A pending prompt records the item
      * when it is answered. */
+    if (worker->local_run != NULL)
+        return;
     if (batch->active && !worker->pending.valid &&
         before == batch->done + batch->skipped + batch->failed +
                       batch->cancelled)
@@ -1304,41 +1326,56 @@ static int build_dest_facts(Worker *worker, const char *source,
     return 1;
 }
 
-static void run_plan(Worker *worker, const UiCommand *command,
-                     const FsOpPlan *plan)
+static void emit_local_progress(Worker *worker)
 {
-    XferDirection direction = action_direction(command->action);
+    const FsOpProgress *progress = fsop_run_progress(worker->local_run);
+    if (progress == NULL || progress->bytes_done == worker->local_run_last_bytes)
+        return;
+    worker->local_run_last_bytes = progress->bytes_done;
+
+    uint64_t elapsed = now_ms(worker) - worker->local_run_started_ms;
+    HandoffEvent event;
+    event_init(&event, HANDOFF_EVT_PROGRESS);
+    event.bytes = progress->bytes_done;
+    event.total = progress->bytes_total;
+    event.total_known = progress->total_known;
+    event.item_index = worker->local_run_command.batch_index + 1;
+    event.item_total = worker->local_run_command.batch_total > 0
+                           ? worker->local_run_command.batch_total
+                           : 1;
+    event.elapsed_ms = elapsed;
+    event.elapsed_known = elapsed > 0;
+    if (elapsed > 0) {
+        event.rate = progress->bytes_done * 1000u / elapsed;
+        event.rate_known = 1;
+    }
+    emit(worker, &event);
+}
+
+/* Emit the terminal exactly once and release the run, the plan, and the
+ * command. Mirrors the blocking tail the old run_plan had. */
+static void finish_local_run(Worker *worker, FsOpRunResult result)
+{
+    const FsOpProgress *live = fsop_run_progress(worker->local_run);
+    FsOpProgress progress = *live;
+    UiCommand command = worker->local_run_command;
+    FsOpPlan *plan = worker->local_plan;
+    XferDirection direction = action_direction(command.action);
     LocalBatch *batch = &worker->local_batch;
     int item_index = batch->active ? batch->index + 1 : 1;
     int item_total = batch->active ? batch->total : 1;
-
-    HandoffEvent started;
-    event_init(&started, HANDOFF_EVT_TRANSFER_STARTED);
-    fmt_copy(started.detail, sizeof(started.detail), last_name(command->path));
-    started.item_index = item_index;
-    started.item_total = item_total;
-    started.total = plan->total_bytes;
-    started.total_known = plan->total_known;
-    fmt_copy(started.path, sizeof(started.path), command->path);
-    started.op[0] = '\0';
-    started.direction = direction;
-    emit(worker, &started);
-
-    FsOpProgress progress;
-    FsOpRunResult result = fsop_run(worker->ports.fs, plan, &progress,
-                                    local_cancel_requested, worker);
 
     if (progress.sync_skipped)
         log_detail(worker, LOGEV_LOG, "sync skipped");
     local_batch_record(worker, result, plan, &progress);
 
     if (result == FSOP_RUN_OK) {
-        log_event(worker, LOGEV_TRANSFER_DONE, NULL, NULL, command->path,
+        log_event(worker, LOGEV_TRANSFER_DONE, NULL, NULL, command.path,
                   "done", "app", progress.bytes_done, progress.bytes_total);
     } else {
-        emit_error(worker, UI_PANE_LOCAL, progress.message,
-                   progress.cause, progress.stage);
-        log_event(worker, LOGEV_TRANSFER_FAIL, NULL, NULL, command->path,
+        emit_error(worker, UI_PANE_LOCAL, progress.message, progress.cause,
+                   progress.stage);
+        log_event(worker, LOGEV_TRANSFER_FAIL, NULL, NULL, command.path,
                   op_stage_name(progress.stage), op_cause_name(progress.cause),
                   progress.bytes_done, progress.bytes_total);
     }
@@ -1354,14 +1391,87 @@ static void run_plan(Worker *worker, const UiCommand *command,
     done.item_index = item_index;
     done.item_total = item_total;
     done.direction = direction;
-    fmt_copy(done.path, sizeof(done.path), command->path);
+    fmt_copy(done.path, sizeof(done.path), command.path);
     emit(worker, &done);
 
-    if (command->batch_last || !batch->active ||
+    if (command.batch_last || !batch->active ||
         batch->index + 1 >= batch->total) {
         worker_list_local(worker, worker->local_path);
         local_batch_emit_done(worker);
     }
+
+    if (result == FSOP_RUN_CANCELLED)
+        handoff_cancel_consume(worker->handoff);
+
+    fsop_run_destroy(worker->local_run);
+    worker->local_run = NULL;
+    worker->local_plan = NULL;
+    worker->local_cancel_requested = 0;
+    worker->local_cancel_seen = 0;
+    free(plan);
+}
+
+/* Advance the local job for this worker step, then let the client, server, and
+ * queue tick again on the next frame. */
+static void local_run_pump(Worker *worker)
+{
+    if (worker->local_run == NULL)
+        return;
+
+    uint64_t start = now_ms(worker);
+    FsOpRunResult result = FSOP_RUN_FAILED;
+    for (int i = 0; i < WORKER_LOCAL_STEPS_MAX; ++i) {
+        result = fsop_run_step(worker->local_run, worker->ports.fs,
+                               WORKER_LOCAL_BYTES_PER_STEP,
+                               local_cancel_requested, worker);
+        if (fsop_run_finished(worker->local_run))
+            break;
+        if (now_ms(worker) - start >= WORKER_LOCAL_SLICE_MS)
+            break;
+    }
+
+    if (fsop_run_finished(worker->local_run)) {
+        finish_local_run(worker, result);
+        return;
+    }
+    emit_local_progress(worker);
+}
+
+/* Start a local plan as a resumable run. On success the run owns `plan`. */
+static int run_plan_begin(Worker *worker, const UiCommand *command,
+                          FsOpPlan *plan)
+{
+    FsOpRun *run = fsop_run_create(plan);
+    if (run == NULL) {
+        emit_error(worker, UI_PANE_LOCAL, "OUT OF MEMORY", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
+        return 0;
+    }
+
+    worker->local_run = run;
+    worker->local_plan = plan;
+    worker->local_run_command = *command;
+    worker->local_run_started_ms = now_ms(worker);
+    worker->local_run_last_bytes = 0;
+    worker->local_cancel_requested = 0;
+    worker->local_cancel_seen = 0;
+
+    LocalBatch *batch = &worker->local_batch;
+    int item_index = batch->active ? batch->index + 1 : 1;
+    int item_total = batch->active ? batch->total : 1;
+
+    HandoffEvent started;
+    event_init(&started, HANDOFF_EVT_TRANSFER_STARTED);
+    fmt_copy(started.detail, sizeof(started.detail), last_name(command->path));
+    started.item_index = item_index;
+    started.item_total = item_total;
+    started.total = plan->total_bytes;
+    started.total_known = plan->total_known;
+    fmt_copy(started.path, sizeof(started.path), command->path);
+    started.op[0] = '\0';
+    started.direction = action_direction(command->action);
+    emit(worker, &started);
+    return 1;
 }
 
 static int same_folder_path(const char *a, const char *b)
@@ -1562,8 +1672,8 @@ static void execute_action(Worker *worker, const UiCommand *command,
         return;
     }
 
-    run_plan(worker, command, plan);
-    free(plan);
+    if (!run_plan_begin(worker, command, plan))
+        free(plan);
 }
 
 static FtpClientResult remote_action_begin(Worker *worker,
@@ -2544,6 +2654,10 @@ static void server_event(void *ctx, const FtpServerEvent *event)
 
 static void cancel_current_transfer(Worker *worker)
 {
+    if (worker->local_run != NULL) {
+        worker->local_cancel_requested = 1;
+        return;
+    }
     if (worker->local_cancel_seen) {
         /* The executor already saw this cancel and stopped. */
         worker->local_cancel_seen = 0;
@@ -2885,6 +2999,12 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
 
 void worker_destroy(Worker *worker)
 {
+    if (worker != NULL) {
+        fsop_run_destroy(worker->local_run);
+        free(worker->local_plan);
+        worker->local_run = NULL;
+        worker->local_plan = NULL;
+    }
     if (worker == NULL)
         return;
     ftp_client_destroy(worker->client);
@@ -3008,6 +3128,7 @@ void worker_step(Worker *worker)
     pump_remote_actions(worker);
     pump_queue(worker);
     drain_pending_actions(worker);
+    local_run_pump(worker);
     local_batch_advance(worker);
     local_batch_flush(worker);
     publish_site_book(worker);

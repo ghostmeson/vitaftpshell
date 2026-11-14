@@ -60,6 +60,16 @@ int handoff_cancel_pending(const Handoff *handoff)
     return handoff != NULL && LOAD_ACQ(&handoff->critical_cancel_valid);
 }
 
+int handoff_cancel_consume(Handoff *handoff)
+{
+    if (handoff == NULL)
+        return 0;
+    if (!LOAD_ACQ(&handoff->critical_cancel_valid))
+        return 0;
+    STORE_REL(&handoff->critical_cancel_valid, 0);
+    return 1;
+}
+
 int handoff_command_pop(Handoff *handoff, UiCommand *out)
 {
     if (handoff == NULL)

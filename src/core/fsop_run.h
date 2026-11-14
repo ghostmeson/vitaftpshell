@@ -3,24 +3,17 @@
 #ifndef VFTP_CORE_FSOP_RUN_H
 #define VFTP_CORE_FSOP_RUN_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "core/cause.h"
 #include "core/fsop_plan.h"
-#include "platform/fs.h"
-
-/*
- * Local operation executor (U17). It walks a U16 plan through FsPort with the
- * templed-write discipline, applies the plan's rollback in reverse, and
- * reports the one cause class and stage for the dock and the log.
- *
- * A recursive delete cannot be rolled back. Cancelling or failing it stops
- * after the item in flight and reports `DELETED n OF m`.
- */
 
 typedef enum {
     FSOP_RUN_OK = 0,
-    FSOP_RUN_FAILED,
     FSOP_RUN_CANCELLED,
-    FSOP_RUN_PARTIAL
+    FSOP_RUN_PARTIAL,
+    FSOP_RUN_FAILED
 } FsOpRunResult;
 
 typedef struct {
@@ -39,6 +32,31 @@ typedef struct {
 
 typedef int (*FsOpCancelFn)(void *ctx);
 
+/*
+ * A run owns everything the executor needs between calls: the step cursor, the
+ * applied-step list, the copy sub-phase, the open handles, progress, and the
+ * copy buffer. It lives on the heap so the worker can suspend a copy while the
+ * client, server, and queue tick and resume it on the next step (KTD20).
+ */
+typedef struct FsOpRun FsOpRun;
+
+/* NULL only when the plan is NULL or allocation fails. The caller keeps the
+ * plan alive until the run is destroyed. */
+FsOpRun *fsop_run_create(const FsOpPlan *plan);
+void fsop_run_destroy(FsOpRun *run);
+
+/*
+ * Advance the run by at most `byte_budget` copied bytes and a bounded number of
+ * atomic steps. `byte_budget` 0 means one byte. Checks `cancel` at every copy
+ * chunk and before every step. Re-entrant calls after the run finishes return
+ * the terminal result without touching the filesystem.
+ */
+FsOpRunResult fsop_run_step(FsOpRun *run, FsPort *fs, size_t byte_budget,
+                            FsOpCancelFn cancel, void *cancel_ctx);
+int fsop_run_finished(const FsOpRun *run);
+const FsOpProgress *fsop_run_progress(const FsOpRun *run);
+
+/* Blocking convenience wrapper over the stepped executor. */
 FsOpRunResult fsop_run(FsPort *fs, const FsOpPlan *plan, FsOpProgress *progress,
                        FsOpCancelFn cancel, void *cancel_ctx);
 

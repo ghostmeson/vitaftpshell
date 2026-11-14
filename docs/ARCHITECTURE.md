@@ -378,6 +378,13 @@ Passwords appear in `sites.cfg` by design and never in the log.
 The planner produces a plan before anything is touched: the ordered creates,
 copies, renames, and deletes, the conflict decision, and the rollback list. The
 executor walks the plan and reports progress; it makes no policy decisions.
+The executor is resumable (D72, KTD20): a heap-owned `FsOpRun` holds the step
+cursor, the applied-step list, the copy sub-phase, the open handles, progress,
+and the copy buffer. `fsop_run_step` advances by a byte budget and a bounded
+number of atomic steps, checks cancel at every copy chunk and before every
+step, and keeps the rollback list as its own phase; the blocking `fsop_run`
+remains a wrapper over it. The worker runs one local slice per `worker_step`
+between network ticks, so a copy no longer blocks the client, server, or queue.
 
 - Recursion creates parents before children.
 - A copy or move into itself or a descendant is refused.
