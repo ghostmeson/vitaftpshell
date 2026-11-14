@@ -561,7 +561,6 @@ static void test_clipboard_copy(void)
 
     enter_ux0_data(app);
     select_local_named(app, "SRC.TXT");
-    press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     CHECK(app_state(app)->screen == UI_SCREEN_ACTIONS);
     CHECK(app_state(app)->actions.selected == UI_ACTION_COPY);

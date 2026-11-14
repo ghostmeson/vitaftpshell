@@ -452,13 +452,15 @@ static void test_server_actions(void)
     }
 
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    s_state.panes[UI_PANE_LOCAL].selected = 2; /* A.TXT */
     send_key(UI_KEY_TRIANGLE);
     s_state.actions.selected = UI_ACTION_COPY;
-    CHECK(s_state.actions.enabled[UI_ACTION_COPY] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_COPY] == 1);
     send_key(UI_KEY_CROSS);
     CHECK(command(UI_CMD_RUN_ACTION) == NULL);
-    CHECK(strcmp(s_state.status, "ACTION UNAVAILABLE") == 0);
-    send_key(UI_KEY_CIRCLE);
+    CHECK(s_state.clip_mode == UI_CLIP_COPY);
+    CHECK(s_state.clip_count == 1);
+    CHECK(strcmp(s_state.clip_paths[0].text, "ux0:data/A.TXT") == 0);
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
 
     reset();
@@ -738,7 +740,6 @@ static void test_action_returns_to_workspace(void)
 {
     reset();
     s_state.panes[UI_PANE_LOCAL].selected = 1;
-    send_key(UI_KEY_SQUARE);
     send_key(UI_KEY_TRIANGLE);
     CHECK(s_state.screen == UI_SCREEN_ACTIONS);
     s_state.actions.selected = UI_ACTION_COPY;
@@ -1366,6 +1367,20 @@ static void test_remote_unsafe_and_folder(void)
                  "FOLDER NOT SUPPORTED") == 0);
 }
 
+static void test_cursor_copy_folder(void)
+{
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 1; /* folder */
+    send_key(UI_KEY_TRIANGLE);
+    s_state.actions.selected = UI_ACTION_COPY;
+    CHECK(s_state.actions.enabled[UI_ACTION_COPY] == 1);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.clip_mode == UI_CLIP_COPY);
+    CHECK(s_state.clip_count == 1);
+    CHECK(strcmp(s_state.clip_paths[0].text, "ux0:data/folder") == 0);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+}
+
 int main(void)
 {
     test_workspace_nav();
@@ -1381,6 +1396,7 @@ int main(void)
     test_actions_no_selection();
     test_marks_pruned_after_delete();
     test_action_returns_to_workspace();
+    test_cursor_copy_folder();
     test_delete_confirm_items();
     test_sites_scroll();
     test_confirm_busy_guard();
