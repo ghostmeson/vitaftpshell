@@ -441,6 +441,62 @@ static void test_stor(void)
     ftp_server_destroy(server);
 }
 
+static int s_guard_checks;
+static int s_guard_holds;
+static int s_guard_releases;
+
+static int test_guard(void *ctx, FtpGuardAction action, const char *path,
+                      int write, int tree)
+{
+    (void)ctx;
+    (void)write;
+    (void)tree;
+    if (action == FTP_GUARD_RELEASE) {
+        s_guard_releases++;
+        return 0;
+    }
+    if (action == FTP_GUARD_HOLD) {
+        s_guard_holds++;
+        return 0;
+    }
+    s_guard_checks++;
+    return path != NULL && strcmp(path, "ux0:data/held.bin") == 0;
+}
+
+/* U26: a held path answers 450 and disarms PASV; a sibling still works. */
+static void test_held_path(void)
+{
+    setup();
+    s_guard_checks = 0;
+    s_guard_holds = 0;
+    s_guard_releases = 0;
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    ftp_server_set_guard(server, test_guard, NULL);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    pasv(server, &client);
+    unsigned before = fake_net_accept_count();
+    (void)data_command(server, &client, "STOR ux0:data/held.bin", 450);
+    CHECK(fake_net_accept_count() == before);
+    CHECK(!fake_fs_exists("ux0:data/held.bin"));
+
+    /* The refusal disarmed PASV: a data command now needs a new one. */
+    (void)data_command(server, &client, "STOR ux0:data/other.bin", 425);
+
+    send_stor(server, &client, "STOR ux0:data/free.bin", "ok", 0, 226);
+    CHECK(fake_fs_exists("ux0:data/free.bin"));
+    CHECK(s_guard_checks > 0);
+    CHECK(s_guard_holds > 0);
+    CHECK(s_guard_releases > 0);
+
+    command(server, &client, "DELE ux0:data/held.bin", 450);
+
+    ftp_server_destroy(server);
+}
+
 static void test_denials(void)
 {
     setup();
@@ -882,6 +938,7 @@ int main(void)
     test_root_listing();
     test_retr();
     test_stor();
+    test_held_path();
     test_denials();
     test_cwd();
     test_file_ops();

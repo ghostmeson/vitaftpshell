@@ -25,6 +25,23 @@ static int ci_equal(const char *a, const char *b)
     return *a == '\0' && *b == '\0';
 }
 
+/* True when `child` is inside `parent` (case-insensitive, separator-aware). */
+static int path_within(const char *parent, const char *child)
+{
+    size_t n = strlen(parent);
+    while (n > 0 && parent[n - 1] == '/')
+        n--;
+    if (n == 0 || parent == NULL || child == NULL)
+        return 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (child[i] == '\0' || lower_ascii(child[i]) != lower_ascii(parent[i]))
+            return 0;
+    }
+    if (child[n] == '\0')
+        return 0;
+    return parent[n - 1] == ':' || child[n] == '/';
+}
+
 static UiCommand *emit(UiCommand *out, int max, int *count,
                        UiCommandType type)
 {
@@ -1262,10 +1279,48 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                 return;
             }
 
+            /* Two sources with one basename resolve to one destination: refuse
+             * before any command. A move source inside another is already
+             * carried by the outer one, so it is skipped (D73). */
+            int keep[UI_CLIP_MAX];
+            int kept = 0;
+            for (int i = 0; i < state->clip_count; ++i)
+                keep[i] = 1;
+            for (int i = 0; i < state->clip_count; ++i) {
+                for (int j = i + 1; j < state->clip_count; ++j) {
+                    if (ci_equal(last_segment(state->clip_paths[i].text),
+                                 last_segment(state->clip_paths[j].text))) {
+                        set_status(state, "SAME DESTINATION");
+                        return;
+                    }
+                }
+            }
+            if (state->clip_mode == UI_CLIP_MOVE) {
+                for (int i = 0; i < state->clip_count; ++i) {
+                    for (int j = 0; j < state->clip_count; ++j) {
+                        if (i != j &&
+                            path_within(state->clip_paths[j].text,
+                                        state->clip_paths[i].text)) {
+                            keep[i] = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+            for (int i = 0; i < state->clip_count; ++i)
+                kept += keep[i];
+            if (kept == 0) {
+                set_status(state, "NOTHING TO PASTE");
+                return;
+            }
+
             int high_risk = 0;
             char risk_path[PATH_MAX_LEN];
             risk_path[0] = '\0';
+            int first = -1;
             for (int i = 0; i < state->clip_count; ++i) {
+                if (!keep[i])
+                    continue;
                 Path target;
                 if (path_join(destination,
                               last_segment(state->clip_paths[i].text),
@@ -1273,6 +1328,8 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                     set_status(state, "PATH TOO LONG");
                     return;
                 }
+                if (first < 0)
+                    first = i;
                 PathRisk risk = PATH_RISK_NORMAL;
                 PathResult result = path_check_write(target.text, 0, &risk);
                 if (result != PATH_OK) {
@@ -1289,7 +1346,7 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             state->pending_action_valid = 0;
             state->pending_pane = state->active_pane;
             fmt_copy(state->pending_path.text, sizeof(state->pending_path.text),
-                     state->clip_paths[0].text);
+                     state->clip_paths[first].text);
             fmt_copy(state->pending_dest.text, sizeof(state->pending_dest.text),
                      destination);
             state->confirm_from_worker = 0;
@@ -1304,13 +1361,17 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             }
 
             state->batch_seq++;
+            int index = 0;
             for (int i = 0; i < state->clip_count; ++i) {
+                if (!keep[i])
+                    continue;
                 UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
                 if (c == NULL) {
                     set_status(state, "COMMAND LIMIT");
                     break;
                 }
-                stamp_batch(state, c, i, state->clip_count);
+                stamp_batch(state, c, index, kept);
+                index++;
                 c->action = state->clip_mode == UI_CLIP_MOVE ? UI_ACTION_MOVE
                                                              : UI_ACTION_COPY;
                 c->pane = state->active_pane;

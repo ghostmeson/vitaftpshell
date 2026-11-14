@@ -873,6 +873,52 @@ static void test_path_busy_prompt(void)
     CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_CANCEL);
 }
 
+/* D73: duplicate destination names are refused before any command, and a move
+ * source inside another is skipped. */
+static void test_paste_guards(void)
+{
+    reset();
+    s_state.screen = UI_SCREEN_ACTIONS;
+    s_state.focus = UI_FOCUS_ACTIONS;
+    s_state.actions.selected = UI_ACTION_PASTE;
+    s_state.actions.enabled[UI_ACTION_PASTE] = 1;
+    s_state.actions.visible[0] = UI_ACTION_PASTE;
+    s_state.actions.visible_count = 1;
+    s_state.clip_mode = UI_CLIP_COPY;
+    s_state.clip_count = 2;
+    snprintf(s_state.clip_paths[0].text, sizeof(s_state.clip_paths[0].text),
+             "ux0:one/x.txt");
+    snprintf(s_state.clip_paths[1].text, sizeof(s_state.clip_paths[1].text),
+             "ux0:two/x.txt");
+
+    CHECK(send_key(UI_KEY_CROSS) == 0);
+    CHECK(strcmp(s_state.status, "SAME DESTINATION") == 0);
+    CHECK(s_state.clip_mode == UI_CLIP_COPY);
+
+    reset();
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:dest");
+    s_state.screen = UI_SCREEN_ACTIONS;
+    s_state.focus = UI_FOCUS_ACTIONS;
+    s_state.actions.selected = UI_ACTION_PASTE;
+    s_state.actions.enabled[UI_ACTION_PASTE] = 1;
+    s_state.actions.visible[0] = UI_ACTION_PASTE;
+    s_state.actions.visible_count = 1;
+    snprintf(s_state.actions.dest, sizeof(s_state.actions.dest), "ux0:dest");
+    s_state.clip_mode = UI_CLIP_MOVE;
+    s_state.clip_count = 2;
+    snprintf(s_state.clip_paths[0].text, sizeof(s_state.clip_paths[0].text),
+             "ux0:data/folder");
+    snprintf(s_state.clip_paths[1].text, sizeof(s_state.clip_paths[1].text),
+             "ux0:data/folder/A.TXT");
+
+    CHECK(send_key(UI_KEY_CROSS) == 1);
+    CHECK(s_commands[0].action == UI_ACTION_MOVE);
+    CHECK(strcmp(s_commands[0].path, "ux0:data/folder") == 0);
+    CHECK(s_commands[0].batch_total == 1);
+    CHECK(s_commands[0].batch_last == 1);
+}
+
 static void test_dock_cancel_and_site_delete(void)
 {
     reset();
@@ -1440,6 +1486,7 @@ int main(void)
     test_sites_scroll();
     test_confirm_busy_guard();
     test_path_busy_prompt();
+    test_paste_guards();
     test_dock_cancel_and_site_delete();
     test_listing_and_dock();
     test_remote_volume_marks();

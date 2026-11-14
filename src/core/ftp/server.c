@@ -81,6 +81,8 @@ struct FtpServer {
 
     char last_command[16];
     int external_busy;
+    FtpServerGuardFn guard;
+    void *guard_ctx;
     int root_index;
 
     int rnfr_valid;
@@ -280,6 +282,8 @@ static void server_close_transfer(FtpServer *server)
     server->listing_single = 0;
     server->listing_single_used = 0;
     server->root_index = 0;
+    if (server->guard != NULL)
+        (void)server->guard(server->guard_ctx, FTP_GUARD_RELEASE, NULL, 0, 0);
 }
 
 static void server_disarm(FtpServer *server)
@@ -289,6 +293,27 @@ static void server_disarm(FtpServer *server)
     server_close_data(server);
     server_close_transfer(server);
     server_drain_listener(server);
+}
+
+/* A held path answers 450 and drops the armed PASV connection. When `hold` is
+ * set, the accepted data command also claims the path for the transfer. */
+static int server_path_held(FtpServer *server, const char *local, int write,
+                            int tree, int hold)
+{
+    if (server->guard == NULL)
+        return 0;
+
+    if (!server->guard(server->guard_ctx, FTP_GUARD_CHECK, local, write, tree))
+        return 0;
+    if (hold &&
+        server->guard(server->guard_ctx, FTP_GUARD_HOLD, local, write, tree)) {
+        server_reply(server, 451, "Resource busy.");
+        server_disarm(server);
+        return 1;
+    }
+    server_reply(server, 450, "Path busy.");
+    server_disarm(server);
+    return 1;
 }
 
 static void server_emit_state_and_client(FtpServer *server)
@@ -1039,6 +1064,11 @@ static int server_data_command(FtpServer *server, ServerDataKind kind,
         }
     }
 
+    if (!is_root &&
+        server_path_held(server, local.text, kind == SDATA_STOR, 0,
+                         kind != SDATA_LIST))
+        return 0;
+
     snprintf(server->active_virtual, sizeof(server->active_virtual), "%s",
              is_root ? "/" : virtual);
     snprintf(server->active_local, sizeof(server->active_local), "%s",
@@ -1113,6 +1143,8 @@ static void server_mlst(FtpServer *server, const char *arg)
     const char *name = "/";
 
     if (!is_root) {
+        if (server_path_held(server, local.text, 0, 0, 0))
+            return;
         PathRisk risk = PATH_RISK_NORMAL;
         if (path_check_read(local.text, 1, &risk) != PATH_OK ||
             server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK) {
@@ -1232,6 +1264,8 @@ static void server_handle_mkd(FtpServer *server, const char *arg)
         server_reply(server, 550, "Not found.");
         return;
     }
+    if (server_path_held(server, local.text, 1, 0, 0))
+        return;
 
     if (server->fs->mkdir(server->fs->ctx, local.text) != FS_OK) {
         server_reply(server, 550, "Not found.");
@@ -1258,6 +1292,8 @@ static void server_handle_dele(FtpServer *server, const char *arg)
         server_reply(server, 550, "Not found.");
         return;
     }
+    if (server_path_held(server, local.text, 1, 1, 0))
+        return;
 
     if (server->fs->remove(server->fs->ctx, local.text) != FS_OK) {
         server_reply(server, 550, "Not found.");
@@ -1284,6 +1320,8 @@ static void server_handle_rmd(FtpServer *server, const char *arg)
         server_reply(server, 550, "Not found.");
         return;
     }
+    if (server_path_held(server, local.text, 1, 1, 0))
+        return;
 
     if (server->fs->rmdir(server->fs->ctx, local.text) != FS_OK) {
         server_reply(server, 550, "Not found.");
@@ -1311,6 +1349,8 @@ static void server_handle_rnfr(FtpServer *server, const char *arg)
         server_reply(server, 550, "Not found.");
         return;
     }
+    if (server_path_held(server, local.text, 1, 1, 0))
+        return;
 
     FsEntry entry;
     if (server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK) {
@@ -1341,7 +1381,9 @@ static void server_handle_rnto(FtpServer *server, const char *arg)
         !is_root) {
         PathRisk risk = PATH_RISK_NORMAL;
         if (path_check_rename(server->rnfr_local, local.text, 1, &risk) ==
-            PATH_OK) {
+                PATH_OK &&
+            !server_path_held(server, server->rnfr_local, 1, 1, 0) &&
+            !server_path_held(server, local.text, 1, 1, 0)) {
             ok = server->fs->rename(server->fs->ctx, server->rnfr_local,
                                     local.text) == FS_OK;
         }
@@ -1368,6 +1410,9 @@ static void server_handle_size(FtpServer *server, const char *arg)
         return;
     }
 
+    if (server_path_held(server, local.text, 0, 0, 0))
+        return;
+
     PathRisk risk = PATH_RISK_NORMAL;
     FsEntry entry;
     if (path_check_read(local.text, 1, &risk) != PATH_OK ||
@@ -1391,6 +1436,9 @@ static void server_handle_mdtm(FtpServer *server, const char *arg)
         server_reply(server, 550, "Not found.");
         return;
     }
+
+    if (server_path_held(server, local.text, 0, 0, 0))
+        return;
 
     PathRisk risk = PATH_RISK_NORMAL;
     FsEntry entry;
@@ -1982,6 +2030,14 @@ NetAddress ftp_server_lan_address(const FtpServer *server)
 {
     NetAddress none = {0, 0};
     return server != NULL ? server->lan_address : none;
+}
+
+void ftp_server_set_guard(FtpServer *server, FtpServerGuardFn guard, void *ctx)
+{
+    if (server == NULL)
+        return;
+    server->guard = guard;
+    server->guard_ctx = ctx;
 }
 
 void ftp_server_set_external_busy(FtpServer *server, int busy)
