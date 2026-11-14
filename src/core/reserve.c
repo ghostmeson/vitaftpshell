@@ -151,8 +151,20 @@ void reserve_release(Reserve *reserve, ReserveLane lane)
         reserve->entries[write++] = reserve->entries[i];
     }
     reserve->count = write;
-    if (reserve->count == 0)
-        reserve->used = 0;
+
+    /* Reclaim the released strings. Entries keep insertion order, so each live
+     * string moves toward the front; a long session cannot exhaust the arena. */
+    size_t dst = 0;
+    for (int i = 0; i < reserve->count; ++i) {
+        ReserveEntry *entry = &reserve->entries[i];
+        const char *src = reserve->arena + entry->off;
+        size_t len = strlen(src) + 1;
+        if ((size_t)entry->off != dst)
+            memmove(reserve->arena + dst, src, len);
+        entry->off = (uint32_t)dst;
+        dst += len;
+    }
+    reserve->used = dst;
 }
 
 int reserve_conflict(const Reserve *reserve, ReserveKind kind, const char *path,

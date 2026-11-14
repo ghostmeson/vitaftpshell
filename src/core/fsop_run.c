@@ -484,6 +484,17 @@ void fsop_run_destroy(FsOpRun *run)
     free(run);
 }
 
+void fsop_run_abort(FsOpRun *run, FsPort *fs)
+{
+    if (run == NULL)
+        return;
+    if (run->copying)
+        copy_abort(run, fs);
+    run->cancelled = 1;
+    run->finished = 1;
+    run->result = FSOP_RUN_CANCELLED;
+}
+
 int fsop_run_finished(const FsOpRun *run)
 {
     return run != NULL && run->finished;

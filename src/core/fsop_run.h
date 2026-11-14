@@ -44,6 +44,8 @@ typedef struct FsOpRun FsOpRun;
  * plan alive until the run is destroyed. */
 FsOpRun *fsop_run_create(const FsOpPlan *plan);
 void fsop_run_destroy(FsOpRun *run);
+/* Abort an in-flight copy (temp removed, source closed) before destroy. */
+void fsop_run_abort(FsOpRun *run, FsPort *fs);
 
 /*
  * Advance the run by at most `byte_budget` copied bytes and a bounded number of

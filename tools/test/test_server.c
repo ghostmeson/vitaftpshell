@@ -497,6 +497,27 @@ static void test_held_path(void)
     ftp_server_destroy(server);
 }
 
+/* A held RNTO target must send one 450, not a 450 followed by a stale 550. */
+static void test_held_rename(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    ftp_server_set_guard(server, test_guard, NULL);
+    FakeFtpClient client;
+    connect_session(server, &client);
+    fake_fs_seed_file("ux0:data/a.bin", "A", 1);
+
+    command(server, &client, "RNFR ux0:data/a.bin", 350);
+    command(server, &client, "RNTO ux0:data/held.bin", 450);
+    /* One reply per command: a stale 550 would be consumed here. */
+    command(server, &client, "NOOP", 200);
+    CHECK(fake_fs_exists("ux0:data/a.bin"));
+
+    ftp_server_destroy(server);
+}
+
 static void test_denials(void)
 {
     setup();
@@ -939,6 +960,7 @@ int main(void)
     test_retr();
     test_stor();
     test_held_path();
+    test_held_rename();
     test_denials();
     test_cwd();
     test_file_ops();

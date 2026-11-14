@@ -293,6 +293,8 @@ static void drain_events(App *app)
         case HANDOFF_EVT_TRANSFER_DONE:
             ui.kind = event.ok ? UI_EVT_TRANSFER_DONE
                                : UI_EVT_TRANSFER_FAILED;
+            ui.direction = (int)event.direction;
+            ui.direction_known = 1;
             ui.bytes = event.bytes;
             ui.total = event.total;
             ui.total_known = event.total_known;

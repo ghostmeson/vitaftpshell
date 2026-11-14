@@ -62,6 +62,15 @@ int handoff_cancel_pending(const Handoff *handoff)
     return handoff != NULL && LOAD_ACQ(&handoff->critical_cancel_valid);
 }
 
+int handoff_cancel_type(const Handoff *handoff)
+{
+    if (handoff == NULL)
+        return UI_CMD_NONE;
+    if (!LOAD_ACQ(&handoff->critical_cancel_valid))
+        return UI_CMD_NONE;
+    return (int)handoff->critical_cancel.command.type;
+}
+
 int handoff_cancel_consume(Handoff *handoff)
 {
     if (handoff == NULL)

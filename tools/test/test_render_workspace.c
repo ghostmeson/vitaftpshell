@@ -315,6 +315,17 @@ static void test_dock_states(void)
     render();
     CHECK(trace_text_at_color("COPIED", 32.0f, 450.0f, C_GREEN));
 
+    /* A waiting local lane shows its yellow badge even before it starts. */
+    memset(&s_state.local_dock, 0, sizeof(s_state.local_dock));
+    s_state.local_dock.waiting = 1;
+    s_state.local_shown = 1;
+    s_state.dock.active = 0;
+    s_state.dock.state = UI_DOCK_IDLE;
+    s_state.dock_primary = UI_DOCK_LANE_NETWORK;
+    render();
+    CHECK(trace_has_text("LOCAL WAITING"));
+    CHECK(trace_has_text_color("LOCAL WAITING", C_YELLOW));
+
     setup();
     s_state.panes[UI_PANE_REMOTE].connected = 0;
     s_state.dock.state = UI_DOCK_IDLE;
