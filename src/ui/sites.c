@@ -195,6 +195,7 @@ static void dock_sites(const UiState *state)
     }
 
     dock_panel_draw(&p);
+    dock_badge_draw(state);
 }
 
 static void legend_draw(void)

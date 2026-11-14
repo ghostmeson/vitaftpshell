@@ -7,6 +7,9 @@
 #include "core/fmt.h"
 #include "core/path.h"
 
+static void open_confirm(UiState *state, UiConfirmKind kind);
+static int is_server_direction(int direction);
+
 static char lower_ascii(char c)
 {
     if (c >= 'A' && c <= 'Z')
@@ -116,6 +119,34 @@ static void set_action_error(UiState *state, UiPaneState *pane,
 
 /* Clear an action failure on the next key. A failed listing (no rows) and a
  * lost session keep their detail because their centered state reads it. */
+static void open_dock_cancel(UiState *state)
+{
+    int network = state->dock.active;
+    int local = state->local_dock.active;
+    int server = is_server_direction((int)state->dock.direction);
+
+    if (network && local) {
+        open_confirm(state, UI_CONFIRM_CANCEL_LANES);
+        if (server) {
+            /* A server transfer ends through the server-stop confirm. */
+            state->confirm.choices[1] = UI_CHOICE_CANCEL_LOCAL;
+            state->confirm.choice_count = 2;
+        }
+        return;
+    }
+    if (local) {
+        open_confirm(state, UI_CONFIRM_CANCEL_XFER);
+        return;
+    }
+    if (network) {
+        if (server) {
+            set_status(state, "STOP THE SERVER TO CANCEL");
+            return;
+        }
+        open_confirm(state, UI_CONFIRM_CANCEL_XFER);
+    }
+}
+
 static void clear_action_error(UiPaneState *pane)
 {
     if (pane != NULL && pane->row_count > 0 && !pane->session_lost)
@@ -343,15 +374,62 @@ static const UiRow *selected_row(const UiState *state, UiPane pane)
     return &p->rows[p->selected];
 }
 
-static void set_transfer_dock(UiState *state, const UiStateEvent *event,
+static int is_local_direction(int direction)
+{
+    return direction >= XFER_DIR_LOCAL_COPY &&
+           direction <= XFER_DIR_LOCAL_MKDIR;
+}
+
+static int is_server_direction(int direction)
+{
+    return direction == XFER_DIR_SERVER_DOWNLOAD ||
+           direction == XFER_DIR_SERVER_UPLOAD;
+}
+
+static UiDock *lane_for(UiState *state, const UiStateEvent *event)
+{
+    if (event->direction_known && is_local_direction(event->direction)) {
+        state->local_shown = 1;
+        return &state->local_dock;
+    }
+    return &state->dock;
+}
+
+static void lane_started(UiState *state, UiDock *lane)
+{
+    if (lane == &state->local_dock) {
+        state->local_shown = 1;
+        lane->waiting = 0;
+        if (!state->dock.active)
+            state->dock_primary = UI_DOCK_LANE_LOCAL;
+    } else {
+        state->dock_primary = UI_DOCK_LANE_NETWORK;
+    }
+}
+
+static void lane_terminal(UiState *state, UiDock *lane)
+{
+    if (lane == &state->local_dock) {
+        state->local_shown = 1;
+        lane->waiting = 0;
+        if (!state->dock.active)
+            state->dock_primary = UI_DOCK_LANE_LOCAL;
+    } else {
+        state->dock_primary = (state->local_shown && state->local_dock.active)
+                                  ? UI_DOCK_LANE_LOCAL
+                                  : UI_DOCK_LANE_NETWORK;
+    }
+}
+
+static void set_transfer_dock(UiDock *dock, const UiStateEvent *event,
                               UiDockState dock_state)
 {
-    state->dock.state = dock_state;
+    dock->state = dock_state;
     if (event->text[0] != '\0')
-        fmt_copy(state->dock.message, sizeof(state->dock.message), event->text);
-    state->dock.done = event->bytes;
-    state->dock.total = event->total;
-    state->dock.total_known = event->total_known;
+        fmt_copy(dock->message, sizeof(dock->message), event->text);
+    dock->done = event->bytes;
+    dock->total = event->total;
+    dock->total_known = event->total_known;
 }
 
 static void open_confirm(UiState *state, UiConfirmKind kind)
@@ -390,6 +468,15 @@ static void open_confirm(UiState *state, UiConfirmKind kind)
         snprintf(c->title, sizeof(c->title), "PATH IN USE");
         snprintf(c->warning, sizeof(c->warning),
                  "WAIT RESUMES WHEN THE OTHER OPERATION RELEASES IT.");
+        break;
+    case UI_CONFIRM_CANCEL_LANES:
+        c->choices[0] = UI_CHOICE_KEEP;
+        c->choices[1] = UI_CHOICE_CANCEL_NETWORK;
+        c->choices[2] = UI_CHOICE_CANCEL_LOCAL;
+        c->choice_count = 3;
+        snprintf(c->title, sizeof(c->title), "CANCEL WHICH TRANSFER");
+        snprintf(c->warning, sizeof(c->warning),
+                 "THE CANCELLED PARTIAL FILE IS REMOVED.");
         break;
     case UI_CONFIRM_CANCEL_XFER:
         c->choices[0] = UI_CHOICE_KEEP;
@@ -689,7 +776,7 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
                 pane->selected = pane->row_count - 1;
             clamp_pane(pane);
         } else if (key == UI_KEY_CROSS) {
-            open_confirm(state, UI_CONFIRM_CANCEL_XFER);
+            open_dock_cancel(state);
         }
         return;
     }
@@ -1706,11 +1793,19 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
             close_confirm(state, 0);
             return;
         }
-        UiCommandType type =
-            (c->kind == UI_CONFIRM_CANCEL_XFER &&
-             choice == UI_CHOICE_CANCEL)
-                ? UI_CMD_CANCEL_TRANSFER
-                : UI_CMD_CONFIRM;
+        UiCommandType type = UI_CMD_CONFIRM;
+        if (c->kind == UI_CONFIRM_CANCEL_XFER && choice == UI_CHOICE_CANCEL) {
+            type = UI_CMD_CANCEL_TRANSFER;
+        } else if (c->kind == UI_CONFIRM_CANCEL_LANES) {
+            if (choice == UI_CHOICE_KEEP) {
+                close_confirm(state, 0);
+                return;
+            }
+            type = choice == UI_CHOICE_CANCEL_NETWORK ? UI_CMD_CANCEL_NETWORK
+                                                      : UI_CMD_CANCEL_LOCAL;
+        }
+        if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT)
+            state->local_dock.waiting = 1;
         UiCommand *command = emit(out, max, count, type);
         if (command != NULL && type == UI_CMD_CONFIRM) {
             command->confirm = c->kind;
@@ -1737,13 +1832,22 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
         UiChoice choice = UI_CHOICE_CANCEL;
         if (c->kind == UI_CONFIRM_DISCARD ||
             c->kind == UI_CONFIRM_CANCEL_XFER ||
+            c->kind == UI_CONFIRM_CANCEL_LANES ||
             c->kind == UI_CONFIRM_STOP_SERVER)
             choice = UI_CHOICE_KEEP;
-        UiCommandType type =
-            (c->kind == UI_CONFIRM_CANCEL_XFER &&
-             choice == UI_CHOICE_CANCEL)
-                ? UI_CMD_CANCEL_TRANSFER
-                : UI_CMD_CONFIRM;
+        UiCommandType type = UI_CMD_CONFIRM;
+        if (c->kind == UI_CONFIRM_CANCEL_XFER && choice == UI_CHOICE_CANCEL) {
+            type = UI_CMD_CANCEL_TRANSFER;
+        } else if (c->kind == UI_CONFIRM_CANCEL_LANES) {
+            if (choice == UI_CHOICE_KEEP) {
+                close_confirm(state, 0);
+                return;
+            }
+            type = choice == UI_CHOICE_CANCEL_NETWORK ? UI_CMD_CANCEL_NETWORK
+                                                      : UI_CMD_CANCEL_LOCAL;
+        }
+        if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT)
+            state->local_dock.waiting = 1;
         UiCommand *command = emit(out, max, count, type);
         if (command != NULL && type == UI_CMD_CONFIRM) {
             command->confirm = c->kind;
@@ -2064,87 +2168,102 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             fmt_copy(state->panes[event->pane].error,
                      sizeof(state->panes[event->pane].error), event->text);
         break;
-    case UI_EVT_TRANSFER_STARTED:
-        state->dock.active = 1;
-        if (state->dock.focused)
+    case UI_EVT_TRANSFER_STARTED: {
+        UiDock *lane = lane_for(state, event);
+        lane->active = 1;
+        if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
         if (event->direction_known)
-            state->dock.direction = (XferDirection)event->direction;
+            lane->direction = (XferDirection)event->direction;
         else
-            state->dock.direction = event->pane == UI_PANE_LOCAL
-                                        ? XFER_DIR_UPLOAD
-                                        : XFER_DIR_DOWNLOAD;
-        fmt_copy(state->dock.name, sizeof(state->dock.name), event->text);
-        set_transfer_dock(state, event, UI_DOCK_ACTIVE);
-        state->dock.done = 0;
-        state->dock.item_index = event->item_index;
-        state->dock.item_total = event->item_total;
-        state->dock.elapsed_ms = 0;
-        state->dock.elapsed_known = 0;
-        state->dock.rate_known = 0;
+            lane->direction = event->pane == UI_PANE_LOCAL ? XFER_DIR_UPLOAD
+                                                           : XFER_DIR_DOWNLOAD;
+        fmt_copy(lane->name, sizeof(lane->name), event->text);
+        set_transfer_dock(lane, event, UI_DOCK_ACTIVE);
+        lane->done = 0;
+        lane->item_index = event->item_index;
+        lane->item_total = event->item_total;
+        lane->elapsed_ms = 0;
+        lane->elapsed_known = 0;
+        lane->rate_known = 0;
+        lane_started(state, lane);
         break;
-    case UI_EVT_TRANSFER_PROGRESS:
-        if (!state->dock.active && (state->dock.state == UI_DOCK_DONE ||
-                                    state->dock.state == UI_DOCK_FAILED))
+    }
+    case UI_EVT_TRANSFER_PROGRESS: {
+        UiDock *lane = event->direction_known ? lane_for(state, event)
+                                              : &state->dock;
+        if (!lane->active &&
+            (lane->state == UI_DOCK_DONE || lane->state == UI_DOCK_FAILED))
             break;
-        set_transfer_dock(state, event, UI_DOCK_ACTIVE);
-        state->dock.rate = event->rate;
-        state->dock.rate_known = event->rate_known;
-        state->dock.elapsed_ms = event->elapsed_ms;
-        state->dock.elapsed_known = event->elapsed_known;
+        lane->active = 1;
+        set_transfer_dock(lane, event, UI_DOCK_ACTIVE);
+        lane->rate = event->rate;
+        lane->rate_known = event->rate_known;
+        lane->elapsed_ms = event->elapsed_ms;
+        lane->elapsed_known = event->elapsed_known;
         if (event->item_index > 0)
-            state->dock.item_index = event->item_index;
+            lane->item_index = event->item_index;
         if (event->item_total > 0)
-            state->dock.item_total = event->item_total;
+            lane->item_total = event->item_total;
         break;
-    case UI_EVT_TRANSFER_DONE:
-        state->dock.active = 0;
-        if (state->dock.focused)
+    }
+    case UI_EVT_TRANSFER_DONE: {
+        UiDock *lane = lane_for(state, event);
+        lane->active = 0;
+        if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
-        set_transfer_dock(state, event, UI_DOCK_DONE);
-        state->dock.rate = event->rate;
-        state->dock.rate_known = event->rate_known;
-        state->dock.elapsed_ms = event->elapsed_ms;
-        state->dock.elapsed_known = event->elapsed_known;
+        set_transfer_dock(lane, event, UI_DOCK_DONE);
+        lane->rate = event->rate;
+        lane->rate_known = event->rate_known;
+        lane->elapsed_ms = event->elapsed_ms;
+        lane->elapsed_known = event->elapsed_known;
+        lane_terminal(state, lane);
         break;
+    }
     case UI_EVT_TRANSFER_CANCELLED:
         state->dock.active = 0;
         if (state->dock.focused)
             set_focus(state, UI_FOCUS_LIST);
         state->dock.state = UI_DOCK_IDLE;
         state->dock.message[0] = '\0';
+        state->local_dock.active = 0;
+        state->local_dock.waiting = 0;
         set_status(state, "CANCELLED");
         break;
-    case UI_EVT_TRANSFER_FAILED:
-        state->dock.active = 0;
-        if (state->dock.focused)
+    case UI_EVT_TRANSFER_FAILED: {
+        UiDock *lane = lane_for(state, event);
+        lane->active = 0;
+        if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
-        set_transfer_dock(state, event, UI_DOCK_FAILED);
+        set_transfer_dock(lane, event, UI_DOCK_FAILED);
+        lane_terminal(state, lane);
         break;
-    case UI_EVT_BATCH_DONE:
-        state->dock.active = 0;
-        if (state->dock.focused)
-            set_focus(state, UI_FOCUS_LIST);
+    }
+    case UI_EVT_BATCH_DONE: {
+        UiDock *lane = &state->local_dock;
+        lane->active = 0;
+        state->local_shown = 1;
         if (event->direction_known)
-            state->dock.direction = (XferDirection)event->direction;
-        state->dock.state = UI_DOCK_DONE;
-        state->dock.done = event->bytes;
-        state->dock.total = event->total;
-        state->dock.total_known = event->total_known;
-        state->dock.item_index = event->item_index;
-        state->dock.item_total = event->item_total;
-        state->dock.skipped = event->batch_skipped;
-        state->dock.failed = event->batch_failed;
-        state->dock.cancelled = event->batch_cancelled;
-        state->dock.rate = event->rate;
-        state->dock.rate_known = event->rate_known;
-        state->dock.elapsed_ms = event->elapsed_ms;
-        state->dock.elapsed_known = event->elapsed_known;
+            lane->direction = (XferDirection)event->direction;
+        lane->state = UI_DOCK_DONE;
+        lane->done = event->bytes;
+        lane->total = event->total;
+        lane->total_known = event->total_known;
+        lane->item_index = event->item_index;
+        lane->item_total = event->item_total;
+        lane->skipped = event->batch_skipped;
+        lane->failed = event->batch_failed;
+        lane->cancelled = event->batch_cancelled;
+        lane->rate = event->rate;
+        lane->rate_known = event->rate_known;
+        lane->elapsed_ms = event->elapsed_ms;
+        lane->elapsed_known = event->elapsed_known;
         if (event->text[0] != '\0')
-            fmt_copy(state->dock.message, sizeof(state->dock.message),
-                     event->text);
+            fmt_copy(lane->message, sizeof(lane->message), event->text);
+        lane_terminal(state, lane);
         /* D18: a completed batch does not clear marks. */
         break;
+    }
     case UI_EVT_SERVER_STATE:
         state->server.run = (UiServerRun)event->value;
         state->server.clients = event->clients;

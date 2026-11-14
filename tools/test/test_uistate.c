@@ -63,6 +63,12 @@ static void reset(void)
     s_state.panes[UI_PANE_REMOTE].connected = 1;
 }
 
+static void set_focus_for_test(UiState *state, UiFocus focus)
+{
+    state->focus = focus;
+    state->dock.focused = focus == UI_FOCUS_DOCK;
+}
+
 static int send_key(UiKey key)
 {
     UiStateEvent event;
@@ -875,6 +881,93 @@ static void test_path_busy_prompt(void)
 
 /* D73: duplicate destination names are refused before any command, and a move
  * source inside another is skipped. */
+/* U27: each lane keeps its own dock; both running shows the network lane full
+ * and gives the dock cancel a three-choice prompt. */
+static void test_two_lane_dock(void)
+{
+    reset();
+    UiStateEvent net;
+    memset(&net, 0, sizeof(net));
+    net.kind = UI_EVT_TRANSFER_STARTED;
+    net.direction = XFER_DIR_DOWNLOAD;
+    net.direction_known = 1;
+    net.total = 100;
+    net.total_known = 1;
+    snprintf(net.text, sizeof(net.text), "FILE.BIN");
+    send_event(&net);
+    CHECK(s_state.dock.active == 1);
+    CHECK(s_state.local_dock.active == 0);
+    CHECK(s_state.dock_primary == UI_DOCK_LANE_NETWORK);
+
+    UiStateEvent local;
+    memset(&local, 0, sizeof(local));
+    local.kind = UI_EVT_TRANSFER_STARTED;
+    local.direction = XFER_DIR_LOCAL_COPY;
+    local.direction_known = 1;
+    local.total = 50;
+    local.total_known = 1;
+    local.item_index = 1;
+    local.item_total = 2;
+    snprintf(local.text, sizeof(local.text), "LOCAL.BIN");
+    send_event(&local);
+    CHECK(s_state.local_dock.active == 1);
+    CHECK(s_state.local_shown == 1);
+    CHECK(s_state.dock_primary == UI_DOCK_LANE_NETWORK);
+
+    UiStateEvent progress;
+    memset(&progress, 0, sizeof(progress));
+    progress.kind = UI_EVT_TRANSFER_PROGRESS;
+    progress.direction = XFER_DIR_LOCAL_COPY;
+    progress.direction_known = 1;
+    progress.bytes = 10;
+    progress.total = 50;
+    progress.total_known = 1;
+    send_event(&progress);
+    CHECK(s_state.local_dock.done == 10);
+    CHECK(s_state.dock.done == 0);
+
+    UiStateEvent done;
+    memset(&done, 0, sizeof(done));
+    done.kind = UI_EVT_TRANSFER_DONE;
+    done.direction = XFER_DIR_DOWNLOAD;
+    done.direction_known = 1;
+    done.bytes = 100;
+    done.total = 100;
+    done.total_known = 1;
+    send_event(&done);
+    CHECK(s_state.dock.active == 0);
+    CHECK(s_state.local_dock.active == 1);
+    CHECK(s_state.dock_primary == UI_DOCK_LANE_LOCAL);
+
+    /* Both active again: the dock prompt offers two lanes. */
+    s_state.dock.active = 1;
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    s_state.local_dock.active = 1;
+    s_state.local_dock.state = UI_DOCK_ACTIVE;
+    set_focus_for_test(&s_state, UI_FOCUS_DOCK);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_CANCEL_LANES);
+    CHECK(s_state.confirm.choices[0] == UI_CHOICE_KEEP);
+    CHECK(s_state.confirm.choices[1] == UI_CHOICE_CANCEL_NETWORK);
+    CHECK(s_state.confirm.choices[2] == UI_CHOICE_CANCEL_LOCAL);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CANCEL_NETWORK) != NULL);
+
+    reset();
+    s_state.dock.active = 1;
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    s_state.local_dock.active = 1;
+    s_state.local_dock.state = UI_DOCK_ACTIVE;
+    set_focus_for_test(&s_state, UI_FOCUS_DOCK);
+    send_key(UI_KEY_CROSS);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CANCEL_LOCAL) != NULL);
+}
+
 static void test_paste_guards(void)
 {
     reset();
@@ -1486,6 +1579,7 @@ int main(void)
     test_sites_scroll();
     test_confirm_busy_guard();
     test_path_busy_prompt();
+    test_two_lane_dock();
     test_paste_guards();
     test_dock_cancel_and_site_delete();
     test_listing_and_dock();

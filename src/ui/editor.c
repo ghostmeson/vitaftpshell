@@ -179,6 +179,7 @@ static void dock_editor(const UiState *state)
     p.right_a_color = editor->dirty ? C_WHITE : C_DIM;
 
     dock_panel_draw(&p);
+    dock_badge_draw(state);
 }
 
 static void legend_draw(void)

@@ -2866,7 +2866,7 @@ static void server_event(void *ctx, const FtpServerEvent *event)
     }
 }
 
-static void cancel_current_transfer(Worker *worker)
+static void cancel_local_lane(Worker *worker)
 {
     if (worker->local_run != NULL) {
         worker->local_cancel_requested = 1;
@@ -2877,10 +2877,17 @@ static void cancel_current_transfer(Worker *worker)
         worker->local_cancel_seen = 0;
         return;
     }
-    if (worker->local_batch.active) {
-        local_batch_cancel(worker);
-        return;
+    if (worker->busy_plan != NULL) {
+        free(worker->busy_plan);
+        worker->busy_plan = NULL;
+        worker->busy_waiting = 0;
     }
+    if (worker->local_batch.active)
+        local_batch_cancel(worker);
+}
+
+static void cancel_network_transfer(Worker *worker)
+{
     if (worker->upload_stat_active) {
         emit_error(worker, UI_PANE_REMOTE, "REMOTE CHECK IN PROGRESS",
                    OP_CAUSE_APP, OP_STAGE_COMMAND);
@@ -2903,6 +2910,17 @@ static void cancel_current_transfer(Worker *worker)
         emit(worker, &cancelled);
         pump_queue(worker);
     }
+}
+
+/* The single-lane confirm means the lane that is running. */
+static void cancel_current_transfer(Worker *worker)
+{
+    if (worker->local_run != NULL || worker->local_batch.active ||
+        worker->busy_plan != NULL) {
+        cancel_local_lane(worker);
+        return;
+    }
+    cancel_network_transfer(worker);
 }
 
 static void handle_command(Worker *worker, const UiCommand *command)
@@ -2982,6 +3000,12 @@ static void handle_command(Worker *worker, const UiCommand *command)
         break;
     case UI_CMD_CANCEL_TRANSFER:
         cancel_current_transfer(worker);
+        break;
+    case UI_CMD_CANCEL_NETWORK:
+        cancel_network_transfer(worker);
+        break;
+    case UI_CMD_CANCEL_LOCAL:
+        cancel_local_lane(worker);
         break;
     case UI_CMD_CLEAR_QUEUE:
         xfer_clear_queued(&worker->queue);

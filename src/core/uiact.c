@@ -41,6 +41,10 @@ const char *ui_command_name(UiCommandType type)
         return "dismiss_error";
     case UI_CMD_CANCEL_TRANSFER:
         return "cancel_transfer";
+    case UI_CMD_CANCEL_NETWORK:
+        return "cancel_network";
+    case UI_CMD_CANCEL_LOCAL:
+        return "cancel_local";
     case UI_CMD_CLEAR_QUEUE:
         return "clear_queue";
     case UI_CMD_QUIT:
@@ -70,6 +74,8 @@ const char *ui_confirm_name(UiConfirmKind kind)
         return "delete_site";
     case UI_CONFIRM_PATH_BUSY:
         return "path_busy";
+    case UI_CONFIRM_CANCEL_LANES:
+        return "cancel_lanes";
     case UI_CONFIRM_NONE:
     default:
         return "none";

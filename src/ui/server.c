@@ -203,6 +203,7 @@ static void dock_server(const UiState *state)
     p.right_a = port;
     p.right_a_color = C_DIM;
     dock_panel_draw(&p);
+    dock_badge_draw(state);
 }
 
 static void legend_draw(const UiState *state)
