@@ -131,6 +131,30 @@ static const char *direction_word(XferDirection direction)
     }
 }
 
+static const char *direction_done_word(XferDirection direction)
+{
+    switch (direction) {
+    case XFER_DIR_UPLOAD:
+    case XFER_DIR_SERVER_UPLOAD:
+        return "UPLOADED";
+    case XFER_DIR_DOWNLOAD:
+    case XFER_DIR_SERVER_DOWNLOAD:
+        return "DOWNLOADED";
+    case XFER_DIR_LOCAL_COPY:
+        return "COPIED";
+    case XFER_DIR_LOCAL_MOVE:
+        return "MOVED";
+    case XFER_DIR_LOCAL_DELETE:
+        return "DELETED";
+    case XFER_DIR_LOCAL_RENAME:
+        return "RENAMED";
+    case XFER_DIR_LOCAL_MKDIR:
+        return "FOLDER CREATED";
+    default:
+        return "DONE";
+    }
+}
+
 static const char *pane_name(UiPane pane)
 {
     return pane == UI_PANE_LOCAL ? "LOCAL" : "REMOTE";
@@ -237,27 +261,57 @@ static void active_dock(const UiState *state, DockPanel *p)
 static void done_dock(const UiState *state, DockPanel *p)
 {
     const UiDock *d = &state->dock;
+    static char subject[64];
     static char line[96];
     static char rate[40];
-    static char index[32];
+    static char skipped_text[32];
 
-    p->word = "DONE";
-    p->word_color = C_GREEN;
-    p->subject = d->name;
+    int batch = d->item_total > 1;
+    int done = d->item_index;
+    int failed = d->failed;
+    int skipped = d->skipped;
+    int cancelled = d->cancelled;
+
+    if (skipped > 0 && done == 0 && failed == 0 && cancelled == 0) {
+        p->word = "SKIPPED";
+        p->word_color = C_DIM;
+    } else if (cancelled > 0) {
+        p->word = "CANCELLED";
+        p->word_color = C_WHITE;
+    } else {
+        p->word = direction_done_word(d->direction);
+        if (failed > 0)
+            p->word_color = (done > 0 || skipped > 0) ? C_YELLOW : C_RED;
+        else
+            p->word_color = C_GREEN;
+    }
+
+    if (batch) {
+        if (cancelled > 0 || failed > 0)
+            snprintf(subject, sizeof(subject), "%d OF %d ITEMS", done,
+                     d->item_total);
+        else
+            snprintf(subject, sizeof(subject), "%d ITEMS", d->item_total);
+        p->subject = subject;
+    } else {
+        p->subject = d->name;
+    }
+
     p->progress_valid = 1;
     p->progress = 1.0f;
     p->bar_color = C_YELLOW;
 
-    if (d->item_index > 0 && d->item_total > 0) {
-        snprintf(index, sizeof(index), "%d OF %d", d->item_index,
-                 d->item_total);
-        p->right_a = index;
-        p->right_a_color = C_DIM;
+    if (batch && skipped > 0) {
+        snprintf(skipped_text, sizeof(skipped_text), "%d SKIPPED", skipped);
+        p->right_a = skipped_text;
+        p->right_a_color = C_YELLOW;
     }
 
     char size[32];
     fmt_size(size, sizeof(size), d->total_known ? d->total : d->done, 1);
-    if (d->elapsed_known) {
+    if (failed > 0 && d->message[0] != '\0') {
+        snprintf(line, sizeof(line), "%s", d->message);
+    } else if (d->elapsed_known) {
         unsigned seconds = (unsigned)(d->elapsed_ms / 1000u);
         char hms[16];
         theme_fmt_hms(hms, sizeof(hms), (int)seconds);
@@ -284,7 +338,7 @@ static void failed_dock(const UiState *state, DockPanel *p)
     static char index[32];
 
     p->word = "FAILED";
-    p->word_color = C_YELLOW;
+    p->word_color = C_RED;
     p->subject = d->name;
     p->progress_valid = d->total_known && d->total > 0;
     p->progress = p->progress_valid ? (float)((double)d->done / (double)d->total)

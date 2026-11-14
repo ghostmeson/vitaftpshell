@@ -63,7 +63,7 @@ static void card_draw(const UiState *state, const LayoutRect *r)
                  sites->reply[0] != '\0' ? sites->reply : "NO REPLY");
         font_fit(footer, PX_MICRO, 700.0f, fitted_footer,
                  sizeof(fitted_footer));
-        font_text(fitted_footer, 32.0f, 160.0f, PX_MICRO, C_YELLOW);
+        font_text(fitted_footer, 32.0f, 160.0f, PX_MICRO, C_RED);
     } else if (site->anonymous) {
         font_text("NO PASSWORD STORED", 32.0f, 160.0f, PX_MICRO, C_DIM);
     } else {
@@ -81,25 +81,25 @@ static void row_draw(const UiSiteList *sites, const LayoutRect *r, int index,
     float y = 246.0f + (float)position * 30.0f;
     int selected = index == sites->selected;
 
-    if (selected) {
-        ui_wash((float)r->x + 1.0f, y, (float)r->w - 2.0f, 30.0f, 0.06f);
-        draw_rect((float)r->x + 8.0f, y, 2.0f, 30.0f, C_WHITE);
-    }
+    if (selected)
+        ui_row_select((float)r->x + 1.0f, y, (float)r->w - 2.0f, 30.0f);
 
     char name[128];
     font_fit(site->name, PX_LABEL, 268.0f, name, sizeof(name));
-    font_text(name, (float)r->x + 32.0f, y + 8.0f, PX_LABEL, C_WHITE);
+    font_text(name, (float)r->x + 32.0f, y + 8.0f, PX_LABEL,
+              selected ? C_FIELD : C_WHITE);
 
     char host[192];
     char fitted_host[192];
     snprintf(host, sizeof(host), "%s:%u", site->host, (unsigned)site->port);
     font_fit(host, PX_MICRO, 520.0f, fitted_host, sizeof(fitted_host));
     font_text(fitted_host, (float)r->x + 300.0f, y + 11.5f, PX_MICRO,
-              C_CYAN_DIM);
+              selected ? C_FIELD : C_CYAN_DIM);
 
     const char *badge = site->anonymous ? "ANON" : "LOGIN";
     font_text_right(badge, (float)(r->x + r->w) - 14.0f, y + 11.5f, PX_MICRO,
-                    site->anonymous ? C_DIM : C_CYAN);
+                    selected ? C_FIELD
+                             : (site->anonymous ? C_DIM : C_CYAN));
 }
 
 static void table_draw(const UiState *state, const LayoutRect *r)
@@ -111,7 +111,7 @@ static void table_draw(const UiState *state, const LayoutRect *r)
 
     font_text_tracked("ALL SITES", 32.0f, 206.0f, PX_LABEL, C_DIM, 2.0f);
     if (sites->save_unavailable)
-        font_text("SAVE UNAVAILABLE", 178.0f, 206.0f, PX_LABEL, C_YELLOW);
+        font_text("SAVE UNAVAILABLE", 178.0f, 206.0f, PX_LABEL, C_RED);
 
     char count[32];
     snprintf(count, sizeof(count), "%d %s", sites->count,

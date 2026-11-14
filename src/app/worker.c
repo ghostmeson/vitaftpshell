@@ -111,7 +111,12 @@ struct Worker {
     XferDirection batch_direction;
     FsOpConflict local_conflict;
     int local_conflict_set;
+    int local_cancel_seen;
     LocalBatch local_batch;
+    UiCommand batch_preflight[UI_CLIP_MAX];
+    int batch_preflight_count;
+    unsigned batch_preflight_id;
+    int batch_executing;
     int transfer_active;
     int transfer_cancelled;
     uint64_t transfer_start_ms;
@@ -144,6 +149,9 @@ static void pump_queue(Worker *worker);
 static void start_transfer_item(Worker *worker, const XferItem *item);
 static void pump_remote_actions(Worker *worker);
 static void worker_list_local(Worker *worker, const char *path);
+static const char *last_name(const char *path);
+static int same_folder_path(const char *a, const char *b);
+static void queue_pending_action(Worker *worker, const UiCommand *command);
 
 static uint64_t now_ms(Worker *worker)
 {
@@ -220,6 +228,9 @@ static void local_batch_begin(Worker *worker, const UiCommand *command,
     worker->local_batch.direction = direction;
     worker->local_conflict = FSOP_CONFLICT_ASK;
     worker->local_conflict_set = 0;
+    worker->batch_executing = 0;
+    worker->batch_preflight_count = 0;
+    worker->batch_preflight_id = 0;
     worker->local_batch.started_ms = now_ms(worker);
     worker->local_batch.last_ms = worker->local_batch.started_ms;
     worker->local_batch.total_known = 1;
@@ -244,6 +255,7 @@ static void local_batch_emit_done(Worker *worker)
     done.total = batch->bytes_total;
     done.total_known = batch->total_known;
     uint64_t elapsed = now_ms(worker) - batch->started_ms;
+    fmt_copy(done.detail, sizeof(done.detail), worker->last_error);
     done.elapsed_ms = elapsed;
     done.elapsed_known = elapsed > 0;
     if (elapsed > 0 && batch->bytes_done > 0) {
@@ -255,6 +267,9 @@ static void local_batch_emit_done(Worker *worker)
     unsigned dropped = batch->id;
     memset(batch, 0, sizeof(*batch));
     batch->dropped_id = dropped;
+    worker->batch_executing = 0;
+    worker->batch_preflight_count = 0;
+    worker->batch_preflight_id = 0;
 }
 
 static void local_batch_record(Worker *worker, FsOpRunResult result,
@@ -308,6 +323,8 @@ static void local_batch_cancel(Worker *worker)
     worker_list_local(worker, worker->local_path);
     local_batch_emit_done(worker);
     worker->pending_command_count = 0;
+    worker->batch_preflight_count = 0;
+    worker->batch_executing = 0;
 }
 
 static void local_batch_flush(Worker *worker)
@@ -323,6 +340,96 @@ static void local_batch_flush(Worker *worker)
     if (missing > 0)
         batch->failed += missing;
     local_batch_emit_done(worker);
+}
+
+static int local_cancel_requested(void *ctx)
+{
+    Worker *worker = ctx;
+    if (worker == NULL || worker->handoff == NULL)
+        return 0;
+    if (!handoff_cancel_pending(worker->handoff))
+        return 0;
+    worker->local_cancel_seen = 1;
+    return 1;
+}
+
+static int preflight_dest(const UiCommand *command, Path *dest)
+{
+    if (command->action != UI_ACTION_COPY &&
+        command->action != UI_ACTION_MOVE)
+        return 0;
+    Path parent;
+    if (path_parent(command->path, &parent) == PATH_OK &&
+        strcmp(parent.text, command->path2) == 0)
+        return 0;
+    const char *name = last_name(command->path);
+    if (!path_name_is_safe(name))
+        return 0;
+    return path_join(command->path2, name, dest) == PATH_OK;
+}
+
+static void local_batch_execute(Worker *worker)
+{
+    worker->batch_executing = 1;
+    for (int i = 0; i < worker->batch_preflight_count; ++i) {
+            if (worker->pending.valid) {
+            for (int j = i; j < worker->batch_preflight_count; ++j)
+                queue_pending_action(worker, &worker->batch_preflight[j]);
+            worker->batch_preflight_count = 0;
+            return;
+        }
+        handle_action(worker, &worker->batch_preflight[i]);
+    }
+    worker->batch_preflight_count = 0;
+}
+
+static void local_batch_preflight(Worker *worker)
+{
+    Path existing[UI_CONFIRM_MAX];
+    int existing_count = 0;
+
+    for (int i = 0; i < worker->batch_preflight_count; ++i) {
+        Path dest;
+        if (!preflight_dest(&worker->batch_preflight[i], &dest))
+            continue;
+        FsEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        if (worker->ports.fs->stat(worker->ports.fs->ctx, dest.text,
+                                   &entry) != FS_OK ||
+            entry.type == FS_ENTRY_DIR)
+            continue;
+        int duplicate = 0;
+        for (int j = 0; j < existing_count; ++j) {
+            if (strcmp(existing[j].text, dest.text) == 0) {
+                duplicate = 1;
+                break;
+            }
+        }
+        if (!duplicate && existing_count < UI_CONFIRM_MAX)
+            existing[existing_count++] = dest;
+    }
+
+    if (existing_count == 0) {
+        local_batch_execute(worker);
+        return;
+    }
+
+    HandoffConfirm request;
+    memset(&request, 0, sizeof(request));
+    request.kind = UI_CONFIRM_CONFLICT;
+    request.valid = 1;
+    fmt_copy(request.context, sizeof(request.context), "TRANSFER");
+    request.item_count = existing_count;
+    request.existing_count = existing_count;
+    if (request.item_count > HANDOFF_CONFIRM_ITEMS)
+        request.item_count = HANDOFF_CONFIRM_ITEMS;
+    for (int i = 0; i < request.item_count; ++i)
+        fmt_copy(request.items[i].name, sizeof(request.items[i].name),
+                 existing[i].text);
+    handoff_confirm_request(worker->handoff, &request);
+
+    worker->pending.valid = 1;
+    worker->pending.kind = 3;
 }
 
 static void emit_session(Worker *worker, int connected, const char *detail)
@@ -1168,8 +1275,8 @@ static void run_plan(Worker *worker, const UiCommand *command,
     emit(worker, &started);
 
     FsOpProgress progress;
-    FsOpRunResult result = fsop_run(worker->ports.fs, plan, &progress, NULL,
-                                    NULL);
+    FsOpRunResult result = fsop_run(worker->ports.fs, plan, &progress,
+                                    local_cancel_requested, worker);
 
     local_batch_record(worker, result, plan, &progress);
 
@@ -1561,6 +1668,25 @@ static void handle_action(Worker *worker, const UiCommand *command)
         ftp_server_busy(worker->server)) {
         emit_error(worker, UI_PANE_LOCAL, "TRANSFER IN PROGRESS",
                    OP_CAUSE_APP, OP_STAGE_TRANSFER);
+        return;
+    }
+
+    if (!worker->batch_executing && command->batch_id != 0) {
+        if (worker->pending.valid) {
+            queue_pending_action(worker, command);
+            return;
+        }
+        if (worker->batch_preflight_count == 0 ||
+            worker->batch_preflight_id != command->batch_id) {
+            worker->batch_preflight_count = 0;
+            worker->batch_preflight_id = command->batch_id;
+        }
+        if (worker->batch_preflight_count < UI_CLIP_MAX)
+            worker->batch_preflight[worker->batch_preflight_count++] =
+                *command;
+        if (!command->batch_last)
+            return;
+        local_batch_preflight(worker);
         return;
     }
 
@@ -2354,6 +2480,15 @@ static void server_event(void *ctx, const FtpServerEvent *event)
 
 static void cancel_current_transfer(Worker *worker)
 {
+    if (worker->local_cancel_seen) {
+        /* The executor already saw this cancel and stopped. */
+        worker->local_cancel_seen = 0;
+        return;
+    }
+    if (worker->local_batch.active) {
+        local_batch_cancel(worker);
+        return;
+    }
     if (worker->upload_stat_active) {
         emit_error(worker, UI_PANE_REMOTE, "REMOTE CHECK IN PROGRESS",
                    OP_CAUSE_APP, OP_STAGE_COMMAND);
@@ -2508,6 +2643,18 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     worker->batch_done++;
                     batch_finish(worker);
                     pump_queue(worker);
+                }
+            } else if (pending.kind == 3) {
+                if (command->choice == UI_CHOICE_CANCEL) {
+                    worker->local_conflict_set = 0;
+                    local_batch_cancel(worker);
+                } else {
+                    worker->local_conflict =
+                        command->choice == UI_CHOICE_OVERWRITE
+                            ? FSOP_CONFLICT_OVERWRITE
+                            : FSOP_CONFLICT_SKIP;
+                    worker->local_conflict_set = 1;
+                    local_batch_execute(worker);
                 }
             } else if (pending.kind == 2) {
                 if (command->confirm == UI_CONFIRM_HIGH_RISK) {

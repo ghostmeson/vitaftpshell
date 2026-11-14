@@ -302,6 +302,7 @@ static void drain_events(App *app)
             break;
         case HANDOFF_EVT_BATCH_DONE:
             ui.kind = UI_EVT_BATCH_DONE;
+            fmt_copy(ui.text, sizeof(ui.text), event.detail);
             ui.pane = pane_for_direction(event.direction);
             ui.direction = (int)event.direction;
             ui.direction_known = 1;

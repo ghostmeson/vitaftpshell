@@ -63,7 +63,7 @@ static void status_draw(const UiState *state, const LayoutRect *r)
               PX_MICRO, server->run == UI_SERVER_ON ? C_CYAN_DIM : C_DIM);
 
     if (server->error[0] != '\0')
-        font_text(server->error, 32.0f, 190.0f, PX_MICRO, C_YELLOW);
+        font_text(server->error, 32.0f, 190.0f, PX_MICRO, C_RED);
 
     if (server->port_focus) {
         ui_wash(26.0f, 210.0f, 516.0f, 30.0f, 0.04f);

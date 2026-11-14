@@ -190,6 +190,7 @@ typedef struct {
 void handoff_init(Handoff *handoff);
 
 int handoff_command_push(Handoff *handoff, const UiCommand *command);
+int handoff_cancel_pending(const Handoff *handoff);
 int handoff_command_pop(Handoff *handoff, UiCommand *out);
 unsigned handoff_command_lost(const Handoff *handoff);
 

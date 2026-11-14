@@ -846,9 +846,7 @@ static void test_dock_cancel_and_site_delete(void)
     send_key(UI_KEY_RIGHT);
     CHECK(s_state.confirm.choice_focus == 1);
     send_key(UI_KEY_CROSS);
-    CHECK(command(UI_CMD_CONFIRM) != NULL);
-    CHECK(command(UI_CMD_CONFIRM)->confirm == UI_CONFIRM_CANCEL_XFER);
-    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_CANCEL);
+    CHECK(command(UI_CMD_CANCEL_TRANSFER) != NULL);
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
     CHECK(s_state.dock.focused == 0);
 

@@ -1423,8 +1423,7 @@ static void test_quit_with_server(void)
 
 static void test_local_batch_terminal(void)
 {
-    App *app = make_app_ex("ux0:data/A.TXT", "A", "ux0:data/B.TXT", "B",
-                           NULL);
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
     if (app == NULL)
         return;
     fake_fs_seed_file("ux0:data/C.TXT", "C", 1);
@@ -1454,6 +1453,60 @@ static void test_local_batch_terminal(void)
     CHECK(app_state(app)->dock.item_total == 3);
     CHECK(app_state(app)->dock.item_index == 3);
     CHECK(app_state(app)->dock.skipped == 0);
+    CHECK(app_state(app)->dock.failed == 0);
+
+    app_destroy(app);
+}
+
+static void test_local_batch_preflight(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/C.TXT", "C", 1);
+    fake_fs_add_dir("ux0:data/DEST");
+    fake_fs_seed_file("ux0:data/DEST/A.TXT", "OLD-A", 5);
+    fake_fs_seed_file("ux0:data/DEST/B.TXT", "OLD-B", 5);
+
+    enter_ux0_data(app);
+    select_local_named(app, "A.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    select_local_named(app, "B.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    select_local_named(app, "C.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_COPY);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    enter_local_named(app, "DEST", "ux0:data/DEST");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 30);
+
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+    CHECK(app_state(app)->confirm.item_count == 2);
+    CHECK(app_state(app)->confirm.existing_count == 2);
+    if (app_state(app)->confirm.item_count == 2) {
+        CHECK(strcmp(app_state(app)->confirm.items[0].name,
+                     "ux0:data/DEST/A.TXT") == 0);
+        CHECK(strcmp(app_state(app)->confirm.items[1].name,
+                     "ux0:data/DEST/B.TXT") == 0);
+    }
+
+    /* CANCEL, SKIP, OVERWRITE: move to SKIP and confirm. */
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 60);
+
+    CHECK(content_is("ux0:data/DEST/A.TXT", "OLD-A"));
+    CHECK(content_is("ux0:data/DEST/B.TXT", "OLD-B"));
+    CHECK(fake_fs_exists("ux0:data/DEST/C.TXT"));
+    CHECK(app_state(app)->dock.item_total == 3);
+    CHECK(app_state(app)->dock.item_index == 1);
+    CHECK(app_state(app)->dock.skipped == 2);
     CHECK(app_state(app)->dock.failed == 0);
 
     app_destroy(app);
@@ -1521,6 +1574,7 @@ int main(void)
     test_clipboard_move();
     test_local_batch_terminal();
     test_local_conflict_prompt();
+    test_local_batch_preflight();
     test_delete_confirm_fresh();
     test_delete_high_risk_and_protected();
     test_cancel();

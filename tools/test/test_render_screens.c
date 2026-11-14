@@ -116,7 +116,7 @@ static void test_sites(void)
     CHECK(trace_text_at("FTP.GNU.ORG", 50.0f, 254.0f));
     CHECK(trace_text_at("ftp.gnu.org:21", 318.0f, 257.5f));
     CHECK(trace_text_at("192.168.1.20:2121", 318.0f, 287.5f));
-    CHECK(trace_text_right("LOGIN", 928.0f, 287.5f, PX_MICRO, C_CYAN));
+    CHECK(trace_text_right("LOGIN", 928.0f, 287.5f, PX_MICRO, C_FIELD));
     CHECK(!trace_has_rect_at(936.0f, 246.0f, C_HAIR));
 
     s_state.sites.rows[1].anonymous = 1;
@@ -152,7 +152,7 @@ static void test_sites(void)
     }
     s_state.sites.save_unavailable = 1;
     render();
-    CHECK(trace_text_at_color("SAVE UNAVAILABLE", 178.0f, 206.0f, C_YELLOW));
+    CHECK(trace_text_at_color("SAVE UNAVAILABLE", 178.0f, 206.0f, C_RED));
     CHECK(trace_text_right("7 IN MEMORY", 928.0f, 209.5f, PX_MICRO, C_DIM));
     CHECK(trace_has_rect(936.0f, 246.0f, 2.0f, 180.0f, C_HAIR));
     CHECK(trace_text_at("SITE0", 50.0f, 254.0f));
@@ -212,8 +212,8 @@ static void test_editor(void)
     editor->error[0] = '\0';
     snprintf(editor->error, sizeof(editor->error), "NAME IS REQUIRED");
     render();
-    CHECK(trace_text_at_color("NAME IS REQUIRED", 32.0f, 160.0f, C_YELLOW));
-    CHECK(trace_text_at_color("NAME", 50.0f, 254.0f, C_YELLOW));
+    CHECK(trace_text_at_color("NAME IS REQUIRED", 32.0f, 160.0f, C_RED));
+    CHECK(trace_text_at_color("NAME", 50.0f, 254.0f, C_RED));
 
     /* The reducer skips the credential rows while anonymous is on. */
     editor->anonymous = 1;
@@ -389,7 +389,7 @@ static void test_server(void)
              "PORT 1337 BUSY - ANOTHER SERVER MAY USE IT");
     render();
     CHECK(trace_text_at_color("PORT 1337 BUSY - ANOTHER SERVER MAY USE IT",
-                              32.0f, 190.0f, C_YELLOW));
+                              32.0f, 190.0f, C_RED));
     CHECK(trace_has_rect(26.0f, 210.0f, 2.0f, 30.0f, C_WHITE));
 
     setup();
@@ -402,7 +402,7 @@ static void test_server(void)
              "NO NETWORK - CONNECT TO WI-FI");
     render();
     CHECK(trace_text_at_color("NO NETWORK - CONNECT TO WI-FI", 32.0f, 190.0f,
-                              C_YELLOW));
+                              C_RED));
     CHECK(trace_text_at("--", 32.0f + font_width("FTP://", PX_MICRO) + 8.0f, 156.0f));
 }
 
