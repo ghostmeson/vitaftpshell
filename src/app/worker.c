@@ -11,6 +11,7 @@
 #include "core/fsop_run.h"
 #include "core/logev.h"
 #include "core/path.h"
+#include "core/reserve.h"
 #include "core/store.h"
 
 #ifndef VFTPSHELL_VERSION
@@ -124,6 +125,12 @@ struct Worker {
     uint64_t local_run_started_ms;
     uint64_t local_run_last_bytes;
     int local_cancel_requested;
+    /* U26: reservations between the lanes, and the item waiting on one. */
+    Reserve reserve;
+    UiCommand busy_command;
+    FsOpPlan *busy_plan;
+    char busy_blocker[PATH_MAX_LEN];
+    int busy_waiting;
     LocalBatch local_batch;
     UiCommand batch_preflight[UI_CLIP_MAX];
     /* Existing destinations named by the one prompt the batch may ask. Kept in
@@ -171,6 +178,8 @@ static const char *last_name(const char *path);
 static int same_folder_path(const char *a, const char *b);
 static void queue_pending_action(Worker *worker, const UiCommand *command);
 static void local_batch_advance(Worker *worker);
+static int run_plan_begin(Worker *worker, const UiCommand *command,
+                          FsOpPlan *plan);
 
 static uint64_t now_ms(Worker *worker)
 {
@@ -347,6 +356,9 @@ static void local_batch_cancel(Worker *worker)
     worker->batch_execute_index = 0;
     worker->batch_preflight_count = 0;
     worker->batch_executing = 0;
+    free(worker->busy_plan);
+    worker->busy_plan = NULL;
+    worker->busy_waiting = 0;
 }
 
 static void local_batch_flush(Worker *worker)
@@ -354,7 +366,7 @@ static void local_batch_flush(Worker *worker)
     LocalBatch *batch = &worker->local_batch;
     if (!batch->active || worker->pending.valid ||
         worker->pending_command_count > 0 || worker->batch_executing ||
-        worker->local_run != NULL)
+        worker->local_run != NULL || worker->busy_plan != NULL)
         return;
     if (now_ms(worker) - batch->last_ms < 250)
         return;
@@ -412,7 +424,7 @@ static void local_batch_advance(Worker *worker)
     LocalBatch *batch = &worker->local_batch;
     if (!batch->active || !worker->batch_executing)
         return;
-    if (worker->local_run != NULL)
+    if (worker->local_run != NULL || worker->busy_plan != NULL)
         return;
     if (worker->pending.valid || worker->pending_command_count > 0)
         return;
@@ -1326,6 +1338,99 @@ static int build_dest_facts(Worker *worker, const char *source,
     return 1;
 }
 
+static void release_local_reservations(Worker *worker)
+{
+    reserve_release(&worker->reserve, RESERVE_LANE_LOCAL);
+}
+
+static ReserveKind step_source_kind(FsOpStepKind kind)
+{
+    switch (kind) {
+    case FSOP_STEP_RENAME:
+    case FSOP_STEP_DELETE_FILE:
+    case FSOP_STEP_DELETE_DIR:
+        return RESERVE_TREE;
+    default:
+        return RESERVE_READ;
+    }
+}
+
+static ReserveKind step_dest_kind(FsOpStepKind kind)
+{
+    return kind == FSOP_STEP_RENAME ? RESERVE_TREE : RESERVE_WRITE;
+}
+
+/* Reserve every path the plan will touch against the other lanes. 1 when the
+ * plan holds the paths, 0 when a blocker was found, -1 when the table filled. */
+static int reserve_local_plan(Worker *worker, const FsOpPlan *plan,
+                              char *blocker, size_t cap)
+{
+    release_local_reservations(worker);
+
+    for (int i = 0; i < plan->step_count; ++i) {
+        const FsOpStep *step = &plan->steps[i];
+        FsOpStepKind kind = (FsOpStepKind)step->kind;
+        if (kind != FSOP_STEP_MKDIR) {
+            const char *src = fsop_plan_step_source(plan, i);
+            if (src[0] != '\0' &&
+                reserve_conflict(&worker->reserve, step_source_kind(kind), src,
+                                 blocker, cap))
+                return 0;
+        }
+        if (kind != FSOP_STEP_DELETE_FILE && kind != FSOP_STEP_DELETE_DIR) {
+            const char *dst = fsop_plan_step_dest(plan, i);
+            if (dst[0] != '\0' &&
+                reserve_conflict(&worker->reserve, step_dest_kind(kind), dst,
+                                 blocker, cap))
+                return 0;
+        }
+    }
+
+    for (int i = 0; i < plan->step_count; ++i) {
+        const FsOpStep *step = &plan->steps[i];
+        FsOpStepKind kind = (FsOpStepKind)step->kind;
+        if (kind != FSOP_STEP_MKDIR) {
+            const char *src = fsop_plan_step_source(plan, i);
+            if (src[0] != '\0' &&
+                !reserve_add(&worker->reserve, RESERVE_LANE_LOCAL,
+                             step_source_kind(kind), src)) {
+                release_local_reservations(worker);
+                return -1;
+            }
+        }
+        if (kind != FSOP_STEP_DELETE_FILE && kind != FSOP_STEP_DELETE_DIR) {
+            const char *dst = fsop_plan_step_dest(plan, i);
+            if (dst[0] != '\0' &&
+                !reserve_add(&worker->reserve, RESERVE_LANE_LOCAL,
+                             step_dest_kind(kind), dst)) {
+                release_local_reservations(worker);
+                return -1;
+            }
+        }
+    }
+    return 1;
+}
+
+static void request_path_busy(Worker *worker, const UiCommand *command,
+                              FsOpPlan *plan, const char *blocker)
+{
+    HandoffConfirm request;
+    memset(&request, 0, sizeof(request));
+    request.kind = UI_CONFIRM_PATH_BUSY;
+    request.valid = 1;
+    fmt_copy(request.context, sizeof(request.context), "PATH IN USE");
+    request.item_count = 1;
+    fmt_copy(request.items[0].name, sizeof(request.items[0].name), blocker);
+    handoff_confirm_request(worker->handoff, &request);
+
+    worker->busy_command = *command;
+    worker->busy_plan = plan;
+    fmt_copy(worker->busy_blocker, sizeof(worker->busy_blocker), blocker);
+    worker->busy_waiting = 0;
+    worker->pending.valid = 1;
+    worker->pending.kind = 4;
+}
+
 static void emit_local_progress(Worker *worker)
 {
     const FsOpProgress *progress = fsop_run_progress(worker->local_run);
@@ -1403,6 +1508,7 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
     if (result == FSOP_RUN_CANCELLED)
         handoff_cancel_consume(worker->handoff);
 
+    release_local_reservations(worker);
     fsop_run_destroy(worker->local_run);
     worker->local_run = NULL;
     worker->local_plan = NULL;
@@ -1437,7 +1543,61 @@ static void local_run_pump(Worker *worker)
     emit_local_progress(worker);
 }
 
-/* Start a local plan as a resumable run. On success the run owns `plan`. */
+/* A WAIT item is head-of-line: retry its reservation every worker step. */
+static void busy_retry(Worker *worker)
+{
+    if (worker->busy_plan == NULL || !worker->busy_waiting)
+        return;
+    if (worker->pending.valid || worker->local_run != NULL)
+        return;
+
+    char blocker[PATH_MAX_LEN];
+    int held =
+        reserve_local_plan(worker, worker->busy_plan, blocker, sizeof(blocker));
+    if (held == 0)
+        return;
+    if (held < 0) {
+        emit_error(worker, UI_PANE_LOCAL, "TRANSFER TOO LARGE", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
+        free(worker->busy_plan);
+        worker->busy_plan = NULL;
+        worker->busy_waiting = 0;
+        return;
+    }
+
+    FsOpPlan *plan = worker->busy_plan;
+    UiCommand command = worker->busy_command;
+    worker->busy_plan = NULL;
+    worker->busy_waiting = 0;
+    if (!run_plan_begin(worker, &command, plan)) {
+        release_local_reservations(worker);
+        free(plan);
+    }
+}
+
+/* Start a local plan as a resumable run. On success the run or the waiting
+ * prompt owns `plan`; on 0 the caller frees it. */
+static int start_local_plan(Worker *worker, const UiCommand *command,
+                            FsOpPlan *plan)
+{
+    char blocker[PATH_MAX_LEN];
+    int held = reserve_local_plan(worker, plan, blocker, sizeof(blocker));
+    if (held < 0) {
+        emit_error(worker, UI_PANE_LOCAL, "TRANSFER TOO LARGE", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
+        return 0;
+    }
+    if (held == 0) {
+        request_path_busy(worker, command, plan, blocker);
+        return 1;
+    }
+    if (!run_plan_begin(worker, command, plan)) {
+        release_local_reservations(worker);
+        return 0;
+    }
+    return 1;
+}
+
 static int run_plan_begin(Worker *worker, const UiCommand *command,
                           FsOpPlan *plan)
 {
@@ -1672,7 +1832,7 @@ static void execute_action(Worker *worker, const UiCommand *command,
         return;
     }
 
-    if (!run_plan_begin(worker, command, plan))
+    if (!start_local_plan(worker, command, plan))
         free(plan);
 }
 
@@ -2834,6 +2994,22 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     worker->local_conflict_set = 1;
                     local_batch_execute(worker);
                 }
+            } else if (pending.kind == 4) {
+                if (command->choice == UI_CHOICE_WAIT) {
+                    worker->busy_waiting = 1;
+                } else if (command->choice == UI_CHOICE_SKIP) {
+                    FsOpPlan *plan = worker->busy_plan;
+                    UiCommand command_copy = worker->busy_command;
+                    worker->busy_plan = NULL;
+                    worker->busy_waiting = 0;
+                    free(plan);
+                    local_batch_skip_item(worker, &command_copy);
+                } else {
+                    free(worker->busy_plan);
+                    worker->busy_plan = NULL;
+                    worker->busy_waiting = 0;
+                    local_batch_cancel(worker);
+                }
             } else if (pending.kind == 2) {
                 if (command->confirm == UI_CONFIRM_HIGH_RISK) {
                     if (command->choice == UI_CHOICE_CONTINUE)
@@ -3001,6 +3177,7 @@ void worker_destroy(Worker *worker)
 {
     if (worker != NULL) {
         fsop_run_destroy(worker->local_run);
+        free(worker->busy_plan);
         free(worker->local_plan);
         worker->local_run = NULL;
         worker->local_plan = NULL;
@@ -3128,6 +3305,7 @@ void worker_step(Worker *worker)
     pump_remote_actions(worker);
     pump_queue(worker);
     drain_pending_actions(worker);
+    busy_retry(worker);
     local_run_pump(worker);
     local_batch_advance(worker);
     local_batch_flush(worker);

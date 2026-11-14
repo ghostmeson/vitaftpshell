@@ -365,6 +365,15 @@ static void open_confirm(UiState *state, UiConfirmKind kind)
         snprintf(c->warning, sizeof(c->warning),
                  "THE REPLACED FILES CANNOT BE RESTORED.");
         break;
+    case UI_CONFIRM_PATH_BUSY:
+        c->choices[0] = UI_CHOICE_WAIT;
+        c->choices[1] = UI_CHOICE_SKIP;
+        c->choices[2] = UI_CHOICE_CANCEL;
+        c->choice_count = 3;
+        snprintf(c->title, sizeof(c->title), "PATH IN USE");
+        snprintf(c->warning, sizeof(c->warning),
+                 "WAIT RESUMES WHEN THE OTHER OPERATION RELEASES IT.");
+        break;
     case UI_CONFIRM_CANCEL_XFER:
         c->choices[0] = UI_CHOICE_KEEP;
         c->choices[1] = UI_CHOICE_CANCEL;

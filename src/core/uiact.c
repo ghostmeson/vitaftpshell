@@ -68,6 +68,8 @@ const char *ui_confirm_name(UiConfirmKind kind)
         return "high_risk";
     case UI_CONFIRM_DELETE_SITE:
         return "delete_site";
+    case UI_CONFIRM_PATH_BUSY:
+        return "path_busy";
     case UI_CONFIRM_NONE:
     default:
         return "none";

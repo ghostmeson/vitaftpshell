@@ -52,7 +52,8 @@ typedef enum {
     UI_CONFIRM_STOP_SERVER,
     UI_CONFIRM_DISCARD,
     UI_CONFIRM_HIGH_RISK,
-    UI_CONFIRM_DELETE_SITE
+    UI_CONFIRM_DELETE_SITE,
+    UI_CONFIRM_PATH_BUSY
 } UiConfirmKind;
 
 typedef enum {
@@ -63,7 +64,8 @@ typedef enum {
     UI_CHOICE_KEEP,
     UI_CHOICE_DISCARD,
     UI_CHOICE_CONTINUE,
-    UI_CHOICE_STOP
+    UI_CHOICE_STOP,
+    UI_CHOICE_WAIT
 } UiChoice;
 
 typedef enum {
