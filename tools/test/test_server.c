@@ -832,6 +832,44 @@ static void test_owner_size_while_download(void)
     ftp_server_destroy(server);
 }
 
+/* The owner exemption also covers an ACTIVE RETR, not only the pending data
+ * accept. A 16 KiB source leaves the transfer active with the data socket
+ * undrained, so the metadata read happens mid-transfer. */
+static void test_owner_size_while_active(void)
+{
+    setup();
+    static char big[16384];
+    memset(big, 'Y', sizeof(big));
+    fake_fs_seed_file("ux0:data/active.bin", big, sizeof(big));
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    s_retr_guard_checks = 0;
+    ftp_server_set_guard(server, retr_owner_guard, NULL);
+
+    FakeFtpClient b;
+    FakeFtpClient a;
+    connect_session(server, &b);
+    connect_second_session(server, &a, PEER_ADDR + 1, PEER_PORT + 20);
+
+    pasv(server, &a);
+    queue_data_peer_for(PEER_ADDR + 1, PEER_PORT + 21);
+    NetSocket *data = data_command(server, &a, "RETR ux0:/data/active.bin",
+                                   150);
+    CHECK(data != NULL);
+    /* The 16 KiB file cannot drain into the 8 KiB fake socket in one tick. */
+    CHECK(cap.done == 0);
+
+    char text[128];
+    command_text(server, &a, "SIZE ux0:/data/active.bin", 213, text,
+                 sizeof(text));
+    CHECK(strstr(text, "16384") != NULL);
+    command_text(server, &b, "SIZE ux0:/data/active.bin", 450, text,
+                 sizeof(text));
+
+    ftp_server_destroy(server);
+}
+
 /* A rename may not create a transfer sidecar name. */
 static void test_rename_sidecar_refused(void)
 {
@@ -1611,6 +1649,7 @@ int main(void)
     test_tree_command_releases();
     test_rename_sidecar_refused();
     test_owner_size_while_download();
+    test_owner_size_while_active();
     test_trace_masks_password();
     test_trace_drops_password();
     test_owner_size_while_upload();
