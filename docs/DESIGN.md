@@ -2,9 +2,9 @@
 
 **Status:** all screens are settled: WORKSPACE, SITES, SITE EDITOR, SERVER,
 ACTIONS, CONFIRM, and TEXT ENTRY. The design phase is complete and the
-architecture plan is written. Two amendments landed after the close, both
-user-directed: the risk mark and the high-risk confirmation (D30, D31), and the
-2000-row cap's `FIRST 2000` notice. The fixed constraints below bind every screen.
+architecture plan is written. The risk mark landed after the close (D31); the
+high-risk confirmation was retired by D87, and the 2000-row cap's `FIRST 2000`
+notice remains. The fixed constraints below bind every screen.
 
 ## Visual authority
 
@@ -359,8 +359,8 @@ Direction A: the console layout (D25). The six states are in
 
 A 582, 76, 360 × 200 panel with a yellow accent and `WARNING` at 596, 84. Eight
 micro lines from 596, 108 on a 16 px stride: the anonymous read-write risk in
-yellow, the excluded app folder and `tai` denials in dim, then the launch/stop
-lifecycle in dim. One of those lines says that an upload replaces a file of the
+yellow, the exposed app folder and writable `tai` folders in dim, then the
+launch/stop lifecycle in dim. One of those lines says that an upload replaces a file of the
 same name (D41).
 
 ### Client
@@ -533,11 +533,9 @@ five-row viewport; a longer set scrolls (D29). The six states are in
 
 - **Delete:** three or many items; the item list shows the **full path** of every
   source, including marks from another folder; the count and known size,
-  `THIS CANNOT BE UNDONE.`, CANCEL / DELETE. When any source is high-risk, the
-  same panel carries the risk path at 168, replaces the warning with
-  `A BAD EDIT CAN STOP THE CONSOLE BOOTING. THERE IS NO UNDO.`, and still shows
-  the full item list; the DELETE choice approves the high-risk plan. There is no
-  separate path-only confirmation for a delete (D61, D66).
+  `THIS CANNOT BE UNDONE.`, CANCEL / DELETE. The retired high-risk warning no
+  longer changes this panel (D87); `boot_config.txt` is refused before the panel
+  opens.
 - **Batch conflict:** `2 DESTINATIONS EXIST`; the batch count; CANCEL / SKIP
   EXISTING / OVERWRITE ALL; the replace warning. A download checks the local
   destination; an upload checks the remote destination with MLST when the server
@@ -547,10 +545,9 @@ five-row viewport; a longer set scrolls (D29). The six states are in
 - **Stop the server during a write:** the client’s write and the partial removed;
   KEEP RUNNING / STOP SERVER.
 - **Discard editor changes:** the site, the lost changes; KEEP EDITING / DISCARD.
-- **High-risk write:** `WRITE INSIDE <PATH>`; the path; `A BAD EDIT CAN STOP THE
-  CONSOLE BOOTING.` and `THERE IS NO UNDO.`; CANCEL / CONTINUE. Used for a write,
-  create, rename, or delete inside `ur0:tai`, `ux0:tai`, or any other high-risk
-  path (D30, D31). `boot_config.txt` never reaches this panel; it is denied.
+- **High-risk write (retired):** the `WRITE INSIDE <PATH>` layout remains in the
+  renderer for history, but no user action opens it after D87. `boot_config.txt`
+  never reaches it; it is denied outright.
 
 ## TEXT ENTRY
 
@@ -626,9 +623,10 @@ server foundation, and the local `tai` policy.
 
 Two amendments landed after the close, both user-directed:
 
-- **Risk marks and the high-risk confirmation (D30, D31).** The local manager may
-  write inside `ur0:tai` and `ux0:tai`, so a high-risk row draws a yellow diamond
-  and the action confirms with a boot warning. `boot_config.txt` stays denied.
+- **Risk marks (D31, amended by D87).** The local manager and the server may
+  write inside `ur0:tai` and `ux0:tai`; a high-risk row still draws its yellow
+  diamond. The extra high-risk confirmation was retired by D87.
+  `ur0:tai/boot_config.txt` stays denied.
 - **`FIRST 2000` (KTD7).** A directory longer than the cap says so on the band
   instead of pretending the list is complete.
 

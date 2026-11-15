@@ -736,67 +736,65 @@ static void test_denials(void)
 {
     setup();
     fake_fs_add_dir("ux0:tai");
+    fake_fs_add_dir("ux0:data/vitaFTPShell");
     fake_fs_seed_file("ur0:tai/config.txt", "config", 6);
     fake_fs_seed_file("ux0:tai/config.txt", "config", 6);
     fake_fs_seed_file("ux0:data/a.txt", "a", 1);
-    size_t before = fake_fs_node_count();
+    fake_fs_seed_file("ur0:tai/boot_config.txt", "boot", 4);
     SCapture cap;
     memset(&cap, 0, sizeof(cap));
     FtpServer *server = start_server(&cap);
     FakeFtpClient client;
     connect_session(server, &client);
 
+    /* boot_config.txt stays locked for the FTP role. */
     pasv(server, &client);
     queue_data_peer();
-    (void)data_command(server, &client, "STOR ur0:tai/x.suprx", 550);
-    CHECK(!fake_fs_exists("ur0:tai/x.suprx"));
-    CHECK(!fake_fs_exists("ur0:tai/x.suprx.vftp.part"));
-    CHECK(!ftp_server_busy(server));
-
+    (void)data_command(server, &client, "STOR ur0:tai/boot_config.txt", 550);
     pasv(server, &client);
     queue_data_peer();
-    (void)data_command(server, &client, "STOR ux0:tai/boot_config.txt", 550);
-    CHECK(!fake_fs_exists("ux0:tai/boot_config.txt"));
-
-    pasv(server, &client);
-    queue_data_peer();
-    (void)data_command(server, &client, "STOR UR0:/TAI/./BOOT_CONFIG.TXT", 550);
-    CHECK(!fake_fs_exists("ur0:tai/boot_config.txt"));
-
+    (void)data_command(server, &client, "STOR UR0:/TAI/./BOOT_CONFIG.TXT",
+                       550);
     pasv(server, &client);
     queue_data_peer();
     (void)data_command(server, &client, "STOR //UR0://TAI//BOOT_CONFIG.TXT",
                        550);
-    CHECK(!fake_fs_exists("ur0:tai/boot_config.txt"));
+    command(server, &client, "DELE ur0:tai/boot_config.txt", 550);
+    CHECK(fake_fs_exists("ur0:tai/boot_config.txt"));
 
-    pasv(server, &client);
-    queue_data_peer();
-    (void)data_command(server, &client, "STOR ux0:data/vitaFTPShell/x", 550);
+    /* tai is writable except boot_config.txt. */
+    send_stor(server, &client, "STOR ur0:tai/x.suprx", "X", 0, 226);
+    CHECK(fake_fs_exists("ur0:tai/x.suprx"));
+    command(server, &client, "DELE ur0:tai/x.suprx", 250);
+    CHECK(!fake_fs_exists("ur0:tai/x.suprx"));
+    command(server, &client, "MKD ur0:tai/NEW", 250);
+    CHECK(fake_fs_exists("ur0:tai/NEW"));
+    command(server, &client, "RMD ur0:tai/NEW", 250);
+    CHECK(!fake_fs_exists("ur0:tai/NEW"));
+    command(server, &client, "DELE ux0:tai/config.txt", 250);
+    CHECK(!fake_fs_exists("ux0:tai/config.txt"));
+
+    /* The app data folder is exposed. */
+    send_stor(server, &client, "STOR ux0:data/vitaFTPShell/x", "X", 0, 226);
+    CHECK(fake_fs_exists("ux0:data/vitaFTPShell/x"));
+    command(server, &client, "DELE ux0:data/vitaFTPShell/x", 250);
     CHECK(!fake_fs_exists("ux0:data/vitaFTPShell/x"));
 
-    command(server, &client, "DELE ux0:tai/config.txt", 550);
-    CHECK(fake_fs_exists("ux0:tai/config.txt"));
-    CHECK(fake_fs_exists("ur0:tai/config.txt"));
-    CHECK(fake_fs_exists("ux0:data/a.txt"));
-
-    command(server, &client, "RNFR /UR0:/TAI/CONFIG.TXT", 550);
-    CHECK(fake_fs_exists("ur0:tai/config.txt"));
-
+    /* A rename into tai is allowed now. */
     command(server, &client, "RNFR /UX0:/DATA/a.txt", 350);
-    command(server, &client, "RNTO ux0:tai/a.txt", 550);
-    CHECK(fake_fs_exists("ux0:data/a.txt"));
-    CHECK(!fake_fs_exists("ux0:tai/a.txt"));
+    command(server, &client, "RNTO ux0:tai/a.txt", 250);
+    CHECK(fake_fs_exists("ux0:tai/a.txt"));
+    CHECK(!fake_fs_exists("ux0:data/a.txt"));
 
+    /* The volume and data roots themselves remain protected. */
     command(server, &client, "DELE /UX0:", 550);
-    CHECK(fake_fs_exists("ux0:data/a.txt"));
     command(server, &client, "RNFR /UX0:", 550);
     command(server, &client, "RMD /UR0:", 550);
     command(server, &client, "RMD /UMA0:", 550);
-    CHECK(fake_fs_exists("uma0:"));
-    CHECK(fake_fs_exists("ur0:tai/config.txt"));
     command(server, &client, "RNFR /UX0:/DATA", 550);
-
-    CHECK(fake_fs_node_count() == before);
+    CHECK(fake_fs_exists("ux0:"));
+    CHECK(fake_fs_exists("ur0:"));
+    CHECK(fake_fs_exists("uma0:"));
 
     ftp_server_destroy(server);
 }
@@ -840,6 +838,7 @@ static void test_mlst_size_mdtm(void)
 {
     setup();
     fake_fs_add_file("ux0:data/f.txt", 5);
+    fake_fs_add_dir("ux0:data/vitaFTPShell");
     SCapture cap;
     memset(&cap, 0, sizeof(cap));
     FtpServer *server = start_server(&cap);
@@ -849,7 +848,7 @@ static void test_mlst_size_mdtm(void)
     command(server, &client, "MLST /UX0:/DATA/f.txt", 250);
     command(server, &client, "MLST /", 250);
     command(server, &client, "MLST /UX0:/DATA", 250);
-    command(server, &client, "MLST ux0:data/vitaFTPShell", 550);
+    command(server, &client, "MLST ux0:data/vitaFTPShell", 250);
     command(server, &client, "SIZE /UX0:/DATA/f.txt", 213);
     command(server, &client, "MDTM /UX0:/DATA/f.txt", 550);
 
@@ -896,7 +895,9 @@ static void test_file_ops(void)
     CHECK(fake_fs_exists("ux0:data/r2.txt"));
     CHECK(!fake_fs_exists("ux0:data/r1.txt"));
 
-    command(server, &client, "MKD ur0:tai/NEW", 550);
+    command(server, &client, "MKD ur0:tai/NEW", 250);
+    CHECK(fake_fs_exists("ur0:tai/NEW"));
+    command(server, &client, "RMD ur0:tai/NEW", 250);
     CHECK(!fake_fs_exists("ur0:tai/NEW"));
 
     command(server, &client, "TYPE A", 200);

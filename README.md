@@ -44,7 +44,7 @@ Implemented and covered by host tests today:
   per-file cross-volume moves, and `DELETED n OF m` on a partial recursive
   delete;
 - the input repeat decoder, the one-writer UI reducer with every settled screen
-  transition, and the command vocabulary, including the high-risk confirmation;
+  transition, and the command vocabulary;
 - the cross-thread handoff: fixed-record command and event rings, critical
   stop/cancel slots, a coalesced progress latch, three listing generations per
   pane, a bulk lane, and a latched server state;
@@ -142,14 +142,13 @@ land:
 
 - The server is **OFF at launch**. Starting it is an explicit action, and its ON
   state and client count stay visible. The warning states that anonymous clients
-  can read and write the exposed volumes and that the app data folder is
-  excluded.
-- The server denies all access to `ur0:tai/boot_config.txt` and to the app's own
-  data folder, and denies every write, create, rename, and delete under
-  `ur0:tai` and `ux0:tai`.
-- The local manager may write inside `ur0:tai` and `ux0:tai` only behind a
-  high-risk confirmation. Nothing in the app writes, renames, or deletes
-  `boot_config.txt`.
+  can read and write the exposed volumes, including the app data folder and
+  the `tai` folders.
+- The server denies all access to `ur0:tai/boot_config.txt`. It may read and
+  write the app data folder and the `tai` folders (D87).
+- The local manager may write inside `ur0:tai` and `ux0:tai` without the
+  retired high-risk prompt. Nothing in the app writes, renames, or deletes
+  `ur0:tai/boot_config.txt`.
 - Volume roots, `ur0:data`, `ux0:data`, and the `tai` folders cannot be renamed,
   moved, or deleted. Every check uses the canonical path, and a rename checks
   both operands.

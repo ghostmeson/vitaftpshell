@@ -169,7 +169,9 @@ design phase can change layout without reopening product requirements.
 ## D12. Protected paths and boot-config denial
 
 **Date:** 2026-11-08
-**Status:** accepted
+**Status:** accepted; the server's app-data and `tai` write denials are
+superseded by D87. The volume-root protection and the `boot_config.txt` denial
+stand.
 
 **Context:** The app can reach every mounted volume, and the server can be
 anonymous read-write. A wrong delete or a boot-config write can cost the console.
@@ -490,8 +492,9 @@ size. The plan’s input table carries the added scroll.
 ## D30. The local manager may write inside the tai folders, behind a high-risk confirmation
 
 **Date:** 2026-11-08
-**Status:** accepted; supersedes D12's consequence that the file manager is not a
-raw root shell.
+**Status:** accepted; the write permission stands, but the high-risk confirmation
+and the server's blanket `tai` denial are superseded by D87. It supersedes D12's
+consequence that the file manager is not a raw root shell.
 
 **Context:** D12 forbids renaming, moving, or deleting `ur0:tai` and `ux0:tai`,
 and R53 makes the server deny every write inside them. It never said what the
@@ -515,9 +518,10 @@ mutates. The risk table is shared policy, so a new high-risk path is one entry.
 ## D31. High-risk paths carry a row mark and a warning confirmation
 
 **Date:** 2026-11-08
-**Status:** accepted
+**Status:** accepted for the row mark; the warning confirmation is retired by
+D87.
 
-**Context:** D30 allows the write, so the risk has to be visible before the act
+**Context:** D30 allowed the write, so the risk had to be visible before the act
 rather than only inside the dialog. The design system allows a mark only when it
 encodes something.
 
@@ -948,7 +952,8 @@ fixture, a draw-call assertion, and a preview file.
 
 **Date:** 2026-11-10
 **Status:** accepted; the one-slot and external-busy clauses are superseded by
-D72, D82, and D85. The high-risk write enforcement stands.
+D72, D82, and D85; the high-risk confirmation is retired by D87. The hard
+protected-path and boot_config enforcement stands.
 
 **Context:** A reducer-only risk check cannot see the final name of a new folder
 or rename, and a marked batch can contain a high-risk item that is not the
@@ -1906,3 +1911,28 @@ the app's own client can stay connected while a PC browses. Concurrent file
 transfers still serialize on the one data slot; that is the next extension if
 it is needed. D9's one-client clause and R50's "one client at a time" text are
 superseded.
+
+## D87. Access is unrestricted except boot_config and system roots
+
+**Date:** 2026-11-15
+**Status:** accepted; b61; user-directed.
+
+**Context:** The v1 safety posture kept the app data folder out of the FTP
+server, made the `tai` folders read-only to it, and asked for a second high-risk
+confirmation before local writes to `tai` or boot-critical file types. The user
+asked to remove those restrictions and accepted the exposure: an anonymous LAN
+client can read stored sites and logs, and can write plugins into `tai`.
+
+**Decision:** The server may read, write, create, rename, and delete in
+`ux0:data/vitaFTPShell` and under `ur0:tai`/`ux0:tai`. The local manager no longer
+opens the high-risk confirmation. The hard denials remain: `ur0:tai/
+boot_config.txt` for every role, and the volume roots, `ur0:data`, `ux0:data`,
+`ur0:tai`, and `ux0:tai` themselves cannot be renamed, moved, or deleted. The
+ordinary destructive confirmation stays. `path_is_high_risk` still classifies
+paths for the yellow row mark and the action target, but it no longer gates an
+operation.
+
+**Consequences:** D30's high-risk prompt, D31's confirmation, D51's high-risk
+worker gate, and the server's app-data/`tai` write denials are superseded. The
+SERVER warning names the app data folder and `tai` as exposed and writable;
+`boot_config.txt` remains the one file every role refuses.

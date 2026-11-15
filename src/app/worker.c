@@ -188,7 +188,7 @@ static void local_batch_advance(Worker *worker);
 static int run_plan_begin(Worker *worker, const UiCommand *command,
                           FsOpPlan *plan);
 static void execute_action(Worker *worker, const UiCommand *command,
-                           FsOpConflict conflict, int high_risk_approved);
+                           FsOpConflict conflict);
 
 static uint64_t now_ms(Worker *worker)
 {
@@ -1666,7 +1666,7 @@ static void busy_retry(Worker *worker)
     worker->busy_waiting = 0;
     free(plan);
     release_local_reservations(worker);
-    execute_action(worker, &command, FSOP_CONFLICT_ASK, 0);
+    execute_action(worker, &command, FSOP_CONFLICT_ASK);
 }
 
 /* Start a local plan as a resumable run. On success the run or the waiting
@@ -1773,23 +1773,6 @@ static void add_copy_candidates(Worker *worker, const char *source,
     }
 }
 
-static void request_high_risk(Worker *worker, const UiCommand *command,
-                              const FsOpPlan *plan, FsOpConflict conflict)
-{
-    HandoffConfirm request;
-    memset(&request, 0, sizeof(request));
-    request.kind = UI_CONFIRM_HIGH_RISK;
-    request.valid = 1;
-    request.high_risk = 1;
-    fmt_copy(request.risk_path, sizeof(request.risk_path), plan->risk_path.text);
-    confirm_request(worker, &request);
-
-    worker->pending.valid = 1;
-    worker->pending.kind = 2;
-    worker->pending.command = *command;
-    worker->pending.conflict = conflict;
-}
-
 static void drain_pending_actions(Worker *worker)
 {
     while (!worker->pending.valid && worker->pending_command_count > 0) {
@@ -1815,7 +1798,7 @@ static void queue_pending_action(Worker *worker, const UiCommand *command)
 }
 
 static void execute_action(Worker *worker, const UiCommand *command,
-                           FsOpConflict conflict, int approved)
+                           FsOpConflict conflict)
 {
     const char *source = command->path;
     const char *destination = command->path2;
@@ -1914,12 +1897,6 @@ static void execute_action(Worker *worker, const UiCommand *command,
         emit_error(worker, UI_PANE_LOCAL,
                    plan->reason[0] != '\0' ? plan->reason : "PLAN REFUSED",
                    OP_CAUSE_APP, OP_STAGE_PLAN);
-        free(plan);
-        return;
-    }
-
-    if (plan->high_risk && !approved) {
-        request_high_risk(worker, command, plan, conflict);
         free(plan);
         return;
     }
@@ -2160,8 +2137,7 @@ static void handle_action(Worker *worker, const UiCommand *command)
                            ? FSOP_CONFLICT_OVERWRITE
                            : (worker->local_conflict_set
                                   ? worker->local_conflict
-                                  : FSOP_CONFLICT_ASK),
-                       command->value == 1);
+                                  : FSOP_CONFLICT_ASK));
         return;
     }
 
@@ -2170,8 +2146,7 @@ static void handle_action(Worker *worker, const UiCommand *command)
                        ? FSOP_CONFLICT_OVERWRITE
                        : (worker->local_conflict_set
                               ? worker->local_conflict
-                              : FSOP_CONFLICT_ASK),
-                   command->value == 1);
+                              : FSOP_CONFLICT_ASK));
 }
 
 static void handle_save_site(Worker *worker, const UiCommand *command)
@@ -3248,26 +3223,6 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     free(worker->busy_plan);
                     worker->busy_plan = NULL;
                     worker->busy_waiting = 0;
-                    local_batch_cancel(worker);
-                }
-            } else if (pending.kind == 2) {
-                if (command->confirm == UI_CONFIRM_HIGH_RISK) {
-                    if (command->choice == UI_CHOICE_CONTINUE)
-                        execute_action(worker, &pending.command,
-                                       pending.conflict, 1);
-                    else
-                        local_batch_skip_item(worker, &pending.command);
-                } else if (command->choice == UI_CHOICE_OVERWRITE) {
-                    worker->local_conflict = FSOP_CONFLICT_OVERWRITE;
-                    worker->local_conflict_set = 1;
-                    execute_action(worker, &pending.command,
-                                   FSOP_CONFLICT_OVERWRITE, 0);
-                } else if (command->choice == UI_CHOICE_SKIP) {
-                    worker->local_conflict = FSOP_CONFLICT_SKIP;
-                    worker->local_conflict_set = 1;
-                    execute_action(worker, &pending.command,
-                                   FSOP_CONFLICT_SKIP, 0);
-                } else {
                     local_batch_cancel(worker);
                 }
             }

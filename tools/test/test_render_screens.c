@@ -332,8 +332,8 @@ static void test_server(void)
     CHECK(trace_text_right("READ-WRITE", 538.0f, 274.0f, PX_VALUE, C_WHITE));
     CHECK(trace_has_text("ANONYMOUS CLIENTS CAN READ"));
     CHECK(trace_has_text("AND WRITE UX0:, UR0:, AND UMA0."));
-    CHECK(trace_has_text("UX0:/DATA/VITAFTPSHELL IS EXCLUDED."));
-    CHECK(trace_has_text("UR0:TAI AND UX0:TAI ARE READ-ONLY."));
+    CHECK(trace_has_text("UX0:/DATA/VITAFTPSHELL IS EXPOSED."));
+    CHECK(trace_has_text("UR0:TAI AND UX0:TAI ARE WRITABLE."));
     CHECK(trace_has_text("UR0:TAI/BOOT_CONFIG.TXT IS DENIED."));
     CHECK(trace_has_text("THE SERVER IS OFF AT LAUNCH."));
     CHECK(trace_has_text("NO CLIENT"));

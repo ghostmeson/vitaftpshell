@@ -60,7 +60,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - **Copy and move take the marked set or the cursor row.** One item is a valid source without a mark, and marks still win when present. Governs R29, R74. (session-settled: user-directed — chosen over requiring a mark for every copy or move: a single item must not need Square.)
 - **Seed `ftp.gnu.org` as an example site.** First run has a working anonymous target; it is editable and never auto-connects. Governs R16. (session-settled: user-approved — proposed as a first-run example and confirmed: gives the primary flow a real target.)
 - **Ship one UNSAFE eboot.** Serving and browsing `ur0:` and `uma0:` needs the permissions the safe authid refuses, so there is a single eboot with a single permission level. Governs R51, R52. (session-settled: user-directed — chosen over a safe build that drops or restricts those volumes: the server's job is the three volumes.)
-- **High-risk paths warn; the local manager may edit inside the tai folders.** `boot_config.txt` stays denied outright, and the server keeps its blanket denial. Governs R33, R34, R71, R72. (session-settled: user-directed — chosen over read-only tai folders: a file manager that refuses the files its owner selects is not a file manager, so the warning and the row mark carry the risk instead.)
+- **Risk marks warn; access is otherwise open except boot_config and system roots.** The local manager and the server may edit the `tai` folders and the app data folder; `boot_config.txt` stays denied outright and the volume/data/tai roots cannot be renamed or deleted. Governs R33, R34, R53, R71, R72; D87. (session-settled: user-directed — chosen over the high-risk confirmation and server denials: the owner accepted the exposure.)
 - **Transfer success is judged by cause class.** Every transfer records an outcome and a class, and only app-caused failures count against the release. Governs R73. (session-settled: user-directed — chosen over a raw completion rate: the network and the remote server can fail a transfer the app did nothing wrong on.)
 
 ### Actors
@@ -148,12 +148,12 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 **Server mode**
 
 - R47. The server is OFF at launch and never starts automatically.
-- R48. SERVER shows OFF or ON, control port (default 1337), local IP, connected client count, and a warning that anonymous clients can read and write. The port can be edited from SERVER. The warning names the exposed volumes and the excluded app data folder. When a client is connected, it names the current operation, path, and transferred and total bytes, with `--` when unknown.
+- R48. SERVER shows OFF or ON, control port (default 1337), local IP, connected client count, and a warning that anonymous clients can read and write. The port can be edited from SERVER. The warning names the exposed volumes, including the app data folder and the writable `tai` folders, and the denied `boot_config.txt`. When a client is connected, it names the current operation, path, and transferred and total bytes, with `--` when unknown.
 - R49. Cross starts and stops the server; starting without a network shows a clear error and leaves it OFF. A bind failure names the port, says another server may be using it, and leaves the server OFF so the port can be changed.
 - R50. The server accepts up to four clients; a fifth connection is refused with a busy reply. One data transfer owns the PASV/data port at a time, and another session's data or PASV command gets a busy reply (D86).
 - R51. The server exposes the mounted subset of `ux0:`, `ur0:`, and `uma0:` as top-level directories; absent volumes are absent, and no other mount is exposed.
 - R52. Anonymous login has read-write access to the exposed volumes.
-- R53. The server denies all access to `ur0:tai/boot_config.txt` and to the app's own data folder under `ux0:data`, and denies every write, create, rename, and delete inside `ur0:tai` and `ux0:tai`, plus destructive commands on volume roots, `ur0:data`, `ux0:data`, and protected system directories. A rename checks both operands. Every check uses the canonical path.
+- R53. The server may read, write, create, rename, and delete in the app data folder under `ux0:data` and under `ur0:tai`/`ux0:tai`. It denies all access to `ur0:tai/boot_config.txt` and destructive commands on volume roots, `ur0:data`, `ux0:data`, and protected system directories. A rename checks both operands. Every check uses the canonical path (D87).
 - R54. The server supports passive mode and the commands a desktop client needs to browse, download, upload, create, rename, and delete. A data connection is accepted only when its peer address equals the control connection's peer; anything else is closed without arming, and the listener backlog is drained when PASV arms.
 - R55. Stopping the server closes the listener and the active session; the UI returns to OFF and reports the stop. If a write is in flight, the stop requires confirmation.
 - R56. The server can run while the client and file manager are in use; its ON state and client count stay visible on every screen.
@@ -170,7 +170,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 
 **High-risk paths and transfer attribution**
 
-- R71. The local manager may modify files inside `ur0:tai` and `ux0:tai`; every write, create, rename, or delete there, and on any other path classified high risk, first shows a high-risk confirmation naming the path and saying a bad edit can stop the console booting. R34 still denies `boot_config.txt` outright.
+- R71. The local manager may modify files inside `ur0:tai` and `ux0:tai`; the retired high-risk confirmation no longer opens (D87). The yellow risk mark still names the path class. R34 still denies `ur0:tai/boot_config.txt` outright.
 - R72. Rows for high-risk paths carry a warning mark, and ACTIONS names the risk on its target panel, so the risk is visible before an action is chosen.
 - R73. Every started transfer records an outcome and a cause class — app, server, network, storage, or user — in the session log.
 - R74. In ACTIONS, COPY, MOVE, DELETE, UPLOAD, and DOWNLOAD act on the marked set when it is non-empty, otherwise on the row under the cursor. COPY and MOVE put that set on the clipboard; PASTE applies it to the folder in view. A folder under the cursor is a valid COPY or MOVE source; UPLOAD and DOWNLOAD still refuse folders.
@@ -204,7 +204,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - F3. Local batch operation
   - **Trigger:** The user marks local items or puts the cursor on one, opens ACTIONS, and chooses copy, move, or delete.
   - **Actors:** A1, A2.
-  - **Steps:** COPY and MOVE freeze the marked set or the cursor row on the clipboard; PASTE applies it to the folder in view. The confirmation names the item count and total known size and shows the high-risk warning when any target is high risk (R71). Protected roots are refused. The batch runs as one job, prompts once for an existing destination, refreshes the pane at the end, and reports one terminal state.
+  - **Steps:** COPY and MOVE freeze the marked set or the cursor row on the clipboard; PASTE applies it to the folder in view. The confirmation names the item count and total known size. Protected roots are refused; the retired high-risk warning no longer changes the prompt (D87). The batch runs as one job, prompts once for an existing destination, refreshes the pane at the end, and reports one terminal state.
   - **Outcome:** The local tree reflects the operation, or nothing changed on cancel or failure; the dock names the operation and its counts.
   - **Covers:** R28-R37, R39, R57-R63, R71-R72, R74.
 
@@ -232,7 +232,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - F7. Edit a system file
   - **Trigger:** The user opens `ur0:tai` or `ux0:tai` and selects a file.
   - **Actors:** A1, A2, A5.
-  - **Steps:** The row carries a risk mark (R72). ACTIONS names the risk on the target. Choosing rename or delete opens the high-risk confirmation; CONTINUE then opens the IME for a rename, or runs the delete. The write goes to a temporary name and renames into place.
+  - **Steps:** The row carries a risk mark (R72). ACTIONS names the risk on the target. Rename opens the IME directly; delete opens the ordinary delete confirmation. The write goes to a temporary name and renames into place (D87).
   - **Outcome:** The file changed deliberately, or nothing changed on cancel.
   - **Covers:** R33, R34, R71, R72.
 
@@ -292,7 +292,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
   - **Covers:** R50-R55.
   - **Given:** The server is ON and a PC connects anonymously.
   - **When:** The PC browses `ux0:`, `ur0:`, and `uma0:`, uploads a file, renames it, and deletes a copy.
-  - **Then:** Each operation succeeds, the client count shows one, `boot_config.txt`, the app's own data folder, and a `ur0:tai` upload are denied, and stopping the server closes the session.
+  - **Then:** Each operation succeeds, the client count shows one, `boot_config.txt` is denied, the app data folder and a `ur0:tai` upload succeed, and stopping the server closes the session.
 
 - AE8. Multi-select upload
   - **Covers:** R9, R23, R38, R43, R44.
@@ -316,7 +316,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
   - **Covers:** R33, R34, R71, R72.
   - **Given:** `ux0:tai/plugins.txt` exists and the local pane is open at `ux0:tai`.
   - **When:** The user selects it, opens ACTIONS, and chooses RENAME.
-  - **Then:** The row carried a risk mark, ACTIONS named the risk, CONFIRM titled `WRITE INSIDE UX0:TAI` carried the boot warning with CANCEL and CONTINUE, CONTINUE opened the IME, and CANCEL changed nothing.
+  - **Then:** The row carried a risk mark, ACTIONS named the risk, and RENAME opened the IME directly; the retired high-risk confirmation did not appear (D87).
 
 - AE12. Attributed failure
   - **Covers:** R26, R73.
@@ -435,7 +435,7 @@ None.
 | Server MLSD | MLSD, LIST, and NLST; FEAT advertises all three. KTD10 |
 | Server foundation | Written in the core, nothing vendored; VitaShell and libftpvita are references. D40, KTD2 |
 | VitaShell parity scope | Defined by the command table in KTD10, not by feature parity. D40 |
-| Local `tai` policy | Writable behind a high-risk confirmation; `boot_config.txt` denied. D30, D31 |
+| Local `tai` policy | Writable without the retired high-risk prompt; `boot_config.txt` denied. D87 |
 | COPY/MOVE source | The marked set when it is non-empty, otherwise the row under the cursor. R74, D69 |
 | Local and network together | One network transfer and one local job, arbitrated by canonical-path reservations. R38, KTD21 |
 | Dock terminal vocabulary | Past-tense verb and one terminal state per batch; items in the dock, files and bytes in the log. R39, KTD19, KTD23 |
@@ -781,6 +781,11 @@ removes it; the path-scoped reservation guard is the only cross-lane exclusion
 connection for transfers, so the one-client rule answered its second connection
 with `450 Busy`. b60 accepts up to four sessions with one data transfer at a
 time (D86); R50 and U7 above carry the amendment.
+
+**Access amendment (2026-11-15).** D87 removes the local high-risk prompt and
+opens the app data folder and `tai` to the server; `ur0:tai/boot_config.txt` and
+the system roots remain hard denials. R48, R53, and R71 above carry the
+amendment.
 
 ### Risks and accepted costs
 

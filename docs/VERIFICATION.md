@@ -1,15 +1,37 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b60.vpk
-**SHA-256:** 91e1b8c45dd6c5f09b54cc4d77979d70d7ec9478a06bab5faff1f9e17cc2145a
+**Build:** vitaftpshell-v01.00-b61.vpk
+**SHA-256:** ecbfdf1451a06177a5f9087967238c139786efba6529f6f5f018112fa29d37e8
 **ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b57 traced the upload defect, b58 fixed the app-local transfer, and b60 adds four server sessions so FileZilla can hold its browse and transfer connections and has run on the console; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy and awaits its hardware retry; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b61 unrestricted access
+
+**Date:** 2026-11-15
+**Build:** `vitaftpshell-v01.00-b61.vpk`
+**SHA-256:** `ecbfdf1451a06177a5f9087967238c139786efba6529f6f5f018112fa29d37e8`
+
+D87 removes the local high-risk confirmation and opens the server's own data
+folder and the `tai` folders. The server may read, write, create, rename, and
+delete in `ux0:data/vitaFTPShell` and under `ur0:tai`/`ux0:tai`; the local manager
+writes `tai` without the extra prompt. The hard denials remain:
+`ur0:tai/boot_config.txt` for every role, and the volume roots, `ur0:data`,
+`ux0:data`, `ur0:tai`, and `ux0:tai` themselves cannot be renamed, moved, or
+deleted. The ordinary destructive confirmation stays. The SERVER warning now
+says the app folder is exposed and `tai` is writable.
+
+Host evidence: `test_path` (app data/tai reads and writes allowed, boot_config
+denied, roots protected), `test_server` (tai upload/delete/mkdir/rename and app
+data STOR/DELE pass; boot_config and roots still 550), `test_uistate` and
+`test_integration` (ordinary delete confirmation, no high-risk prompt),
+`test_client` (risk reported but no approval gate). ASan/UBSan clean. The b61
+console retry is pending; M5 remains PART.
 
 ## b60 four-client server
 

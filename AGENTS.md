@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 twenty-one host suites, and `tools/preview/run.sh` renders 40 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b60.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b61.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -51,8 +51,8 @@ gate (D85), and the console confirmed both transfer directions between the app's
 own client and server. b60 accepts up to four server sessions, one data
 transfer at a time (D86), and has run on the console: FileZilla held two
 sessions and uploaded and downloaded successfully; the app-local client moved
-files across all three volumes. M13 and M10 are partly observed; M1–M9, M11, and
-M12 are pending, so
+files across all three volumes. b61 applies D87 and awaits its console retry.
+M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
 the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
@@ -100,9 +100,9 @@ shape; the transfer dock is where work is visible.
 - GPLv3. Keep the license and the third-party notices intact.
 - One `UNSAFE` eboot. The server and the local pane need all three volumes, and
   the safe authid refuses them (D32).
-- The local manager may write inside `ur0:tai` and `ux0:tai` behind the
-  high-risk confirmation; the server never may; `boot_config.txt` is denied for
-  every role (D30, D31).
+- The local manager and the server may write inside `ur0:tai` and `ux0:tai`;
+  the server exposes the app's own data folder. `ur0:tai/boot_config.txt` is
+  denied for every role (D87).
 - Every started transfer records one cause class, and the release gate is zero
   `app`-class failures plus 95% over attempts that were neither cancelled nor
   network-interrupted (D33).
@@ -204,16 +204,15 @@ run is the only evidence that promotes the project to `verified`.
    component. v1 has no system-level surface.
 3. **Server OFF by default.** Starting it is an explicit action. The ON state and
    client count stay visible on every screen. The warning says anonymous clients
-   can read and write the exposed volumes and that the app data folder is
-   excluded.
+   can read and write the exposed volumes, including the app data folder and
+   the `tai` folders except `ur0:tai/boot_config.txt`.
 4. **Protected paths.** Volume roots, `ur0:data`, `ux0:data`, `ur0:tai`, and
-   `ux0:tai` cannot be renamed, moved, or deleted. The server denies all access to
-   `ur0:tai/boot_config.txt` and the app's own data folder under `ux0:data`, and
-   denies every write, create, rename, and delete under `ur0:tai` and `ux0:tai`.
-   The local manager may write inside the `tai` folders only after the high-risk
-   confirmation (D30); nothing in the app writes, renames, or deletes
-   `boot_config.txt`. Every check uses the canonical path from D42, and a rename
-   checks both operands.
+   `ux0:tai` cannot be renamed, moved, or deleted. The server and the local
+   manager may read and write inside the app data folder and the `tai` folders;
+   `ur0:tai/boot_config.txt` stays denied for every role (D87). The local
+   high-risk confirmation is retired; the yellow risk mark remains a warning.
+   Every check uses the canonical path from D42, and a rename checks both
+   operands.
 5. **Never delete or recreate a system directory.** `ur0:`, `ux0:`, `uma0:`,
    `ur0:data`, `ux0:data`, `ur0:tai`, and `ux0:tai` belong to the console. The
    app creates only its own data folder.
@@ -282,7 +281,7 @@ A job is finished when:
 - Do not invent screen geometry outside `docs/DESIGN.md`.
 - Do not add SFTP, FTPS, HTTP, WebDAV, or SMB in v1.
 - Do not add a background transfer daemon or a boot-time server.
-- Do not write to `boot_config.txt`, `ur0:tai`, or `ux0:tai`.
+- Do not write to `ur0:tai/boot_config.txt`; the `tai` contents and the app data folder are writable by design (D87).
 - Do not render a number the platform cannot report.
 - Do not hide the server's ON state or its anonymous access.
 - Do not remove the COCKPIT MIT notice from the derived graphics files.

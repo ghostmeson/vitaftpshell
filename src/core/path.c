@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define APP_DATA "ux0:data/vitaFTPShell"
 
 static char lower(char c)
 {
@@ -285,6 +284,9 @@ int path_is_high_risk(const char *path)
 
 static PathResult check_path(const char *path, int server_role, PathRisk *risk)
 {
+    /* The server_role no longer selects a write denial; boot_config below is
+     * denied for every role and the protected-path table is shared. */
+    (void)server_role;
     Path canonical;
     PathResult result = path_canonicalize(path, &canonical);
     if (result != PATH_OK)
@@ -294,13 +296,6 @@ static PathResult check_path(const char *path, int server_role, PathRisk *risk)
 
     if (ci_equal(p, "ur0:tai/boot_config.txt"))
         return PATH_DENIED;
-
-    if (server_role) {
-        if (is_under(p, "ur0:tai") || is_under(p, "ux0:tai"))
-            return PATH_DENIED;
-        if (is_under(p, APP_DATA))
-            return PATH_DENIED;
-    }
 
     if (path_is_protected(p))
         return PATH_PROTECTED;
@@ -319,8 +314,6 @@ PathResult path_check_read(const char *path, int server_role, PathRisk *risk)
 
     const char *p = canonical.text;
     if (server_role && ci_equal(p, "ur0:tai/boot_config.txt"))
-        return PATH_DENIED;
-    if (server_role && is_under(p, APP_DATA))
         return PATH_DENIED;
 
     if (risk != NULL)

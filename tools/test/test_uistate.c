@@ -576,7 +576,7 @@ static void test_high_risk_action(void)
     send_key(UI_KEY_CROSS);
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
     CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
-    CHECK(s_state.confirm.high_risk == 1);
+    CHECK(s_state.confirm.high_risk == 0);
     CHECK(s_state.confirm.item_count == 1);
     CHECK(strcmp(s_state.confirm.items[0].name, "ur0:tai/x.suprx") == 0);
     CHECK(s_state.confirm_from_worker == 0);
@@ -588,7 +588,7 @@ static void test_high_risk_action(void)
     CHECK(run != NULL);
     if (run != NULL) {
         CHECK(run->action == UI_ACTION_DELETE);
-        CHECK(run->value == 1);
+        CHECK(run->value == 0);
         CHECK(strcmp(run->path, "ur0:tai/x.suprx") == 0);
     }
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
@@ -642,16 +642,12 @@ static void test_action_ime_and_risk(void)
     send_key(UI_KEY_TRIANGLE);
     CHECK(s_state.actions.selected == UI_ACTION_PASTE);
     send_key(UI_KEY_CROSS);
-    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
-    CHECK(s_state.confirm.kind == UI_CONFIRM_HIGH_RISK);
-    CHECK(strstr(s_state.confirm.risk_path, "ur0:tai") != NULL);
-    send_key(UI_KEY_RIGHT);
-    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
     CHECK(s_command_count == 2);
     for (int i = 0; i < s_command_count; ++i) {
         CHECK(s_commands[i].type == UI_CMD_RUN_ACTION);
         CHECK(s_commands[i].action == UI_ACTION_COPY);
-        CHECK(s_commands[i].value == 1);
+        CHECK(s_commands[i].value == 0);
         CHECK(strcmp(s_commands[i].path2, "ur0:tai") == 0);
     }
     CHECK(s_state.clip_mode == UI_CLIP_NONE);
@@ -1496,9 +1492,10 @@ static void test_high_risk_delete_warning(void)
 
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
     CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
-    CHECK(s_state.confirm.high_risk == 1);
-    CHECK(strstr(s_state.confirm.warning, "BOOTING") != NULL);
-    CHECK(strcmp(s_state.confirm.risk_path, "ur0:tai/X.SUPRX") == 0);
+    CHECK(s_state.confirm.high_risk == 0);
+    CHECK(strstr(s_state.confirm.warning, "UNDONE") != NULL);
+    CHECK(strstr(s_state.confirm.warning, "BOOTING") == NULL);
+    CHECK(s_state.confirm.risk_path[0] == '\0');
 }
 
 static void test_remote_volume_root_open(void)

@@ -861,7 +861,7 @@ static void test_delete_confirm_fresh(void)
     app_destroy(app);
 }
 
-static void test_delete_high_risk_and_protected(void)
+static void test_delete_inside_tai_and_protected(void)
 {
     App *app = make_app_ex("ur0:tai/x.suprx", "X", NULL,
                            "ur0:tai/boot_config.txt", "CONFIG");
@@ -872,7 +872,8 @@ static void test_delete_high_risk_and_protected(void)
     enter_local_named(app, "ur0:", "ur0:");
     enter_local_named(app, "tai", "ur0:tai");
 
-    /* A normal high-risk path shows the delete list and needs a second step. */
+    /* D87: a tai file needs the ordinary delete confirmation, not the retired
+     * high-risk gate. */
     select_local_named(app, "x.suprx");
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     for (int i = 0; i < 5; ++i)
@@ -880,7 +881,7 @@ static void test_delete_high_risk_and_protected(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DELETE);
-    CHECK(app_state(app)->confirm.high_risk == 1);
+    CHECK(app_state(app)->confirm.high_risk == 0);
     CHECK(app_state(app)->confirm.item_count == 1);
     CHECK(strcmp(app_state(app)->confirm.items[0].name,
                  "ur0:tai/x.suprx") == 0);
@@ -1824,7 +1825,7 @@ int main(void)
     test_local_batch_preflight();
     test_local_batch_refused_item();
     test_delete_confirm_fresh();
-    test_delete_high_risk_and_protected();
+    test_delete_inside_tai_and_protected();
     test_cancel();
     test_save_failure();
     test_log_never_contains_a_password();
