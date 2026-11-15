@@ -30,9 +30,20 @@
 #define WORKER_LOCAL_STEPS_MAX 16
 #define WORKER_CONFIRM_ITEMS HANDOFF_CONFIRM_ITEMS
 
+/* Which prompt owns the answer. A bare int let the local-action arm vanish
+ * without a compiler warning; the enum makes a missing case loud. */
+typedef enum {
+    PENDING_NONE = 0,
+    PENDING_TRANSFER,
+    PENDING_LOCAL_CONFLICT,
+    PENDING_BATCH_CONFLICT,
+    PENDING_BUSY,
+    PENDING_REMOTE_WAIT
+} PendingKind;
+
 typedef struct {
     int valid;
-    int kind; /* 1 transfer, 2 local action */
+    PendingKind kind;
     unsigned prompt_id;
     UiCommand command;
     XferItem item;
@@ -555,7 +566,7 @@ static void local_batch_preflight(Worker *worker)
     confirm_request(worker, &request);
 
     worker->pending.valid = 1;
-    worker->pending.kind = 3;
+    worker->pending.kind = PENDING_BATCH_CONFLICT;
 }
 
 static void emit_session(Worker *worker, int connected, const char *detail)
@@ -1255,7 +1266,7 @@ static void request_local_conflict(Worker *worker, const UiCommand *command,
     confirm_request(worker, &request);
 
     worker->pending.valid = 1;
-    worker->pending.kind = 2;
+    worker->pending.kind = PENDING_LOCAL_CONFLICT;
     worker->pending.command = *command;
     worker->pending.conflict = FSOP_CONFLICT_ASK;
 }
@@ -1275,7 +1286,7 @@ static void request_transfer_conflict(Worker *worker, const XferItem *item)
     confirm_request(worker, &request);
 
     worker->pending.valid = 1;
-    worker->pending.kind = 1;
+    worker->pending.kind = PENDING_TRANSFER;
 }
 
 /* --- local action execution -------------------------------------------- */
@@ -1492,7 +1503,7 @@ static void request_path_busy(Worker *worker, const UiCommand *command,
     fmt_copy(worker->busy_blocker, sizeof(worker->busy_blocker), blocker);
     worker->busy_waiting = 0;
     worker->pending.valid = 1;
-    worker->pending.kind = 4;
+    worker->pending.kind = PENDING_BUSY;
 }
 
 /* The network lane reuses the PATH BUSY prompt. The item stays claimed and
@@ -1512,7 +1523,7 @@ static void request_network_path_busy(Worker *worker, const XferItem *item,
 
     worker->network_waiting = 0;
     worker->pending.valid = 1;
-    worker->pending.kind = 5;
+    worker->pending.kind = PENDING_REMOTE_WAIT;
     worker->pending.item = *item;
 }
 
@@ -3154,7 +3165,8 @@ static void handle_command(Worker *worker, const UiCommand *command)
             command->prompt_id == worker->pending.prompt_id) {
             PendingWork pending = worker->pending;
             worker->pending.valid = 0;
-            if (pending.kind == 1) {
+            switch (pending.kind) {
+            case PENDING_TRANSFER:
                 if (command->choice == UI_CHOICE_CANCEL) {
                     /* CANCEL ends the batch, not just the item in the prompt. */
                     xfer_init(&worker->queue);
@@ -3177,7 +3189,8 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     batch_finish(worker);
                     pump_queue(worker);
                 }
-            } else if (pending.kind == 3) {
+                break;
+            case PENDING_BATCH_CONFLICT:
                 if (command->choice == UI_CHOICE_CANCEL) {
                     worker->local_conflict_set = 0;
                     local_batch_cancel(worker);
@@ -3189,7 +3202,31 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     worker->local_conflict_set = 1;
                     local_batch_execute(worker);
                 }
-            } else if (pending.kind == 5) {
+                break;
+            case PENDING_LOCAL_CONFLICT: {
+                /* The prompt freed the plan, so the answer rebuilds it with the
+                 * chosen decision. A refusal is a failed item, never a silent
+                 * drop: no run and no new prompt means the planner said no. */
+                if (command->choice == UI_CHOICE_CANCEL) {
+                    worker->local_conflict_set = 0;
+                    local_batch_cancel(worker);
+                } else {
+                    FsOpConflict conflict =
+                        command->choice == UI_CHOICE_OVERWRITE
+                            ? FSOP_CONFLICT_OVERWRITE
+                            : FSOP_CONFLICT_SKIP;
+                    worker->local_conflict = conflict;
+                    worker->local_conflict_set = 1;
+                    execute_action(worker, &pending.command, conflict);
+                    if (worker->local_run == NULL && !worker->pending.valid &&
+                        worker->busy_plan == NULL &&
+                        worker->local_batch.active)
+                        worker->local_batch.failed++;
+                }
+                break;
+            }
+            case PENDING_REMOTE_WAIT:
+                {
                 XferItem item = pending.item;
                 if (command->choice == UI_CHOICE_WAIT) {
                     worker->network_waiting = 1;
@@ -3209,7 +3246,9 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     cancelled.direction_known = 1;
                     emit(worker, &cancelled);
                 }
-            } else if (pending.kind == 4) {
+                }
+                break;
+            case PENDING_BUSY:
                 if (command->choice == UI_CHOICE_WAIT) {
                     worker->busy_waiting = 1;
                 } else if (command->choice == UI_CHOICE_SKIP) {
@@ -3225,6 +3264,10 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     worker->busy_waiting = 0;
                     local_batch_cancel(worker);
                 }
+                break;
+            case PENDING_NONE:
+            default:
+                break;
             }
         } else if (command->confirm == UI_CONFIRM_CANCEL_XFER &&
                    command->choice == UI_CHOICE_CANCEL) {

@@ -1798,6 +1798,58 @@ static void test_local_conflict_prompt(void)
     app_destroy(app);
 }
 
+/* A rename onto an existing name raises the single-item conflict prompt.
+ * Answering it must run the chosen action; the base branch dropped the answer
+ * and the item died on the batch idle flush. */
+static void test_local_rename_conflict(void)
+{
+    App *app = make_app_ex("ux0:data/OLD.TXT", "OLD", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/NEW.TXT", "NEW", 3);
+    enter_ux0_data(app);
+
+    /* SKIP: both files stay, the item is booked skipped. */
+    select_local_named(app, "OLD.TXT");
+    fake_ime_queue_text("NEW.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    for (int i = 0; i < 4; ++i)
+        press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_RENAME);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 20);
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+    press(app, INPUT_BIT(INPUT_RIGHT)); /* SKIP */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 40);
+
+    CHECK(fake_fs_exists("ux0:data/OLD.TXT"));
+    CHECK(content_is("ux0:data/NEW.TXT", "NEW"));
+    CHECK(app_state(app)->local_dock.skipped == 1);
+    CHECK(app_state(app)->local_dock.failed == 0);
+
+    /* OVERWRITE: the source leaves and the target holds its bytes. */
+    select_local_named(app, "OLD.TXT");
+    fake_ime_queue_text("NEW.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    for (int i = 0; i < 4; ++i)
+        press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 20);
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_RIGHT)); /* OVERWRITE */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 40);
+
+    CHECK(!fake_fs_exists("ux0:data/OLD.TXT"));
+    CHECK(content_is("ux0:data/NEW.TXT", "OLD"));
+    CHECK(app_state(app)->local_dock.failed == 0);
+
+    app_destroy(app);
+}
+
 int main(void)
 {
     test_download_destination_failure();
@@ -1822,6 +1874,7 @@ int main(void)
     test_clipboard_move();
     test_local_batch_terminal();
     test_local_conflict_prompt();
+    test_local_rename_conflict();
     test_local_batch_preflight();
     test_local_batch_refused_item();
     test_delete_confirm_fresh();
