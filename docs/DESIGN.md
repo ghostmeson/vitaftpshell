@@ -606,6 +606,17 @@ look and how focus moves.
 | TEXT INPUT | System IME for paths, names, and fields | open, cancelled, unavailable |
 | ERROR / RECONNECT | Inline failure and reconnect | network lost, login failed, transfer failed, server failed |
 
+## Launcher icon
+
+The home-screen icon is not a screen. It is a 128×128 true-black tile with one
+centred mark: a yellow arrow pointing right above a cyan arrow pointing left.
+The pair states the two live lanes and the transfer between them in the
+product's own palette. There is no frame, panel, glow, or text: the bubble
+launcher cuts its corners, so anything at the edge breaks the silhouette. The
+mark lives inside a centred 70×60 box. Full geometry and the mask check are in
+[`design/2026-11-15-launcher-icon.md`](design/2026-11-15-launcher-icon.md); the
+decision is D84.
+
 ## Design phase complete
 
 The screen inventory is settled. The planning questions that were deferred here

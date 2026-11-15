@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 twenty-one host suites, and `tools/preview/run.sh` renders 40 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b55.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b56.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -44,7 +44,8 @@ and download work, and the dock words read correctly in green. b55 carries the
 review remediation (U1-U10): the failed-transfer terminal, the two-lane local
 guard with WAIT on both lanes, prompt identity, the UI stack budget, the
 budgeted transfer pumps, the server session bounds, and the single sidecar
-owner. M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
+owner. b56 re-packages that code with the settled launcher icon (D84). M13 and
+M10 are partly observed; M1–M9, M11, and M12 are pending, so
 the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
@@ -306,7 +307,7 @@ judgment call:
 - directory sync after a rename: `FsPort` has no call for it, so power-loss
   durability needs a port extension or a confirmed platform guarantee;
 - the mksfoex flags this SDK build needs;
-- the icon and LiveArea art.
+- the LiveArea art (the launcher icon is settled, D84).
 
 ## Directory map
 
@@ -331,7 +332,7 @@ vitaFTPShell/
     ui/                the seven screens, dock, legends, shared parts, render
     app/               app frame loop and the one worker
     platform/          port headers and the six psp2_* adapters
-  sce_sys/             placeholder icon and LiveArea art (U14 replaces)
+  sce_sys/             launcher icon and placeholder LiveArea art (U14 replaces the LiveArea art)
   tools/
     check_worker_stack.py  linked-ELF worker stack budget check (build gate)
     test/run.sh        layering guard and host test runner
@@ -343,7 +344,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D83
+    DECISIONS.md       numbered decisions, D1-D84
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification

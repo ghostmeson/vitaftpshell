@@ -1835,3 +1835,24 @@ leaves the deferred prompt latched, so the app shows it when the screen frees.
 **Consequences:** A local dialog can no longer satisfy a transfer prompt, and
 the same-kind ambiguity between the three transfer prompts is closed. UI-owned
 dialogs emit id 0.
+
+## D84. The launcher icon is a centred two-arrow mark
+
+**Date:** 2026-11-15
+**Status:** accepted; b56.
+
+**Context:** `sce_sys/icon0.png` was a placeholder. The Vita bubble launcher
+masks icon art with a rounded square, so a border or an edge-to-edge panel is
+clipped and reads as a broken shape. The product's settled shape is two live
+panes, one network and one local, exchanging files.
+
+**Decision:** The icon is a 128×128 true-black tile with one centred mark: a
+yellow arrow pointing right above a cyan arrow pointing left, drawn in
+`C_YELLOW` and `C_CYAN` with no frame, panel, glow, or text. The mark occupies a
+centred 70×60 box, inside the bubble's straight edge. It ships as an indexed
+8-bit PNG because `tools/check_assets.sh` and the installer require that format.
+
+**Consequences:** The launcher icon no longer clips at the bubble mask and reads
+at small size. LiveArea art remains open; a change to the mark is a new decision.
+Red and green stay out of the icon so it can never be mistaken for a failure or
+a server alert.
