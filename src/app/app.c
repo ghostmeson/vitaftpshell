@@ -81,8 +81,8 @@ static void apply_listing(App *app, UiPane pane)
     const void *rows = NULL;
     int count = 0;
     uint32_t generation = 0;
-    if (!handoff_listing_acquire(&app->handoff, pane, &rows, &count,
-                                 &generation))
+    if (!handoff_listing_adopt(&app->handoff, pane, &rows, &count,
+                               &generation))
         return;
 
     app->listing_held[pane] = 1;
@@ -612,13 +612,6 @@ int app_tick(App *app)
     ui_render(&app->state);
     draw_present();
 
-    for (int pane = 0; pane < UI_PANE_COUNT; ++pane) {
-        if (app->listing_held[pane]) {
-            handoff_listing_release(&app->handoff, (UiPane)pane);
-            app->listing_held[pane] = 0;
-        }
-    }
-
     if (worker_quit(app->worker) || app->state.quit)
         return 0;
     return 1;
@@ -628,6 +621,12 @@ void app_destroy(App *app)
 {
     if (app == NULL)
         return;
+    for (int pane = 0; pane < UI_PANE_COUNT; ++pane) {
+        if (app->listing_held[pane]) {
+            handoff_listing_release(&app->handoff, (UiPane)pane);
+            app->listing_held[pane] = 0;
+        }
+    }
     if (app->thread_started) {
         __atomic_store_n(&app->stop, 1, __ATOMIC_RELEASE);
         pthread_join(app->thread, NULL);

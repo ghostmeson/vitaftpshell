@@ -183,6 +183,50 @@ static void test_listing_generations(void)
     handoff_listing_release(&s_handoff, UI_PANE_LOCAL);
 }
 
+/* The UI keeps its held generation and adopts a newer one without ever
+ * pointing at a released slot. */
+static void test_listing_adopt(void)
+{
+    handoff_init(&s_handoff);
+    static int list_a[] = {1};
+    static int list_b[] = {2};
+    static int list_c[] = {3};
+
+    int slot = handoff_listing_begin(&s_handoff, UI_PANE_LOCAL);
+    CHECK(slot == 0);
+    CHECK(handoff_listing_publish(&s_handoff, UI_PANE_LOCAL, slot, list_a, 1));
+
+    const void *rows = NULL;
+    int count = 0;
+    uint32_t generation = 0;
+    CHECK(handoff_listing_adopt(&s_handoff, UI_PANE_LOCAL, &rows, &count,
+                                &generation) == 1);
+    CHECK(rows == list_a && count == 1 && generation == 1);
+
+    /* Nothing newer: the held row stays. */
+    CHECK(handoff_listing_adopt(&s_handoff, UI_PANE_LOCAL, &rows, &count,
+                                &generation) == 1);
+    CHECK(rows == list_a && generation == 1);
+
+    slot = handoff_listing_begin(&s_handoff, UI_PANE_LOCAL);
+    CHECK(slot == 1);
+    CHECK(handoff_listing_publish(&s_handoff, UI_PANE_LOCAL, slot, list_b, 1));
+    CHECK(handoff_listing_adopt(&s_handoff, UI_PANE_LOCAL, &rows, &count,
+                                &generation) == 1);
+    CHECK(rows == list_b && generation == 2);
+    CHECK(s_handoff.listings[UI_PANE_LOCAL].slots[0].held == 0);
+
+    slot = handoff_listing_begin(&s_handoff, UI_PANE_LOCAL);
+    CHECK(slot == 2);
+    CHECK(handoff_listing_publish(&s_handoff, UI_PANE_LOCAL, slot, list_c, 1));
+    CHECK(handoff_listing_adopt(&s_handoff, UI_PANE_LOCAL, &rows, &count,
+                                &generation) == 1);
+    CHECK(rows == list_c && generation == 3);
+    CHECK(s_handoff.listings[UI_PANE_LOCAL].slots[1].held == 0);
+
+    handoff_listing_release(&s_handoff, UI_PANE_LOCAL);
+}
+
 static void test_log_ring(void)
 {
     handoff_init(&s_handoff);
@@ -464,6 +508,7 @@ int main(void)
     test_event_progress();
     test_latched_server();
     test_listing_generations();
+    test_listing_adopt();
     test_log_ring();
     test_bulk();
     test_record_integrity();

@@ -216,6 +216,11 @@ int handoff_listing_publish(Handoff *handoff, UiPane pane, int slot,
 /* The reader keeps one generation until it releases it at a frame boundary. */
 int handoff_listing_acquire(Handoff *handoff, UiPane pane, const void **rows,
                             int *row_count, uint32_t *generation);
+/* Keep the held generation, or adopt the newest published one when it is
+ * newer. The old slot is released in the same step, so the UI's row pointer
+ * never points at a slot the worker may rewrite. */
+int handoff_listing_adopt(Handoff *handoff, UiPane pane, const void **rows,
+                          int *row_count, uint32_t *generation);
 void handoff_listing_release(Handoff *handoff, UiPane pane);
 unsigned handoff_listing_lost(const Handoff *handoff, UiPane pane);
 
