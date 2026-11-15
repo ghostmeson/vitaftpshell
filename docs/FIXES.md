@@ -83,8 +83,7 @@ matrix passes.
 
 **Still open from the b63 review, recorded rather than built** (U7):
 
-- Sidecar `RNTO` asymmetry: `.vftp.part`/`.vftp.old` are refused as write and delete targets but not as rename destinations.
-- The data-connection accept matches the peer address only, not the port; two clients on one host share an address.
+- The data-connection accept cannot distinguish two sessions on one host; the fixed port is kept and the limitation is accepted (U4).
 - Cancellation during the final-reply wait discards a complete download by design (D89, KTD8); the cancel dialog says the partial is removed.
 - `FEAT` advertises a `perm` fact that `MLSD`/`MLST` never emits.
 - A PASV reply captures the LAN address at start; a DHCP change leaves a stale `227` endpoint.

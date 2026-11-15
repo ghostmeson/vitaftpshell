@@ -413,8 +413,9 @@ PathResult path_check_rename(const char *from, const char *to, int server_role,
     PathResult b = check_path(to, server_role, &to_risk);
     if (b != PATH_OK)
         return b;
-    /* The sidecar names are the transfer's own; a rename must not create one. */
-    if (path_is_sidecar(to))
+    /* A rename may not create a sidecar, and it may not steal a live temp.
+     * The aside stays a legal source so a leftover can be repaired. */
+    if (path_is_sidecar(to) || path_sidecar_kind(from) == PATH_SIDECAR_PART)
         return PATH_DENIED;
 
     if (risk != NULL)

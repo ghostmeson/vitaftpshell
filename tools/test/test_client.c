@@ -725,6 +725,70 @@ static void test_download_final_reply_short(void)
 /* An upload that loses its final reply must end bounded too. */
 /* No expected size means completeness cannot be established: a silent final
  * reply must not keep the file. */
+/* A file that grew after the preflight still counts as complete. */
+static void test_download_final_reply_over_delivery(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/grew.bin", "ux0:data/grew.bin",
+                                  5, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/grew.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+
+    fake_net_queue_rx(data, "hello!!", 7);
+    fake_net_shutdown(data);
+    tick(client);
+    tick(client);
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(cap.file_kept == 1);
+    char buf[16];
+    size_t n = fake_fs_read_file("ux0:data/grew.bin", buf, sizeof(buf));
+    CHECK(n == 7);
+
+    ftp_client_destroy(client);
+}
+
+/* Cancel works before PASV has been sent (the SIZE step). */
+static void test_cancel_during_size(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/cancel.bin",
+                                  "ux0:data/cancel.bin", 5, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /UX0:/DATA/cancel.bin");
+    CHECK(ftp_client_cancel(client) == FTP_CLIENT_OK);
+    expect_cmd(&server, "ABOR");
+    reply(&server, 225, "No transfer in progress.");
+    tick_until_settled(client);
+    CHECK(!fake_fs_exists("ux0:data/cancel.bin"));
+
+    ftp_client_destroy(client);
+}
+
 static void test_download_final_reply_unknown_size(void)
 {
     setup();
@@ -1556,6 +1620,8 @@ int main(void)
     test_upload_final_reply_missing();
     test_download_final_reply_unknown_size();
     test_download_size_preflight();
+    test_download_final_reply_over_delivery();
+    test_cancel_during_size();
     test_download_budget();
     test_upload();
     test_download_reset();
