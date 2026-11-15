@@ -103,8 +103,6 @@ typedef struct {
     unsigned id;
     int item_count;
     int existing_count;
-    int high_risk;
-    char risk_path[PATH_MAX_LEN];
     char context[128];
     HandoffConfirmItem items[HANDOFF_CONFIRM_ITEMS];
 } HandoffConfirm;

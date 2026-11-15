@@ -337,8 +337,6 @@ typedef struct {
     UiConfirmKind confirm;
     const UiConfirmItem *items;
     int item_count;
-    int high_risk;
-    char risk_path[PATH_MAX_LEN];
     int value;
     int clients;
     uint64_t bytes;

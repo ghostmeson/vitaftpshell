@@ -137,7 +137,3 @@ void draw_set_additive(int on)
     vita2d_set_blend_mode_add(on ? 1 : 0);
 }
 
-void draw_clear_clip(void)
-{
-    vita2d_disable_clipping();
-}

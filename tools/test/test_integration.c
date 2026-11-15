@@ -883,7 +883,6 @@ static void test_delete_inside_tai_and_protected(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DELETE);
-    CHECK(app_state(app)->confirm.high_risk == 0);
     CHECK(app_state(app)->confirm.item_count == 1);
     CHECK(strcmp(app_state(app)->confirm.items[0].name,
                  "ur0:tai/x.suprx") == 0);
@@ -1856,6 +1855,60 @@ static void test_local_conflict_prompt(void)
 /* A rename onto an existing name raises the single-item conflict prompt.
  * Answering it must run the chosen action; the base branch dropped the answer
  * and the item died on the batch idle flush. */
+/* A worker confirmation raised while a local dialog owns the screen waits for
+ * that dialog instead of replacing it or vanishing. */
+static void test_deferred_worker_confirmation(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "UP", NULL, "ux0:data/DEL.TXT",
+                           "DEL");
+    if (app == NULL)
+        return;
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.exists_path = "/UP.TXT";
+    peer.exists_size = 2;
+
+    enter_ux0_data(app);
+    select_local_named(app, "DEL.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    for (int i = 0; i < 5; ++i)
+        press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_DELETE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DELETE);
+
+    /* Queue the upload behind the open dialog. */
+    UiCommand up;
+    memset(&up, 0, sizeof(up));
+    up.type = UI_CMD_TRANSFER;
+    up.pane = UI_PANE_LOCAL;
+    snprintf(up.path, sizeof(up.path), "ux0:data/UP.TXT");
+    snprintf(up.path2, sizeof(up.path2), "/");
+    up.total = 2;
+    up.total_known = 1;
+    CHECK(handoff_command_push(app_handoff(app), &up) == 1);
+    pump(app, &peer, 80);
+
+    /* The worker prompt waits; the local dialog still owns the screen. */
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DELETE);
+
+    /* Answer the local dialog with CANCEL; the deferred prompt appears. */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, &peer, 80);
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+
+    press(app, INPUT_BIT(INPUT_RIGHT)); /* SKIP */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, &peer, 40);
+    CHECK(peer.stors == 0);
+
+    app_destroy(app);
+}
+
 static void test_local_rename_conflict(void)
 {
     App *app = make_app_ex("ux0:data/OLD.TXT", "OLD", NULL, NULL, NULL);
@@ -1931,6 +1984,7 @@ int main(void)
     test_local_batch_terminal();
     test_local_conflict_prompt();
     test_local_rename_conflict();
+    test_deferred_worker_confirmation();
     test_local_batch_preflight();
     test_local_batch_refused_item();
     test_delete_confirm_fresh();

@@ -469,10 +469,7 @@ static void drain_events(App *app)
         request.prompt_id = confirm.id;
         request.items = app->confirm_items;
         request.item_count = confirm.item_count;
-        request.high_risk = confirm.high_risk;
         request.existing_count = confirm.existing_count;
-        snprintf(request.risk_path, sizeof(request.risk_path), "%s",
-                 confirm.risk_path);
         feed(app, &request);
     }
 }

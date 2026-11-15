@@ -683,15 +683,6 @@ static void confirm_states(void)
     state.confirm.choices[1] = UI_CHOICE_DISCARD;
     save_state("confirm-discard", &state);
 
-    confirm_state(&state, UI_CONFIRM_HIGH_RISK,
-                  "WRITE INSIDE HIGH-RISK PATH", "", "");
-    snprintf(state.confirm.risk_path, sizeof(state.confirm.risk_path),
-             "ur0:tai/x.suprx");
-    state.confirm.high_risk = 1;
-    state.confirm.choices[0] = UI_CHOICE_CANCEL;
-    state.confirm.choices[1] = UI_CHOICE_CONTINUE;
-    save_state("confirm-high-risk", &state);
-
     confirm_state(&state, UI_CONFIRM_DELETE_SITE, "DELETE SITE", "HOME NAS",
                   "THIS CANNOT BE UNDONE.");
     save_state("confirm-delete-site", &state);

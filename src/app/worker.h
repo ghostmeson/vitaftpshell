@@ -16,6 +16,9 @@
 
 /* The worker's step cadence; it sleeps this long between worker_step calls. */
 #define WORKER_TICK_MS 8
+/* The recursive folder scan's fixed depth. The build gate reads this header,
+ * so the constant and the check cannot drift (U8). */
+#define WORKER_REMOTE_DEPTH 32
 
 /*
  * The one worker (D38). It owns the FTP client, the FTP server, the transfer

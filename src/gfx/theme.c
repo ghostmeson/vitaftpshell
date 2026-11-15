@@ -30,12 +30,7 @@
 #define METER_GAP 2.0f
 #define METER_ABSENT_DIM 0.7f
 
-#define HAZARD_STRIPE_W 9.0f
-#define HAZARD_PERIOD 22.0f
 
-#define SWEEP_PERIOD 5.0f
-#define SWEEP_CORE_DIM 0.12f
-#define SWEEP_HALO_DIM 0.05f
 
 #define READOUT_BUF 24
 

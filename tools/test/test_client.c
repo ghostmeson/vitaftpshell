@@ -478,7 +478,7 @@ static void test_download(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/UX0:/DATA/dl.bin", "ux0:data/dl.bin", 0,
+    FtpClientTransfer transfer = {"/UX0:/DATA/dl.bin", "ux0:data/dl.bin",
                                   100, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     CHECK(cap.total == 100 && cap.total_known == 1);
@@ -510,7 +510,7 @@ static void test_download(void)
     CHECK(!fake_fs_exists("ux0:data/dl.bin.vftp.part"));
 
     fake_fs_add_dir("ux0:data/adir");
-    FtpClientTransfer dir = {"/x", "ux0:data/adir", 0, 0, 0};
+    FtpClientTransfer dir = {"/x", "ux0:data/adir", 0, 0};
     CHECK(ftp_client_download(client, &dir, NULL) == FTP_CLIENT_LOCAL_FAILED);
     CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
     /* The worker owns the failure terminal; the client emits no done event. */
@@ -534,7 +534,7 @@ static void test_download_budget(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/UX0:/DATA/big.bin", "ux0:data/big.bin", 0,
+    FtpClientTransfer transfer = {"/UX0:/DATA/big.bin", "ux0:data/big.bin",
                                   6144, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
@@ -578,7 +578,7 @@ static void test_upload(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/UX0:/DATA/up.bin", "ux0:data/up.bin", 0, 0, 0};
+    FtpClientTransfer transfer = {"/UX0:/DATA/up.bin", "ux0:data/up.bin", 0, 0};
     CHECK(ftp_client_upload(client, &transfer) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -638,7 +638,7 @@ static void test_download_final_reply_missing(void)
     capture_reset_rows(&cap);
 
     FtpClientTransfer transfer = {"/UX0:/DATA/keep.bin", "ux0:data/keep.bin",
-                                  0, 5, 1};
+                                  5, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -682,7 +682,7 @@ static void test_download_final_reply_short(void)
     capture_reset_rows(&cap);
 
     FtpClientTransfer transfer = {"/UX0:/DATA/short.bin", "ux0:data/short.bin",
-                                  0, 10, 1};
+                                  10, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -720,7 +720,7 @@ static void test_upload_final_reply_missing(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/UX0:/DATA/up2.bin", "ux0:data/up2.bin", 0, 0, 0};
+    FtpClientTransfer transfer = {"/UX0:/DATA/up2.bin", "ux0:data/up2.bin", 0, 0};
     CHECK(ftp_client_upload(client, &transfer) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -754,7 +754,7 @@ static void test_download_reset(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0, 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -796,7 +796,7 @@ static void test_control_drop(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0, 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -922,7 +922,7 @@ static void test_data_idle(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0, 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -960,7 +960,7 @@ static void test_cancel_alignment(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0, 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -1037,7 +1037,7 @@ static void test_450_disarms(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/a.bin", "ux0:data/a.bin", 0, 0, 0};
+    FtpClientTransfer transfer = {"/a.bin", "ux0:data/a.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -1051,7 +1051,7 @@ static void test_450_disarms(void)
     CHECK(cap.done == 2 && cap.ok == 0);
     CHECK(cap.done_cause == FTP_CAUSE_SERVER);
 
-    FtpClientTransfer second = {"/b.bin", "ux0:data/b.bin", 0, 0, 0};
+    FtpClientTransfer second = {"/b.bin", "ux0:data/b.bin", 0, 0};
     CHECK(ftp_client_download(client, &second, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,141).");
@@ -1082,7 +1082,7 @@ static void test_high_risk(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.suprx", "ur0:tai/x.suprx", 0, 0, 0};
+    FtpClientTransfer transfer = {"/x.suprx", "ur0:tai/x.suprx", 0, 0};
     PathRisk risk = PATH_RISK_NORMAL;
     /* D87: high-risk paths still report their class, but no longer require a
      * local approval step. The hard path denials remain. */
@@ -1197,7 +1197,7 @@ static void test_abort_reverse_order(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0, 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -1223,7 +1223,7 @@ static void test_abort_reverse_order(void)
     CHECK(strcmp(ftp_client_cwd_text(client), "/AFTER") == 0);
 
     /* A server that refuses ABOR must not cost the session. */
-    FtpClientTransfer second = {"/y.bin", "ux0:data/y.bin", 0, 0, 0};
+    FtpClientTransfer second = {"/y.bin", "ux0:data/y.bin", 0, 0};
     CHECK(ftp_client_download(client, &second, NULL) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,141).");

@@ -111,8 +111,6 @@ typedef struct {
 typedef struct {
     const char *remote_path;
     const char *local_path;
-    /* The caller has shown the high-risk confirmation for this destination. */
-    int risk_approved;
     /* A listing size hint for downloads; 0 means unknown. */
     uint64_t total;
     int total_known;
@@ -123,7 +121,6 @@ typedef enum {
     FTP_CLIENT_BUSY,
     FTP_CLIENT_INVALID,
     FTP_CLIENT_NOT_CONNECTED,
-    FTP_CLIENT_NEED_RISK,
     FTP_CLIENT_DENIED,
     /* The transfer was accepted but its local file could not be opened. The
      * client is back in READY and reported no operation-done event; the worker
@@ -144,7 +141,7 @@ FtpClientResult ftp_client_connect(FtpClient *client,
 FtpClientResult ftp_client_list(FtpClient *client, const char *path);
 FtpClientResult ftp_client_nlst(FtpClient *client, const char *path);
 FtpClientResult ftp_client_cwd(FtpClient *client, const char *path);
-/* A denied destination returns DENIED; an unapproved high-risk one NEED_RISK. */
+/* A denied destination returns DENIED. */
 FtpClientResult ftp_client_download(FtpClient *client,
                                     const FtpClientTransfer *transfer,
                                     PathRisk *out_risk);

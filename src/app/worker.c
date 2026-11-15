@@ -22,7 +22,9 @@
 #endif
 
 #define WORKER_CMD_BUDGET 8
-#define WORKER_REMOTE_DEPTH 32
+/* A batch terminal waits this long for any last item to land before it books
+ * the remainder as failed. */
+#define WORKER_BATCH_IDLE_MS 250
 /* One local slice per worker step; the network engine ticks before it. */
 #define WORKER_NET_WAIT_MS 50
 #define WORKER_LOCAL_BYTES_PER_STEP (64u * 1024u)
@@ -432,7 +434,7 @@ static void local_batch_flush(Worker *worker)
         worker->pending_command_count > 0 || worker->batch_executing ||
         worker->local_run != NULL || worker->busy_plan != NULL)
         return;
-    if (now_ms(worker) - batch->last_ms < 250)
+    if (now_ms(worker) - batch->last_ms < WORKER_BATCH_IDLE_MS)
         return;
     int missing = batch->total - batch->done - batch->skipped -
                   batch->failed - batch->cancelled;
@@ -2323,7 +2325,6 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
         FtpClientTransfer transfer;
         transfer.remote_path = item->source.text;
         transfer.local_path = item->destination.text;
-        transfer.risk_approved = 0;
         transfer.total = item->total;
         transfer.total_known = item->total_known;
         result = ftp_client_download(worker->client, &transfer, NULL);
@@ -2331,7 +2332,6 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
         FtpClientTransfer transfer;
         transfer.remote_path = item->destination.text;
         transfer.local_path = item->source.text;
-        transfer.risk_approved = 0;
         transfer.total = item->total;
         transfer.total_known = item->total_known;
         result = ftp_client_upload(worker->client, &transfer);

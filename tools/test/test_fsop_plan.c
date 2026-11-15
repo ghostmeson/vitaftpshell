@@ -198,8 +198,6 @@ static void test_risk(void)
     FsOpRequest marked = {FSOP_COPY, sources, 1, "ux0:data", &f,
                           FSOP_CONFLICT_OVERWRITE};
     CHECK(fsop_plan_build(&s_plan, &marked) == 1);
-    CHECK(s_plan.high_risk == 1);
-    CHECK(strcmp(s_plan.risk_path.text, "ur0:tai/config.txt") == 0);
 
     facts_reset();
     fact("ux0:data/A.TXT", FS_ENTRY_FILE, 1, 1);
@@ -209,8 +207,6 @@ static void test_risk(void)
     FsOpRequest dest = {FSOP_COPY, plain, 1, "ur0:tai", &f2,
                         FSOP_CONFLICT_OVERWRITE};
     CHECK(fsop_plan_build(&s_plan, &dest) == 1);
-    CHECK(s_plan.high_risk == 1);
-    CHECK(strcmp(s_plan.risk_path.text, "ur0:tai/A.TXT") == 0);
 
     facts_reset();
     fact("ur0:tai/NEW", FS_ENTRY_DIR, 0, 0);
@@ -218,7 +214,6 @@ static void test_risk(void)
     FsOpRequest mkdir = {FSOP_MKDIR, NULL, 0, "ur0:tai/NEW", &f3,
                          FSOP_CONFLICT_ASK};
     CHECK(fsop_plan_build(&s_plan, &mkdir) == 1);
-    CHECK(s_plan.high_risk == 1);
 }
 
 static void test_merge(void)
@@ -332,7 +327,6 @@ static void test_rename_and_mkdir(void)
                           FSOP_CONFLICT_OVERWRITE};
     CHECK(fsop_plan_build(&s_plan, &rename) == 1);
     CHECK(s_plan.ok == 1);
-    CHECK(s_plan.high_risk == 1);
     CHECK(step_source_index(&s_plan, FSOP_STEP_RENAME, "ur0:tai/a.txt") >= 0);
 
     /* ASK records the destination name for the prompt; SKIP counts as skipped

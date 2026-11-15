@@ -503,15 +503,6 @@ static void open_confirm(UiState *state, UiConfirmKind kind)
         snprintf(c->title, sizeof(c->title), "DISCARD CHANGES");
         snprintf(c->warning, sizeof(c->warning), "THE EDITS ARE LOST.");
         break;
-    case UI_CONFIRM_HIGH_RISK:
-        c->choices[0] = UI_CHOICE_CANCEL;
-        c->choices[1] = UI_CHOICE_CONTINUE;
-        c->choice_count = 2;
-        c->high_risk = 1;
-        snprintf(c->title, sizeof(c->title), "WRITE INSIDE HIGH-RISK PATH");
-        snprintf(c->warning, sizeof(c->warning),
-                 "A BAD EDIT CAN STOP THE CONSOLE BOOTING. THERE IS NO UNDO.");
-        break;
     case UI_CONFIRM_DELETE_SITE:
         c->choices[0] = UI_CHOICE_CANCEL;
         c->choices[1] = UI_CHOICE_DELETE;
@@ -1681,13 +1672,9 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
     case UI_KEY_CROSS: {
         UiChoice choice = c->choices[c->choice_focus];
         int from_worker = state->confirm_from_worker;
-        if (!from_worker && (c->kind == UI_CONFIRM_HIGH_RISK ||
-                             c->kind == UI_CONFIRM_DELETE)) {
-            int approved = c->kind == UI_CONFIRM_HIGH_RISK
-                               ? choice == UI_CHOICE_CONTINUE
-                               : choice == UI_CHOICE_DELETE;
-            int approved_value =
-                (c->kind == UI_CONFIRM_HIGH_RISK || c->high_risk) ? 1 : 0;
+        if (!from_worker && c->kind == UI_CONFIRM_DELETE) {
+            int approved = choice == UI_CHOICE_DELETE;
+            int approved_value = 0;
             if (approved) {
                 UiPaneState *pending =
                     &state->panes[state->pending_pane];
@@ -1789,9 +1776,7 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
         return;
     }
     case UI_KEY_CIRCLE: {
-        if ((c->kind == UI_CONFIRM_HIGH_RISK ||
-             c->kind == UI_CONFIRM_DELETE) &&
-            !state->confirm_from_worker) {
+        if (c->kind == UI_CONFIRM_DELETE && !state->confirm_from_worker) {
             close_confirm(state, 0);
             return;
         }
@@ -2287,12 +2272,6 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         state->confirm.items = event->items;
         state->confirm.item_count = event->item_count;
         state->confirm.existing_count = event->existing_count;
-        if (event->high_risk) {
-            state->confirm.high_risk = 1;
-            snprintf(state->confirm.risk_path,
-                     sizeof(state->confirm.risk_path), "%s",
-                     event->risk_path);
-        }
         break;
     case UI_EVT_IME_RESULT:
         if (state->pending_action_valid) {

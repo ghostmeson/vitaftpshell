@@ -62,6 +62,10 @@ fi
 
 echo "layering guard: OK"
 
+# The stack gate's own parser: a missing or malformed depth must fail, not pass
+# vacuously. This needs no Vita toolchain.
+python3 "$ROOT/tools/check_worker_stack.py" --self-test
+
 # --- Asset guard ------------------------------------------------------------
 # The installer rejects 24-bit truecolor LiveArea art with 0x8010113D; every
 # sce_sys PNG must be indexed 8-bit (color type 3, bit depth 8).
