@@ -2221,6 +2221,18 @@ void ftp_server_tick(FtpServer *server, unsigned wait_ms)
             server_stop_internal(server, "NETWORK LOST");
             return;
         }
+        /* A DHCP lease change moves the console; the next 227 must name the
+         * current address, not the one read at start (D59). An unknown or
+         * zero address is not a usable endpoint, so the last known one stays. */
+        if (link.address_known && link.address.addr != 0 &&
+            link.address.addr != server->lan_address.addr) {
+            server->lan_address = link.address;
+            server_trace(server, "FTPD LINK ADDRESS %u.%u.%u.%u",
+                         (link.address.addr >> 24) & 0xFF,
+                         (link.address.addr >> 16) & 0xFF,
+                         (link.address.addr >> 8) & 0xFF,
+                         link.address.addr & 0xFF);
+        }
     }
 
     for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
