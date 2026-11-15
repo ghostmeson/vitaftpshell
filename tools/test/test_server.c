@@ -115,7 +115,7 @@ static void command(FtpServer *server, FakeFtpClient *client, const char *cmd,
                     int expect)
 {
     fake_ftp_client_send(client, cmd);
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
 
     int code = 0;
     char text[512] = {0};
@@ -136,7 +136,7 @@ static void command_text(FtpServer *server, FakeFtpClient *client,
                          const char *cmd, int expect, char *out, size_t cap)
 {
     fake_ftp_client_send(client, cmd);
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
 
     int code = 0;
     char text[512] = {0};
@@ -159,7 +159,7 @@ static void command_text(FtpServer *server, FakeFtpClient *client,
 static void connect_session(FtpServer *server, FakeFtpClient *client)
 {
     fake_net_queue_accept(fake_net_listener_at(0), PEER_ADDR, PEER_PORT);
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
 
     NetSocket *control = fake_net_accepted_at(0);
     CHECK(control != NULL);
@@ -189,7 +189,7 @@ static NetSocket *data_command(FtpServer *server, FakeFtpClient *client,
 {
     unsigned before = fake_net_accept_count();
     fake_ftp_client_send(client, cmd);
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
 
     int code = 0;
     char text[512] = {0};
@@ -213,7 +213,7 @@ static NetSocket *data_command(FtpServer *server, FakeFtpClient *client,
 static void wait_reply(FtpServer *server, FakeFtpClient *client, int expect)
 {
     for (int i = 0; i < 6; ++i) {
-        ftp_server_tick(server);
+        ftp_server_tick(server, 0);
         int code = 0;
         char text[512] = {0};
         if (read_reply(client, &code, text, sizeof(text))) {
@@ -298,7 +298,7 @@ static void test_login(void)
     command(server, &client, "ABOR", 225);
 
     fake_ftp_client_send(&client, "USER bob");
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
     int code = 0;
     char text[512];
     CHECK(read_reply(&client, &code, text, sizeof(text)) == 1);
@@ -640,7 +640,7 @@ static void test_mlst_size_mdtm(void)
     command(server, &client, "MDTM /UX0:/DATA/f.txt", 550);
 
     fake_ftp_client_send(&client, "MLST /UX0:/DATA/f.txt");
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
     int code = 0;
     char text[512];
     CHECK(read_reply(&client, &code, text, sizeof(text)) == 1);
@@ -764,7 +764,7 @@ static void test_second_client(void)
     connect_session(server, &client);
 
     fake_net_queue_accept(fake_net_listener_at(0), 0x0A000009u, 41000);
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
     NetSocket *second = fake_net_accepted_at(1);
     CHECK(second != NULL);
     char tx[64];
@@ -826,7 +826,7 @@ static void test_control_write_failure(void)
 
     fake_ftp_client_send(&client, "NOOP");
     fake_net_fail_send_next(NET_ERROR);
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
 
     CHECK(ftp_server_state(server) == FTP_SERVER_ON);
     CHECK(ftp_server_clients(server) == 0);
@@ -896,7 +896,7 @@ static void test_quit(void)
 
     FakeFtpClient second;
     fake_net_queue_accept(fake_net_listener_at(0), PEER_ADDR, 40100);
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
     NetSocket *control = fake_net_accepted_at(1);
     CHECK(control != NULL);
     fake_ftp_client_init(&second, control);
@@ -921,7 +921,7 @@ static void test_network_loss(void)
 
     fake_net_set_link(0, 1, PEER_ADDR, 0);
     fake_clock_advance(1000);
-    ftp_server_tick(server);
+    ftp_server_tick(server, 0);
 
     CHECK(ftp_server_state(server) == FTP_SERVER_OFF);
     CHECK(ftp_server_clients(server) == 0);

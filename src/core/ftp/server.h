@@ -87,7 +87,8 @@ typedef int (*FtpServerGuardFn)(void *ctx, FtpGuardAction action,
 
 void ftp_server_set_guard(FtpServer *server, FtpServerGuardFn guard,
                           void *ctx);
-void ftp_server_tick(FtpServer *server);
+/* `wait_ms` bounds the socket wait; pass 0 while a local job needs the slice. */
+void ftp_server_tick(FtpServer *server, unsigned wait_ms);
 
 FtpServerState ftp_server_state(const FtpServer *server);
 int ftp_server_clients(const FtpServer *server);

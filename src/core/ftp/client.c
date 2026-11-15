@@ -21,6 +21,10 @@
 
 #define CLIENT_SEND_MAX (FTP_PATH_MAX + 64)
 #define CLIENT_DATA_BUF 4096
+/* One tick moves at most this much payload; the local lane uses the same
+ * shape so neither starves the other. */
+#define CLIENT_DATA_BYTES_PER_TICK (32u * 1024u)
+#define CLIENT_DATA_SLICE_MS 6
 
 typedef enum {
     CSTEP_NONE = 0,
@@ -120,6 +124,8 @@ struct FtpClient {
     char data_buf[CLIENT_DATA_BUF];
     size_t data_len;
     size_t data_off;
+    unsigned data_budget;
+    uint64_t data_slice_start;
 
     FtpLineReader list_lines;
 
@@ -750,25 +756,25 @@ static int client_write_all(FsPort *fs, FsFile *file, const char *data,
     return 1;
 }
 
-static void client_pump_receive(FtpClient *client)
+static int client_pump_receive(FtpClient *client)
 {
     char buf[2048];
     size_t got = 0;
     NetResult r = client->net->receive(client->net->ctx, client->data, buf,
                                        sizeof(buf), &got);
     if (r == NET_WOULD_BLOCK)
-        return;
+        return 0;
     if (r == NET_CLOSED || (r == NET_OK && got == 0)) {
         client_close_data(client);
         client->data_state = FTP_DATA_DRAINING;
         if (client->final_seen)
             client_complete_data(client, 1, FTP_CAUSE_APP,
                                  client->stage, NULL);
-        return;
+        return 0;
     }
     if (r != NET_OK) {
         client_data_failure(client, FTP_CAUSE_NETWORK, "DATA CONNECTION LOST");
-        return;
+        return 0;
     }
 
     client->data_deadline = now_ms(client) + CLIENT_DATA_IDLE_MS;
@@ -789,14 +795,18 @@ static void client_pump_receive(FtpClient *client)
             !client_write_all(client->fs, client->temp.file, buf, got)) {
             client_data_failure(client, FTP_CAUSE_STORAGE,
                                 "DESTINATION WRITE FAILED");
-            return;
+            return 0;
         }
     }
 
+    client->data_budget = got >= client->data_budget
+                              ? 0
+                              : client->data_budget - (unsigned)got;
     client_emit_progress(client);
+    return 1;
 }
 
-static void client_pump_send(FtpClient *client)
+static int client_pump_send(FtpClient *client)
 {
     if (client->data_off < client->data_len) {
         size_t sent = 0;
@@ -804,28 +814,31 @@ static void client_pump_send(FtpClient *client)
             client->net->ctx, client->data, client->data_buf + client->data_off,
             client->data_len - client->data_off, &sent);
         if (r == NET_WOULD_BLOCK)
-            return;
+            return 0;
         if (r != NET_OK || sent == 0) {
             client_data_failure(client, FTP_CAUSE_NETWORK,
                                 "DATA CONNECTION LOST");
-            return;
+            return 0;
         }
         client->data_off += sent;
         client->transferred += sent;
         client->data_deadline = now_ms(client) + CLIENT_DATA_IDLE_MS;
+        client->data_budget = sent >= client->data_budget
+                                  ? 0
+                                  : client->data_budget - (unsigned)sent;
         client_emit_progress(client);
-        return;
+        return 1;
     }
 
     if (client->file_eof) {
         client_close_data(client);
         client->data_state = FTP_DATA_DRAINING;
-        return;
+        return 0;
     }
 
     if (client->file == NULL) {
         client_data_failure(client, FTP_CAUSE_STORAGE, "SOURCE FILE MISSING");
-        return;
+        return 0;
     }
 
     size_t got = 0;
@@ -836,33 +849,38 @@ static void client_pump_send(FtpClient *client)
         client->file_eof = 1;
         client_close_data(client);
         client->data_state = FTP_DATA_DRAINING;
-        return;
+        return 0;
     }
     if (r != FS_OK) {
         client_data_failure(client, FTP_CAUSE_STORAGE, "SOURCE READ FAILED");
-        return;
+        return 0;
     }
     if (got == 0) {
         client->file_eof = 1;
         client_close_data(client);
         client->data_state = FTP_DATA_DRAINING;
-        return;
+        return 0;
     }
 
     client->data_len = got;
     client->data_off = 0;
     client->data_deadline = now_ms(client) + CLIENT_DATA_IDLE_MS;
-    client_pump_send(client);
+    return 1;
 }
 
 static void client_pump_data(FtpClient *client)
 {
     if (client->data_state != FTP_DATA_ACTIVE || client->data == NULL)
         return;
-    if (client->data_kind == CDATA_STOR)
-        client_pump_send(client);
-    else
-        client_pump_receive(client);
+    while (client->data_budget > 0) {
+        if (now_ms(client) - client->data_slice_start >= CLIENT_DATA_SLICE_MS)
+            break;
+        int moved = client->data_kind == CDATA_STOR
+                        ? client_pump_send(client)
+                        : client_pump_receive(client);
+        if (!moved)
+            break;
+    }
 }
 
 static void client_parse_mlst(FtpClient *client, const Reply *reply)
@@ -1791,7 +1809,7 @@ FtpClientResult ftp_client_cancel(FtpClient *client)
     return FTP_CLIENT_OK;
 }
 
-void ftp_client_tick(FtpClient *client)
+void ftp_client_tick(FtpClient *client, unsigned wait_ms)
 {
     if (client == NULL)
         return;
@@ -1802,6 +1820,8 @@ void ftp_client_tick(FtpClient *client)
         return;
 
     uint64_t now = now_ms(client);
+    client->data_budget = CLIENT_DATA_BYTES_PER_TICK;
+    client->data_slice_start = now;
 
     if (client->send_off < client->send_len) {
         if (!client_flush(client)) {
@@ -1833,7 +1853,7 @@ void ftp_client_tick(FtpClient *client)
     if (set.count > 0) {
         NetReadySet ready;
         NetResult wr =
-            client->net->wait(client->net->ctx, &set, 50, &ready);
+            client->net->wait(client->net->ctx, &set, wait_ms, &ready);
         if (wr != NET_OK) {
             client_lost(client, "WAIT FAILED");
             return;
@@ -1894,8 +1914,9 @@ void ftp_client_tick(FtpClient *client)
         return;
     }
 
-    if ((client->data_state == FTP_DATA_ACTIVE ||
-         client->data_state == FTP_DATA_DRAINING) &&
+    /* DRAINING is waiting for the final reply, not for payload; the stage
+     * deadline governs it, so a slow 226 cannot discard a complete file. */
+    if (client->data_state == FTP_DATA_ACTIVE &&
         client->data_deadline != 0 && now >= client->data_deadline) {
         client_data_failure(client, FTP_CAUSE_NETWORK, "DATA IDLE");
         return;

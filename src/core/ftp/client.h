@@ -162,7 +162,8 @@ FtpClientResult ftp_client_disconnect(FtpClient *client);
 /* Cancels the listing or transfer in flight; the session survives. */
 FtpClientResult ftp_client_cancel(FtpClient *client);
 
-void ftp_client_tick(FtpClient *client);
+/* `wait_ms` bounds the socket wait; pass 0 while a local job needs the slice. */
+void ftp_client_tick(FtpClient *client, unsigned wait_ms);
 
 FtpClientState ftp_client_state(const FtpClient *client);
 FtpDataState ftp_client_data_state(const FtpClient *client);
