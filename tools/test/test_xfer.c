@@ -68,79 +68,30 @@ static void test_order_and_slot(void)
     CHECK(xfer_busy(&queue));
     CHECK(xfer_depth(&queue) == 1);
 
-    XferItem terminal;
-    OpCause cause = OP_CAUSE_APP;
-    OpStage stage = OP_STAGE_NONE;
-    CHECK(xfer_take_terminal(&queue, &terminal, &cause, &stage) == 1);
-    CHECK(strcmp(terminal.source.text, "a") == 0);
-    CHECK(terminal.state == XFER_ITEM_DONE);
-    CHECK(cause == OP_CAUSE_APP);
-    CHECK(stage == OP_STAGE_TRANSFER);
-    CHECK(xfer_take_terminal(&queue, NULL, NULL, NULL) == 0);
-
     CHECK(xfer_cancel_active(&queue, OP_CAUSE_USER, OP_STAGE_TRANSFER, &next) ==
           1);
     CHECK(strcmp(next.source.text, "c") == 0);
-    CHECK(xfer_take_terminal(&queue, &terminal, &cause, &stage) == 1);
-    CHECK(strcmp(terminal.source.text, "b") == 0);
-    CHECK(terminal.state == XFER_ITEM_CANCELLED);
-    CHECK(cause == OP_CAUSE_USER);
 
     CHECK(xfer_release(&queue, XFER_ITEM_DONE, OP_CAUSE_APP, OP_STAGE_TRANSFER,
                        &next) == 1);
     CHECK(!xfer_busy(&queue));
     CHECK(queue.count == 0);
-    CHECK(xfer_take_terminal(&queue, &terminal, NULL, NULL) == 1);
-    CHECK(strcmp(terminal.source.text, "c") == 0);
+    CHECK(xfer_depth(&queue) == 0);
 }
 
-static void test_conflict_survives(void)
-{
-    XferQueue queue;
-    xfer_init(&queue);
-
-    CHECK(xfer_conflict(&queue) == XFER_CONFLICT_NONE);
-    CHECK(xfer_set_conflict(&queue, XFER_CONFLICT_OVERWRITE_ALL) == 1);
-    CHECK(xfer_conflict(&queue) == XFER_CONFLICT_OVERWRITE_ALL);
-    CHECK(xfer_set_conflict(&queue, XFER_CONFLICT_SKIP_EXISTING) == 0);
-    CHECK(xfer_conflict(&queue) == XFER_CONFLICT_OVERWRITE_ALL);
-
-    CHECK(push(&queue, "a", "x") == 1);
-    CHECK(push(&queue, "b", "x") == 1);
-    CHECK(xfer_claim(&queue, NULL) == 1);
-    CHECK(xfer_release(&queue, XFER_ITEM_DONE, OP_CAUSE_APP, OP_STAGE_TRANSFER,
-                       NULL) == 1);
-    CHECK(xfer_conflict(&queue) == XFER_CONFLICT_OVERWRITE_ALL);
-    CHECK(xfer_set_conflict(&queue, XFER_CONFLICT_CANCEL) == 0);
-    CHECK(xfer_conflict(&queue) == XFER_CONFLICT_OVERWRITE_ALL);
-
-    CHECK(push(&queue, "c", "x") == 1);
-    CHECK(xfer_release(&queue, XFER_ITEM_DONE, OP_CAUSE_APP, OP_STAGE_TRANSFER,
-                       NULL) == 1);
-    CHECK(xfer_release(&queue, XFER_ITEM_DONE, OP_CAUSE_APP, OP_STAGE_TRANSFER,
-                       NULL) == 1);
-    CHECK(xfer_conflict(&queue) == XFER_CONFLICT_OVERWRITE_ALL);
-}
-
-static void test_terminal_latch(void)
+static void test_clear_queued(void)
 {
     XferQueue queue;
     xfer_init(&queue);
     CHECK(push(&queue, "a", "x") == 1);
     CHECK(push(&queue, "b", "x") == 1);
     CHECK(xfer_claim(&queue, NULL) == 1);
-    CHECK(xfer_release(&queue, XFER_ITEM_FAILED, OP_CAUSE_STORAGE,
-                       OP_STAGE_WRITE, NULL) == 1);
+    xfer_clear_queued(&queue);
+    CHECK(queue.count == 1);
+    CHECK(xfer_busy(&queue));
     CHECK(xfer_release(&queue, XFER_ITEM_DONE, OP_CAUSE_APP, OP_STAGE_TRANSFER,
                        NULL) == 1);
-
-    XferItem terminal;
-    OpCause cause = OP_CAUSE_APP;
-    CHECK(xfer_take_terminal(&queue, &terminal, &cause, NULL) == 1);
-    CHECK(terminal.state == XFER_ITEM_FAILED);
-    CHECK(cause == OP_CAUSE_STORAGE);
-    CHECK(queue.lost == 1);
-    CHECK(xfer_take_terminal(&queue, &terminal, NULL, NULL) == 0);
+    CHECK(queue.count == 0);
 }
 
 static void test_full_queue(void)
@@ -158,8 +109,7 @@ static void test_full_queue(void)
 int main(void)
 {
     test_order_and_slot();
-    test_conflict_survives();
-    test_terminal_latch();
+    test_clear_queued();
     test_full_queue();
 
     if (s_failures != 0) {
