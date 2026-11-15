@@ -928,6 +928,8 @@ static void test_two_lane_dock(void)
     send_key(UI_KEY_CROSS);
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
     CHECK(s_state.confirm.kind == UI_CONFIRM_CANCEL_LANES);
+    CHECK(strstr(s_state.confirm.warning, "CANCELLED TRANSFERS REMOVE") !=
+          NULL);
     CHECK(s_state.confirm.choices[0] == UI_CHOICE_KEEP);
     CHECK(s_state.confirm.choices[1] == UI_CHOICE_CANCEL_NETWORK);
     CHECK(s_state.confirm.choices[2] == UI_CHOICE_CANCEL_LOCAL);
@@ -962,6 +964,8 @@ static void test_waiting_lane_cancel(void)
     send_key(UI_KEY_CROSS);
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
     CHECK(s_state.confirm.kind == UI_CONFIRM_CANCEL_XFER);
+    CHECK(strstr(s_state.confirm.warning, "TRANSFERRED FILE IS REMOVED") !=
+          NULL);
     CHECK(s_state.confirm.choices[1] == UI_CHOICE_CANCEL);
 
     /* A waiting lane beside a live network lane offers both lanes. */

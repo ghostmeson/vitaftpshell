@@ -478,15 +478,17 @@ static void open_confirm(UiState *state, UiConfirmKind kind)
         c->choice_count = 3;
         snprintf(c->title, sizeof(c->title), "CANCEL WHICH TRANSFER");
         snprintf(c->warning, sizeof(c->warning),
-                 "THE CANCELLED PARTIAL FILE IS REMOVED.");
+                 "CANCELLED TRANSFERS REMOVE THEIR FILES.");
         break;
     case UI_CONFIRM_CANCEL_XFER:
         c->choices[0] = UI_CHOICE_KEEP;
         c->choices[1] = UI_CHOICE_CANCEL;
         c->choice_count = 2;
         snprintf(c->title, sizeof(c->title), "CANCEL THE TRANSFER");
+        /* An explicit cancel discards even a download whose bytes all
+         * arrived (D89); "transferred" is true for both directions. */
         snprintf(c->warning, sizeof(c->warning),
-                 "THE PARTIAL FILE IS REMOVED.");
+                 "THE TRANSFERRED FILE IS REMOVED.");
         break;
     case UI_CONFIRM_STOP_SERVER:
         c->choices[0] = UI_CHOICE_KEEP;
