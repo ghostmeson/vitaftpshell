@@ -1852,9 +1852,6 @@ static void test_local_conflict_prompt(void)
     app_destroy(app);
 }
 
-/* A rename onto an existing name raises the single-item conflict prompt.
- * Answering it must run the chosen action; the base branch dropped the answer
- * and the item died on the batch idle flush. */
 /* A worker confirmation raised while a local dialog owns the screen waits for
  * that dialog instead of replacing it or vanishing. */
 static void test_deferred_worker_confirmation(void)
@@ -1917,7 +1914,6 @@ static void test_local_rename_conflict(void)
     fake_fs_seed_file("ux0:data/NEW.TXT", "NEW", 3);
     enter_ux0_data(app);
 
-    /* SKIP: both files stay, the item is booked skipped. */
     select_local_named(app, "OLD.TXT");
     fake_ime_queue_text("NEW.TXT");
     press(app, INPUT_BIT(INPUT_TRIANGLE));
@@ -1937,7 +1933,6 @@ static void test_local_rename_conflict(void)
     CHECK(app_state(app)->local_dock.skipped == 1);
     CHECK(app_state(app)->local_dock.failed == 0);
 
-    /* OVERWRITE: the source leaves and the target holds its bytes. */
     select_local_named(app, "OLD.TXT");
     fake_ime_queue_text("NEW.TXT");
     press(app, INPUT_BIT(INPUT_TRIANGLE));

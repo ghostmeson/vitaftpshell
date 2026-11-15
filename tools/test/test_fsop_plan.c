@@ -187,7 +187,9 @@ static void test_batch_conflict(void)
     CHECK(s_plan.item_count == 5);
 }
 
-static void test_risk(void)
+/* A tai destination is allowed at plan time (D87); these cases are the only
+ * planner-level proof that the folder is not refused. */
+static void test_tai_destination_allowed(void)
 {
     facts_reset();
     fact("ur0:tai/config.txt", FS_ENTRY_FILE, 4, 1);
@@ -198,6 +200,8 @@ static void test_risk(void)
     FsOpRequest marked = {FSOP_COPY, sources, 1, "ux0:data", &f,
                           FSOP_CONFLICT_OVERWRITE};
     CHECK(fsop_plan_build(&s_plan, &marked) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.step_count == 1);
 
     facts_reset();
     fact("ux0:data/A.TXT", FS_ENTRY_FILE, 1, 1);
@@ -207,6 +211,8 @@ static void test_risk(void)
     FsOpRequest dest = {FSOP_COPY, plain, 1, "ur0:tai", &f2,
                         FSOP_CONFLICT_OVERWRITE};
     CHECK(fsop_plan_build(&s_plan, &dest) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.step_count == 1);
 
     facts_reset();
     fact("ur0:tai/NEW", FS_ENTRY_DIR, 0, 0);
@@ -214,6 +220,8 @@ static void test_risk(void)
     FsOpRequest mkdir = {FSOP_MKDIR, NULL, 0, "ur0:tai/NEW", &f3,
                          FSOP_CONFLICT_ASK};
     CHECK(fsop_plan_build(&s_plan, &mkdir) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.step_count == 1);
 }
 
 static void test_merge(void)
@@ -373,7 +381,7 @@ int main(void)
     test_cross_volume_move();
     test_same_folder();
     test_batch_conflict();
-    test_risk();
+    test_tai_destination_allowed();
     test_merge();
     test_volume_root_source();
     test_unknown_total();

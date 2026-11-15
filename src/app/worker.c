@@ -194,6 +194,7 @@ static void pump_queue(Worker *worker);
 static void start_transfer_item(Worker *worker, const XferItem *item);
 static void pump_remote_actions(Worker *worker);
 static void worker_list_local(Worker *worker, const char *path);
+static void worker_list_root(Worker *worker);
 static const char *last_name(const char *path);
 static int same_folder_path(const char *a, const char *b);
 static void queue_pending_action(Worker *worker, const UiCommand *command);
@@ -672,6 +673,20 @@ static const char *fs_result_text(FsResult result)
     default:
         return "LISTING FAILED";
     }
+}
+
+/* A finished download changes the local folder; the kept-file terminal needs
+ * the same refresh as a normal success. */
+static void refresh_local_after_download(Worker *worker,
+                                         const XferItem *item)
+{
+    if (strcmp(worker->local_path, "*") == 0) {
+        worker_list_root(worker);
+        return;
+    }
+    Path parent;
+    if (path_parent(item->destination.text, &parent) == PATH_OK)
+        worker_list_local(worker, parent.text);
 }
 
 static void emit_transfer_done(Worker *worker, XferDirection direction,
@@ -2715,17 +2730,10 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
                   worker->connecting_valid ? worker->connecting_site.host : NULL,
                   finished.source.text, "done", "app", event->bytes,
                   event->total);
-        if (finished.direction == XFER_DIR_DOWNLOAD) {
-            if (strcmp(worker->local_path, "*") == 0) {
-                worker_list_root(worker);
-            } else {
-                Path parent;
-                if (path_parent(finished.destination.text, &parent) == PATH_OK)
-                    worker_list_local(worker, parent.text);
-            }
-        } else {
+        if (finished.direction == XFER_DIR_DOWNLOAD)
+            refresh_local_after_download(worker, &finished);
+        else
             worker->refresh_remote = 1;
-        }
     } else {
         emit_transfer_done(worker, finished.direction, finished.source.text, 0,
                            event->file_kept, event->bytes, event->total, event->total_known,
@@ -2741,15 +2749,8 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
                   worker->connecting_valid ? worker->connecting_site.host : NULL,
                   finished.source.text, op_stage_name(event->stage),
                   op_cause_name(event->cause), event->bytes, event->total);
-        if (event->file_kept && finished.direction == XFER_DIR_DOWNLOAD) {
-            if (strcmp(worker->local_path, "*") == 0) {
-                worker_list_root(worker);
-            } else {
-                Path parent;
-                if (path_parent(finished.destination.text, &parent) == PATH_OK)
-                    worker_list_local(worker, parent.text);
-            }
-        }
+        if (event->file_kept && finished.direction == XFER_DIR_DOWNLOAD)
+            refresh_local_after_download(worker, &finished);
     }
 
     batch_finish(worker);
@@ -3288,7 +3289,6 @@ static void handle_command(Worker *worker, const UiCommand *command)
                 }
                 break;
             case PENDING_NONE:
-            default:
                 break;
             }
         } else if (command->confirm == UI_CONFIRM_CANCEL_XFER &&
@@ -3417,6 +3417,7 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
                               WORKER_LIST_CAP,
                           sizeof(UiRow));
     if (worker->rows == NULL) {
+        reserve_destroy(worker->reserve);
         free(worker);
         return NULL;
     }
