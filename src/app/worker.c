@@ -2213,7 +2213,10 @@ static void handle_connect(Worker *worker, const UiCommand *command)
         return;
     }
 
-    if (worker->transfer_active) {
+    /* One predicate for every client command that would arm a passive data
+     * connection; a queued item must not be dropped by a session reset. */
+    if (worker->transfer_active || xfer_busy(&worker->queue) ||
+        ftp_server_busy(worker->server)) {
         emit_error(worker, UI_PANE_REMOTE, "TRANSFER IN PROGRESS",
                    OP_CAUSE_APP, OP_STAGE_CONNECT);
         return;
@@ -3087,6 +3090,10 @@ static void handle_command(Worker *worker, const UiCommand *command)
         else if (!worker->connected)
             emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
                        OP_STAGE_COMMAND);
+        else if (worker->transfer_active || xfer_busy(&worker->queue) ||
+                 ftp_server_busy(worker->server))
+            /* Latch it; worker_step re-issues once the lanes are idle. */
+            worker->refresh_remote = 1;
         else if (remote_list(worker) != FTP_CLIENT_OK)
             emit_error(worker, UI_PANE_REMOTE, "BUSY - TRY AGAIN",
                        OP_CAUSE_APP, OP_STAGE_COMMAND);
@@ -3509,7 +3516,8 @@ void worker_step(Worker *worker)
     ftp_server_tick(worker->server,
                     worker->local_run != NULL ? 0 : WORKER_NET_WAIT_MS);
     if (worker->refresh_remote && worker->connected &&
-        !ftp_client_busy(worker->client)) {
+        !worker->transfer_active && !xfer_busy(&worker->queue) &&
+        !ftp_server_busy(worker->server) && !ftp_client_busy(worker->client)) {
         worker->refresh_remote = 0;
         if (remote_list(worker) != FTP_CLIENT_OK)
             emit_error(worker, UI_PANE_REMOTE, "LIST FAILED", OP_CAUSE_APP,
