@@ -54,6 +54,8 @@ typedef struct ServerSession {
     int rnfr_valid;
     char rnfr_local[PATH_MAX_LEN];
     char rnfr_virtual[FTP_PATH_MAX];
+    char last_command[16];
+    unsigned accept_seq;
 } ServerSession;
 
 struct FtpServer {
@@ -75,6 +77,8 @@ struct FtpServer {
 
     ServerSession sessions[SERVER_MAX_CLIENTS];
     NetAddress last_peer;
+    int active_session;
+    unsigned accept_counter;
 
     FtpDataState data_state;
     int data_session;
@@ -115,6 +119,10 @@ struct FtpServer {
     char detail[96];
 };
 
+static ServerSession *server_session_at(FtpServer *server, int index);
+static int server_session_index(FtpServer *server,
+                                const ServerSession *session);
+
 static uint64_t server_now(FtpServer *server)
 {
     return server->clock->now_ms(server->clock->ctx);
@@ -142,6 +150,19 @@ static void server_state_event(FtpServer *server)
     server_emit(server, &event);
 }
 
+static ServerSession *server_most_recent_session(FtpServer *server)
+{
+    ServerSession *best = NULL;
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+        ServerSession *s = &server->sessions[i];
+        if (!s->used)
+            continue;
+        if (best == NULL || s->accept_seq > best->accept_seq)
+            best = s;
+    }
+    return best;
+}
+
 static void server_client_event(FtpServer *server)
 {
     FtpServerEvent event;
@@ -149,6 +170,24 @@ static void server_client_event(FtpServer *server)
     event.state = server->state;
     event.clients = server->clients;
     event.data_state = server->data_state;
+    event.session_index = -1;
+
+    ServerSession *session = server_session_at(server, server->active_session);
+    if (session == NULL)
+        session = server_most_recent_session(server);
+    if (server->active_session < 0 && session != NULL)
+        event.session_index = server_session_index(server, session);
+    else if (session != NULL)
+        event.session_index = server->active_session;
+
+    if (session != NULL) {
+        event.peer = session->peer;
+        event.op = session->last_command;
+        event.path = (server->data_session == event.session_index &&
+                      server->active_virtual[0] != '\0')
+                         ? server->active_virtual
+                         : session->cwd;
+    }
     server_emit(server, &event);
 }
 
@@ -534,6 +573,8 @@ static void server_close_session(FtpServer *server, ServerSession *session,
         server->net->close(server->net->ctx, session->control);
         session->control = NULL;
     }
+    if (server->active_session == server_session_index(server, session))
+        server->active_session = -1;
     session->used = 0;
     server->clients--;
     if (server->clients < 0)
@@ -1732,6 +1773,13 @@ static void server_handle_command(ServerSession *session, const char *line,
     cmd[cmd_len] = '\0';
 
     snprintf(server->last_command, sizeof(server->last_command), "%s", cmd);
+    server->active_session = index;
+    if (strcmp(session->last_command, cmd) != 0) {
+        /* The verb only; arguments never reach the panel. */
+        snprintf(session->last_command, sizeof(session->last_command), "%s",
+                 cmd);
+        server_client_event(server);
+    }
     if (strcmp(cmd, "PASS") == 0)
         server_trace(server, "FTPC PASS ****");
     else
@@ -2044,6 +2092,8 @@ static void server_accept_control(FtpServer *server)
     memset(session, 0, sizeof(*session));
     session->server = server;
     session->used = 1;
+    session->accept_seq = ++server->accept_counter;
+    server->active_session = slot;
     session->control = accepted;
     session->peer = peer;
     session->cwd[0] = '/';

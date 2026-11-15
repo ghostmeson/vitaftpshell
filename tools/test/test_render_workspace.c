@@ -337,6 +337,34 @@ static void test_dock_states(void)
     CHECK(trace_has_text("LOCAL WAITING"));
     CHECK(trace_has_text_color("LOCAL WAITING", C_YELLOW));
 
+    /* A finished local batch keeps its terminal badge while the network lane
+     * runs; the word is past tense once the batch has stopped. */
+    s_state.dock.active = 1;
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    s_state.dock_primary = UI_DOCK_LANE_NETWORK;
+    s_state.local_dock.waiting = 0;
+    s_state.local_dock.active = 0;
+    s_state.local_dock.state = UI_DOCK_DONE;
+    render();
+    CHECK(trace_has_text("LOCAL DONE"));
+    CHECK(trace_has_text_color("LOCAL DONE", C_DIM));
+
+    s_state.local_dock.state = UI_DOCK_FAILED;
+    render();
+    CHECK(trace_has_text("LOCAL FAILED"));
+    CHECK(trace_has_text_color("LOCAL FAILED", C_RED));
+
+    s_state.local_dock.state = UI_DOCK_DONE;
+    s_state.local_dock.cancelled = 1;
+    render();
+    CHECK(trace_has_text("LOCAL CANCELLED"));
+    CHECK(trace_has_text_color("LOCAL CANCELLED", C_WHITE));
+
+    s_state.dock.active = 0;
+    s_state.dock.state = UI_DOCK_IDLE;
+    s_state.local_dock.cancelled = 0;
+    s_state.local_dock.waiting = 1;
+
     /* A solo waiting lane owns the panel, not a badge over the idle dock. */
     s_state.dock.active = 0;
     s_state.dock.state = UI_DOCK_IDLE;
