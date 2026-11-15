@@ -71,7 +71,7 @@ behavior contract is
 |---|---|
 | **FTP client** | Saved sites with anonymous or login credentials, passive FTP only, remote browsing, download, upload, create, rename, and delete. MLSD first, LIST fallback, Unix and DOS listings. |
 | **File manager** | Browse the mounted `ux0:`, `ur0:`, and `uma0:` volumes, multi-select, recursive folder copy, move, and delete, with protected-path rules and explicit confirmations. |
-| **FTP server** | Anonymous read-write FTP on the mounted volumes while the app is open. OFF at launch, one client at a time, with the ON state and client count visible on every screen. |
+| **FTP server** | Anonymous read-write FTP on the mounted volumes while the app is open. OFF at launch, up to four clients with one data transfer at a time, with the ON state and client count visible on every screen. |
 | **Transfer dock** | One active transfer, the rest queued. Progress, size, speed, retry, and cancel without blocking the workspace. |
 
 Not in v1: SFTP, FTPS, HTTP, WebDAV, SMB, resume, sync, background transfers,

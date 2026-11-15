@@ -124,8 +124,8 @@ keep the app open. This is a deliberate boundary, not a temporary limitation.
 ## D9. One active transfer, one server client
 
 **Date:** 2026-11-08
-**Status:** accepted; the one-transfer clause is superseded by D72 and D82. The
-server still accepts one client at a time.
+**Status:** accepted; the one-transfer clause is superseded by D72 and D82, the
+one-client clause by D86.
 
 **Context:** Concurrent writers make the state model and the error model much
 harder to prove on a console with one screen and one user.
@@ -656,7 +656,7 @@ to hand off and no direct call from the UI into the engine.
 **Date:** 2026-11-08
 **Status:** accepted
 
-**Context:** The server accepts one client and runs one transfer, so a single data
+**Context:** The server runs one data transfer at a time, so a single data
 port cannot collide with itself. An ephemeral port would work on the LAN but makes
 router forwarding impractical, and the screen edits only one port.
 
@@ -1881,3 +1881,28 @@ different paths, and a PC can work in unrelated paths while the console
 transfers. A same-path collision still answers 450 through the reservation
 table. D51's external-busy clause and D72's "or while an app transfer occupies
 the network lane" clause are superseded; the held-path clause stands.
+
+## D86. The server accepts four clients, one data transfer at a time
+
+**Date:** 2026-11-15
+**Status:** accepted; b60.
+
+**Context:** FileZilla opens a separate control connection for transfers and
+keeps another for browsing. The one-client server refused the second connection
+with `450 Busy`, so an upload from FileZilla could not start even though the
+app's own client and its server worked. The user chose to allow multiple clients.
+
+**Decision:** The server accepts up to four control sessions
+(`SERVER_MAX_CLIENTS`). Each session owns its login, current directory, line
+reader, reply buffer, idle deadline, last command, and rename state. One data
+transfer owns the single PASV/data port at a time; a second session's data or
+`PASV` command answers 450 `Another client is transferring`, and closing a
+non-owner session does not abort the owner's transfer. A fifth control
+connection gets `450 Busy` and is closed. The SERVER panel shows the client
+count and the most recent peer.
+
+**Consequences:** FileZilla can hold its browse and transfer connections, and
+the app's own client can stay connected while a PC browses. Concurrent file
+transfers still serialize on the one data slot; that is the next extension if
+it is needed. D9's one-client clause and R50's "one client at a time" text are
+superseded.

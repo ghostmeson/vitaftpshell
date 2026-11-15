@@ -24,4 +24,5 @@ build_and_run() {
 
 build_and_run "$ROOT/tools/test/test_integration.c"
 build_and_run "$ROOT/tools/test/test_app_thread.c"
+build_and_run "$ROOT/tools/test/test_server.c"
 echo "asan: OK"

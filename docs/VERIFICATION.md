@@ -1,15 +1,44 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b58.vpk
-**SHA-256:** 6632615ccf83afcf4e206183a2fe8df6bf9fb055215abc92b430aa5540f0ecae
+**Build:** vitaftpshell-v01.00-b60.vpk
+**SHA-256:** 91e1b8c45dd6c5f09b54cc4d77979d70d7ec9478a06bab5faff1f9e17cc2145a
 **ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b57 traced the upload defect and b58 removes the global server-busy gate that caused it; the b58 hardware retry is pending; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b57 traced the upload defect, b58 fixed the app-local transfer, and b60 adds four server sessions so FileZilla can hold its browse and transfer connections; b60 hardware retry pending; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b60 four-client server
+
+**Date:** 2026-11-15
+**Build:** `vitaftpshell-v01.00-b60.vpk`
+**SHA-256:** `91e1b8c45dd6c5f09b54cc4d77979d70d7ec9478a06bab5faff1f9e17cc2145a`
+
+The b58 console run fixed the app-local transfer but FileZilla still received
+`450 Busy` because it opens a separate control connection for transfers while
+the app's remote pane held the one client slot. b60 accepts up to four control
+sessions (`SERVER_MAX_CLIENTS`). Each session owns its login, current directory,
+line reader, reply buffer, idle deadline, last command, and rename state. One
+data transfer owns the single PASV/data port; a second session's `PASV` or data
+command answers 450 `Another client is transferring`. Closing a non-owner does
+not abort the owner's transfer. A fifth control connection gets `450 Busy`.
+
+The refactor exposed a latent guard bug: `server_path_held` returned as soon as
+the CHECK reported a free path, so it never called HOLD and no server transfer
+ever held its path in the reservation table. b60 calls HOLD only after CHECK
+passes, and a non-owner's failed probe no longer disarms the owner's data
+connection.
+
+Host evidence: `test_two_clients` (two logins, isolated PWD/CWD, sequential
+listings, a second session's PASV refused during the first transfer, the STOR
+path held against a non-owner's MLST, a non-owner close that leaves the
+transfer running, and a new session after); `test_client_limit` (four accepted,
+fifth refused, count drops on QUIT). ASan/UBSan clean, including the server
+suite. The b58 hardware result and the b60 retry are separate rows; M5 stays PART
+until FileZilla completes an upload and download on b60.
 
 ## b58 server upload fix
 
@@ -231,7 +260,7 @@ evidence are recorded here. The project therefore stays `building`.
 | M2 | LAN server with MLSD | MLSD is used, browse and download complete | pending | pending | PENDING |
 | M3 | LAN server with MLSD disabled | LIST fallback parses, browse and download complete | pending | pending | PENDING |
 | M4 | DOS-listing server | Names, sizes, and folders parse; a download completes | pending | pending | PENDING |
-| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete | List, MKD, rename, delete pass; the app-local upload and download pass; FileZilla gets `450 Busy` when a second control connection arrives while the app holds the one client slot | `450 Busy` is the one-client limit; retest with `0 CLIENTS` and FileZilla limited to one connection | PART |
+| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete | List, MKD, rename, delete pass; the app-local upload and download pass; b58 refused FileZilla's second control connection; b60 accepts four sessions with one data transfer at a time | Install b60 and retry a FileZilla upload and download while the app remote pane is connected | PART |
 | M6 | Denials through the server | `boot_config.txt`, `ux0:tai` upload, volume-root delete all refuse, and nothing is created | pending | pending | PENDING |
 | M7 | Second client and stop-during-write | 450 to the second client; stop during a write confirms and leaves no partial | pending | pending | PENDING |
 | M8 | Network loss and cancel | Server stops and reports; cancel takes effect within 5 s; no crash dump | pending | pending | PENDING |

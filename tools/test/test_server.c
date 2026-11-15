@@ -174,14 +174,139 @@ static void connect_session(FtpServer *server, FakeFtpClient *client)
     command(server, client, "PASS x", 230);
 }
 
+static void pasv(FtpServer *server, FakeFtpClient *client);
+static void queue_data_peer(void);
+static void queue_data_peer_for(uint32_t peer, uint16_t port);
+static NetSocket *data_command(FtpServer *server, FakeFtpClient *client,
+                               const char *cmd, int expect);
+static void finish_data(FtpServer *server, FakeFtpClient *client, int expect);
+static void wait_reply(FtpServer *server, FakeFtpClient *client, int expect);
+
+/* A second control session from a different peer (the FileZilla browse and
+ * transfer connections come from one PC; the test uses a second address to
+ * keep the data-peer check unambiguous). */
+static void connect_second_session(FtpServer *server, FakeFtpClient *client,
+                                   uint32_t peer, uint16_t port)
+{
+    unsigned before = fake_net_accept_count();
+    fake_net_queue_accept(fake_net_listener_at(0), peer, port);
+    ftp_server_tick(server, 0);
+    CHECK(fake_net_accept_count() == before + 1);
+
+    NetSocket *control = fake_net_accepted_at(before);
+    CHECK(control != NULL);
+    fake_ftp_client_init(client, control);
+
+    int code = 0;
+    char text[512];
+    CHECK(read_reply(client, &code, text, sizeof(text)) == 1);
+    CHECK(code == 220);
+
+    command(server, client, "USER anonymous", 331);
+    command(server, client, "PASS x", 230);
+}
+
+static int s_two_held;
+
+static int two_client_guard(void *ctx, FtpGuardAction action, const char *path,
+                            int write, int tree)
+{
+    (void)ctx;
+    (void)write;
+    (void)tree;
+    if (action == FTP_GUARD_RELEASE) {
+        s_two_held = 0;
+        return 0;
+    }
+    if (path == NULL || strcmp(path, "ux0:data/busy.bin") != 0)
+        return 0;
+    if (action == FTP_GUARD_CHECK)
+        return s_two_held;
+    if (action == FTP_GUARD_HOLD) {
+        s_two_held = 1;
+        return 0;
+    }
+    return 0;
+}
+
+static void test_two_clients(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    s_two_held = 0;
+    ftp_server_set_guard(server, two_client_guard, NULL);
+
+    FakeFtpClient a;
+    FakeFtpClient b;
+    connect_session(server, &a);
+    connect_second_session(server, &b, PEER_ADDR + 1, PEER_PORT + 20);
+    CHECK(ftp_server_clients(server) == 2);
+
+    command(server, &a, "PWD", 257);
+    command(server, &b, "PWD", 257);
+    command(server, &b, "CWD /UX0:", 250);
+    char text[512];
+    command_text(server, &b, "PWD", 257, text, sizeof(text));
+    CHECK(strstr(text, "/UX0:") != NULL);
+    command_text(server, &a, "PWD", 257, text, sizeof(text));
+    CHECK(strstr(text, "\"/\"") != NULL);
+
+    /* A listing from B while A is idle is independent. */
+    pasv(server, &b);
+    queue_data_peer_for(PEER_ADDR + 1, PEER_PORT + 21);
+    NetSocket *data =
+        data_command(server, &b, "MLSD /UX0:", 150);
+    CHECK(data != NULL);
+    finish_data(server, &b, 226);
+
+    /* A transfer owns the one data slot; B's PASV waits for it. */
+    pasv(server, &a);
+    queue_data_peer();
+    data = data_command(server, &a, "STOR ux0:/data/busy.bin", 150);
+    CHECK(data != NULL);
+    (void)data_command(server, &b, "PASV", 450);
+    /* A non-owner's control-only probe of the held path must not disarm A. */
+    command(server, &b, "MLST /UX0:/data/busy.bin", 450);
+
+    /* Closing the other client must not abort A's active transfer. */
+    command(server, &b, "QUIT", 221);
+    CHECK(ftp_server_clients(server) == 1);
+    fake_net_queue_rx(data, "x", 1);
+    fake_net_shutdown(data);
+    wait_reply(server, &a, 226);
+    command(server, &a, "NOOP", 200);
+
+    /* A new session can transfer after A's data slot is released. */
+    connect_second_session(server, &b, PEER_ADDR + 1, PEER_PORT + 22);
+    pasv(server, &b);
+    queue_data_peer_for(PEER_ADDR + 1, PEER_PORT + 21);
+    data = data_command(server, &b, "MLSD /UX0:", 150);
+    CHECK(data != NULL);
+    finish_data(server, &b, 226);
+
+    command(server, &b, "QUIT", 221);
+    CHECK(ftp_server_clients(server) == 1);
+    command(server, &a, "QUIT", 221);
+    CHECK(ftp_server_clients(server) == 0);
+
+    ftp_server_destroy(server);
+}
+
 static void pasv(FtpServer *server, FakeFtpClient *client)
 {
     command(server, client, "PASV", 227);
 }
 
+static void queue_data_peer_for(uint32_t peer, uint16_t port)
+{
+    fake_net_queue_accept(fake_net_listener_at(1), peer, port);
+}
+
 static void queue_data_peer(void)
 {
-    fake_net_queue_accept(fake_net_listener_at(1), PEER_ADDR, PEER_PORT + 1);
+    queue_data_peer_for(PEER_ADDR, PEER_PORT + 1);
 }
 
 static NetSocket *data_command(FtpServer *server, FakeFtpClient *client,
@@ -843,26 +968,40 @@ static void test_root_absent_volume(void)
     ftp_server_destroy(server);
 }
 
-static void test_second_client(void)
+static void test_client_limit(void)
 {
     setup();
     SCapture cap;
     memset(&cap, 0, sizeof(cap));
     FtpServer *server = start_server(&cap);
-    FakeFtpClient client;
-    connect_session(server, &client);
 
+    FakeFtpClient clients[4];
+    connect_session(server, &clients[0]);
+    for (int i = 1; i < 4; ++i)
+        connect_second_session(server, &clients[i], PEER_ADDR + (uint32_t)i,
+                               (uint16_t)(PEER_PORT + 20 + i));
+    CHECK(ftp_server_clients(server) == 4);
+
+    /* The fifth control connection is refused without disturbing the four. */
+    unsigned before = fake_net_accept_count();
     fake_net_queue_accept(fake_net_listener_at(0), 0x0A000009u, 41000);
     ftp_server_tick(server, 0);
-    NetSocket *second = fake_net_accepted_at(1);
-    CHECK(second != NULL);
-    char tx[64];
-    size_t n = fake_net_read_tx(second, tx, sizeof(tx) - 1);
-    tx[n] = '\0';
-    CHECK(strstr(tx, "450") != NULL);
-    CHECK(!fake_net_is_open(second));
-    CHECK(ftp_server_clients(server) == 1);
-    command(server, &client, "NOOP", 200);
+    CHECK(fake_net_accept_count() == before + 1);
+    NetSocket *fifth = fake_net_accepted_at(before);
+    CHECK(fifth != NULL);
+    int code = 0;
+    char text[128];
+    CHECK(read_reply(&clients[0], &code, text, sizeof(text)) == 0);
+    char raw[64];
+    size_t n = fake_net_read_tx(fifth, raw, sizeof(raw) - 1);
+    raw[n] = '\0';
+    CHECK(strstr(raw, "450") != NULL);
+    CHECK(!fake_net_is_open(fifth));
+    CHECK(ftp_server_clients(server) == 4);
+
+    command(server, &clients[3], "QUIT", 221);
+    CHECK(ftp_server_clients(server) == 3);
+    command(server, &clients[0], "NOOP", 200);
 
     ftp_server_destroy(server);
 }
@@ -878,7 +1017,7 @@ static void test_busy_and_abort(void)
 
     pasv(server, &client);
     queue_data_peer();
-    NetSocket *data = data_command(server, &client, "STOR ux0:data/busy.bin", 150);
+    NetSocket *data = data_command(server, &client, "STOR ux0:/data/busy.bin", 150);
     CHECK(data != NULL);
     CHECK(ftp_server_busy(server));
 
@@ -891,8 +1030,8 @@ static void test_busy_and_abort(void)
     CHECK(read_reply(&client, &code, text, sizeof(text)) == 1);
     CHECK(code == 226);
     command(server, &client, "NOOP", 200);
-    CHECK(!fake_fs_exists("ux0:data/busy.bin"));
-    CHECK(!fake_fs_exists("ux0:data/busy.bin.vftp.part"));
+    CHECK(!fake_fs_exists("ux0:/data/busy.bin"));
+    CHECK(!fake_fs_exists("ux0:/data/busy.bin.vftp.part"));
 
     ftp_server_destroy(server);
 }
@@ -1104,6 +1243,7 @@ int main(void)
     test_retr();
     test_stor();
     test_stor_connect_after_command();
+    test_two_clients();
     test_trace_masks_password();
     test_held_path();
     test_held_rename();
@@ -1113,7 +1253,7 @@ int main(void)
     test_mlst_mtime();
     test_root_absent_volume();
     test_mlst_size_mdtm();
-    test_second_client();
+    test_client_limit();
     test_busy_and_abort();
     test_control_write_failure();
     test_peer_check();

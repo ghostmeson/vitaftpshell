@@ -107,3 +107,7 @@ invent a second alert colour, a new type size, or a decorative icon.
 
 The HTML sheets draw at 1:1 with the real 5×7 face; open them in a browser. The
 PNGs are the same canvases at 2× for records.
+
+**2026-11-15 amendment:** the SERVER client panel now reads `UP TO 4 CLIENTS`
+and the server accepts four sessions with one data transfer at a time (D86).
+The 2026-11-08 SERVER sheets remain the historical one-client record.
