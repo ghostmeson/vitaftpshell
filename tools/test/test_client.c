@@ -963,13 +963,10 @@ static void test_high_risk(void)
 
     FtpClientTransfer transfer = {"/x.suprx", "ur0:tai/x.suprx", 0, 0, 0};
     PathRisk risk = PATH_RISK_NORMAL;
-    CHECK(ftp_client_download(client, &transfer, &risk) ==
-          FTP_CLIENT_NEED_RISK);
-    CHECK(risk == PATH_RISK_HIGH);
-    CHECK(!fake_fs_exists("ur0:tai/x.suprx"));
-
-    transfer.risk_approved = 1;
+    /* D87: high-risk paths still report their class, but no longer require a
+     * local approval step. The hard path denials remain. */
     CHECK(ftp_client_download(client, &transfer, &risk) == FTP_CLIENT_OK);
+    CHECK(risk == PATH_RISK_HIGH);
     CHECK(ftp_client_state(client) == FTP_CLIENT_TRANSFERRING);
     CHECK(!fake_fs_exists("ur0:tai/x.suprx"));
 

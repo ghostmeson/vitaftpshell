@@ -1405,9 +1405,6 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                 return;
             }
 
-            int high_risk = 0;
-            char risk_path[PATH_MAX_LEN];
-            risk_path[0] = '\0';
             int first = -1;
             for (int i = 0; i < state->clip_count; ++i) {
                 if (!keep[i])
@@ -1421,15 +1418,10 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                 }
                 if (first < 0)
                     first = i;
-                PathRisk risk = PATH_RISK_NORMAL;
-                PathResult result = path_check_write(target.text, 0, &risk);
+                PathResult result = path_check_write(target.text, 0, NULL);
                 if (result != PATH_OK) {
                     set_status(state, protection_reason(result, target.text));
                     return;
-                }
-                if (risk == PATH_RISK_HIGH && !high_risk) {
-                    high_risk = 1;
-                    fmt_copy(risk_path, sizeof(risk_path), target.text);
                 }
             }
 
@@ -1441,15 +1433,6 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             fmt_copy(state->pending_dest.text, sizeof(state->pending_dest.text),
                      destination);
             state->confirm_from_worker = 0;
-
-            if (high_risk) {
-                open_confirm(state, UI_CONFIRM_HIGH_RISK);
-                state->confirm_return = UI_SCREEN_WORKSPACE;
-                fmt_copy(state->confirm.risk_path,
-                         sizeof(state->confirm.risk_path), risk_path);
-                state->confirm.high_risk = 1;
-                return;
-            }
 
             state->batch_seq++;
             int index = 0;
@@ -1535,25 +1518,16 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
 
         int source_type = source_types[0];
 
-        int high_risk = 0;
-        char risk_path[PATH_MAX_LEN];
-        risk_path[0] = '\0';
-
         /* A remote path is not a Vita path: the local protection table would
          * reject every remote delete as INVALID PATH. Remote deletes are
          * confirmed here and executed by the FTP client. */
         if (action == UI_ACTION_DELETE &&
             state->active_pane == UI_PANE_LOCAL) {
             for (int i = 0; i < source_count; ++i) {
-                PathRisk risk = PATH_RISK_NORMAL;
-                PathResult result = path_check_delete(sources[i], 0, &risk);
+                PathResult result = path_check_delete(sources[i], 0, NULL);
                 if (result != PATH_OK) {
                     set_status(state, protection_reason(result, sources[i]));
                     return;
-                }
-                if (risk == PATH_RISK_HIGH && !high_risk) {
-                    high_risk = 1;
-                    fmt_copy(risk_path, sizeof(risk_path), sources[i]);
                 }
             }
         } else if (action == UI_ACTION_DOWNLOAD && destination[0] != '\0' &&
@@ -1565,15 +1539,10 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                     set_status(state, "PATH TOO LONG");
                     return;
                 }
-                PathRisk risk = PATH_RISK_NORMAL;
-                PathResult result = path_check_write(target.text, 0, &risk);
+                PathResult result = path_check_write(target.text, 0, NULL);
                 if (result != PATH_OK) {
                     set_status(state, protection_reason(result, target.text));
                     return;
-                }
-                if (risk == PATH_RISK_HIGH && !high_risk) {
-                    high_risk = 1;
-                    fmt_copy(risk_path, sizeof(risk_path), target.text);
                 }
             }
         }
@@ -1612,15 +1581,7 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             UiConfirm *confirm = &state->confirm;
             confirm->items = confirm->local_items;
             confirm->item_count = source_count;
-            confirm->high_risk = high_risk;
-            if (high_risk) {
-                fmt_copy(confirm->risk_path,
-                         sizeof(confirm->risk_path), risk_path);
-                /* The plain delete warning is not enough inside a tai folder:
-                 * name the boot risk as well (R71, D30). */
-                snprintf(confirm->warning, sizeof(confirm->warning),
-                         "A BAD EDIT CAN STOP THE CONSOLE BOOTING. THERE IS NO UNDO.");
-            }
+            confirm->high_risk = 0;
             snprintf(confirm->title, sizeof(confirm->title), "DELETE %d ITEM%s",
                      source_count, source_count == 1 ? "" : "S");
             fmt_copy(confirm->context, sizeof(confirm->context), destination);
@@ -1645,15 +1606,6 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                     }
                 }
             }
-            return;
-        }
-
-        if (high_risk) {
-            open_confirm(state, UI_CONFIRM_HIGH_RISK);
-            state->confirm_return = UI_SCREEN_WORKSPACE;
-            fmt_copy(state->confirm.risk_path,
-                     sizeof(state->confirm.risk_path), risk_path);
-            state->confirm.high_risk = 1;
             return;
         }
 

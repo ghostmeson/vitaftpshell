@@ -109,8 +109,8 @@ static void warning_draw(const LayoutRect *r)
         "AND WRITE UX0:, UR0:, AND UMA0.",
     };
     static const char *const dim[] = {
-        "UX0:/DATA/VITAFTPSHELL IS EXCLUDED.",
-        "UR0:TAI AND UX0:TAI ARE READ-ONLY.",
+        "UX0:/DATA/VITAFTPSHELL IS EXPOSED.",
+        "UR0:TAI AND UX0:TAI ARE WRITABLE.",
         "UR0:TAI/BOOT_CONFIG.TXT IS DENIED.",
         "AN UPLOAD REPLACES A FILE OF THE",
         "SAME NAME.",

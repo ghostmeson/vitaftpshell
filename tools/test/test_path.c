@@ -95,14 +95,15 @@ static void test_denials_and_risk(void)
     CHECK(path_check_write("ur0:tai/boot_config.txt", 0, &risk) == PATH_DENIED);
     CHECK(path_check_write("UR0:/TAI/./BOOT_CONFIG.TXT", 0, &risk) ==
           PATH_DENIED);
-    CHECK(path_check_write("ux0:tai/boot_config.txt", 1, &risk) == PATH_DENIED);
+    CHECK(path_check_write("ux0:tai/boot_config.txt", 1, &risk) == PATH_OK);
+    CHECK(risk == PATH_RISK_HIGH);
     CHECK(path_check_write("ur0:tai\\boot_config.txt", 0, &risk) ==
           PATH_INVALID);
     CHECK(path_check_write("ur0:tai\\boot_config.txt", 1, &risk) ==
           PATH_INVALID);
 
     CHECK(path_check_read("ux0:data/vitaFTPShell/sites.cfg", 1, &risk) ==
-          PATH_DENIED);
+          PATH_OK);
     CHECK(path_check_read("ux0:data/vitaFTPShell/sites.cfg", 0, &risk) ==
           PATH_OK);
     CHECK(path_check_read("ur0:tai/config.txt", 1, &risk) == PATH_OK);
@@ -111,12 +112,15 @@ static void test_denials_and_risk(void)
 
     CHECK(path_check_write("ur0:tai/config.txt", 0, &risk) == PATH_OK);
     CHECK(risk == PATH_RISK_HIGH);
-    CHECK(path_check_write("ur0:tai/config.txt", 1, &risk) == PATH_DENIED);
+    CHECK(path_check_write("ur0:tai/config.txt", 1, &risk) == PATH_OK);
+    CHECK(risk == PATH_RISK_HIGH);
 
-    CHECK(path_check_write("UX0:/TAI/X.SUPRX", 1, &risk) == PATH_DENIED);
+    CHECK(path_check_write("UX0:/TAI/X.SUPRX", 1, &risk) == PATH_OK);
+    CHECK(risk == PATH_RISK_HIGH);
     CHECK(path_check_write("UX0:/TAI/X.SUPRX", 0, &risk) == PATH_OK);
     CHECK(risk == PATH_RISK_HIGH);
-    CHECK(path_check_write("//UR0://TAI//CONFIG.TXT", 1, &risk) == PATH_DENIED);
+    CHECK(path_check_write("//UR0://TAI//CONFIG.TXT", 1, &risk) == PATH_OK);
+    CHECK(risk == PATH_RISK_HIGH);
     CHECK(path_check_write("//UR0://TAI//CONFIG.TXT", 0, &risk) == PATH_OK);
     CHECK(risk == PATH_RISK_HIGH);
     CHECK(path_is_high_risk("ux0:"));
@@ -127,11 +131,11 @@ static void test_denials_and_risk(void)
           PATH_OK);
     CHECK(risk == PATH_RISK_NORMAL);
     CHECK(path_check_write("ux0:data/vitaFTPShell/sites.cfg", 1, &risk) ==
-          PATH_DENIED);
+          PATH_OK);
 
     CHECK(path_check_delete("ux0:", 0, &risk) == PATH_PROTECTED);
     CHECK(path_check_delete("ux0:data", 0, &risk) == PATH_PROTECTED);
-    CHECK(path_check_delete("ux0:tai", 1, &risk) == PATH_DENIED);
+    CHECK(path_check_delete("ux0:tai", 1, &risk) == PATH_PROTECTED);
     CHECK(path_check_delete("ux0:tai", 0, &risk) == PATH_PROTECTED);
 
     CHECK(path_check_rename("ux0:data/a", "ux0:data/b", 0, &risk) == PATH_OK);
@@ -141,7 +145,8 @@ static void test_denials_and_risk(void)
           PATH_OK);
     CHECK(risk == PATH_RISK_HIGH);
     CHECK(path_check_rename("ur0:tai/config.txt", "ux0:data/x", 1, &risk) ==
-          PATH_DENIED);
+          PATH_OK);
+    CHECK(risk == PATH_RISK_HIGH);
 }
 
 static void test_sidecar_names(void)

@@ -217,9 +217,9 @@ arena.
   memory, and sends the save result and the bulk view on separate events. The
   editor receives a full site (including the password) through the edit-site
   event, never through the site list.
-- A high-risk local write is checked twice: the reducer checks the destination
-  and every marked source, and the worker checks the built plan and asks for the
-  high-risk confirmation if the reducer could not know the final name (D51).
+- A local write still checks the destination and every marked source against the
+  hard denials and protected paths. The path risk is carried for the yellow row
+  mark and the action target; no high-risk confirmation opens (D87).
 - The server transfer start is its own event and its own start timestamp; a
   server upload with an unknown total still shows direction, name, and progress.
 
@@ -335,17 +335,17 @@ One module owns this and all three roles call it.
   denial and risk tables, while the original bytes go to the filesystem,
   because the exposed volumes are case-insensitive and a case variant must not
   slip past a denial.
-- **Denied:** `ur0:tai/boot_config.txt` for every role, and every write, create,
-  rename, or delete under `ur0:tai`, `ux0:tai`, and the app's own data folder for
-  the server. The server also denies reads of `boot_config.txt` and its own data
-  folder; the `tai` folders stay readable. A rename checks both operands.
+- **Denied:** `ur0:tai/boot_config.txt` for every role. The server may read,
+  write, create, rename, and delete in the app data folder and the `tai`
+  folders; only the system-path denials and `boot_config.txt` remain (D87). A
+  rename checks both operands.
 - **Protected:** volume roots, `ur0:data`, `ux0:data`, and the `tai` directories
   cannot be renamed, moved, or deleted, by any role.
-- **High risk for the local manager:** the `tai` folders and their contents,
+- **Risk mark for the local manager:** the `tai` folders and their contents,
   volume roots, `ur0:data` and `ux0:data` themselves, and the files that control
-  loading (`config.txt`, `plugins.txt`, `*.skprx`, `*.suprx`). Risk belongs to a
-  write step, source and destination, so a download or a copy into a `tai` folder
-  carries it. A high-risk action confirms first (D30, D31).
+  loading (`config.txt`, `plugins.txt`, `*.skprx`, `*.suprx`) stay classified
+  high-risk and carry the yellow row mark. The high-risk confirmation is
+  retired; protected paths and `boot_config.txt` are hard denials (D87).
 - A remote-supplied name containing `/`, `\`, `:`, NUL, or a `..` segment is
   refused before any local path is built.
 
