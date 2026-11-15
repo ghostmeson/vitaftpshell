@@ -19,9 +19,9 @@ contracts and fakes, the gfx base and layout table, the reply/listing/path/
 format policy, the site/settings/store/log policy, the passive FTP client and
 server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
-adapters, and the app/worker runtime exist. `tools/test/run.sh` passes nineteen
-host suites, `tools/preview/run.sh` renders 40 settled states, and `build.sh`
-emits `vitaftpshell-v01.00-b55.vpk` with the real app linked. b16 and b18 have
+adapters, and the app/worker runtime exist. `tools/test/run.sh` passes
+twenty-one host suites, `tools/preview/run.sh` renders 40 settled states, and
+`build.sh` emits `vitaftpshell-v01.00-b56.vpk` with the real app linked. b16 and b18 have
 run on the console: b18 proved the drive browser, pinned the IME as the
 new-folder/rename blocker, showed the client failing at TCP connect, and showed
 the server with no client. b20 opened the IME and reached a rename, then the
@@ -51,7 +51,8 @@ a worker-stack budget in `build.sh`, turns a refused sync into a recorded hint,
 counts refused batch items, and reads `FAILED` on a total failure. b43 has run
 on the console (operator report, 2026-11-14): copy, paste, new folder, rename,
 and download work, and the dock words read correctly in green. b55 carries the
-review remediation (U1-U10) and is built and host-tested, not yet on hardware.
+review remediation (U1-U10); b56 re-packages that code with the settled launcher
+icon (D84). Both are built and host-tested, not yet on hardware.
 M13 and M10 are partly observed; the project stays `building` until every row
 has a recorded PASS.
 

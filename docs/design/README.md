@@ -101,6 +101,9 @@ invent a second alert colour, a new type size, or a decorative icon.
 | 2026-11-08 | [Text entry open](2026-11-08-text-entry-open.png) | System keyboard contract |
 | 2026-11-08 | [Text entry cancelled](2026-11-08-text-entry-cancelled.png) | Field unchanged |
 | 2026-11-08 | [Text entry unavailable](2026-11-08-text-entry-unavailable.png) | Inline fallback |
+| 2026-11-15 | [Launcher icon](2026-11-15-launcher-icon.md) | Settled: two-arrow mark, mask-safe (D84) |
+| 2026-11-15 | [Launcher icon render](2026-11-15-launcher-icon.png) | 4× record, true black field |
+| 2026-11-15 | [Launcher icon with bubble mask](2026-11-15-launcher-icon-bubble.png) | 4× record, 26 px corner cut |
 
 The HTML sheets draw at 1:1 with the real 5×7 face; open them in a browser. The
 PNGs are the same canvases at 2× for records.

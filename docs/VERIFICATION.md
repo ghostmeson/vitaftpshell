@@ -1,15 +1,26 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b55.vpk
-**SHA-256:** 84e5ed73a8a6d6be73973d544cb4f19dd1dfe401bd972892542821907e4d2349
+**Build:** vitaftpshell-v01.00-b56.vpk
+**SHA-256:** 5f5fe87e5cd4d0328e552eb6ca55454d4383a18099d4c183a0800c79bc149be5
 **ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b55 carries the review remediation, built and host-tested, not yet on hardware; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b56 re-packages the b55 review remediation with the settled launcher icon, code unchanged, built and host-tested, not yet on hardware; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b56 icon rebuild
+
+**Date:** 2026-11-15
+**Build:** `vitaftpshell-v01.00-b56.vpk`
+**SHA-256:** `5f5fe87e5cd4d0328e552eb6ca55454d4383a18099d4c183a0800c79bc149be5`
+
+The only change from b55 is `sce_sys/icon0.png`, the settled launcher icon (D84).
+`tools/check_assets.sh` accepts the indexed 8-bit icon, and the packaged VPK
+carries the same bytes as the source file. No code changed, so the b55 host run
+below still applies and the M1-M13 matrix is unchanged.
 
 ## b55 host run (review remediation)
 
