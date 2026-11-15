@@ -97,6 +97,8 @@ typedef struct {
     UiConfirmKind kind;
     /* The lane the prompt belongs to; UI_PANE_REMOTE for a network item. */
     int pane;
+    /* Unique per request; the answer must echo it. */
+    unsigned id;
     int item_count;
     int existing_count;
     int high_risk;

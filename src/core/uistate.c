@@ -1821,6 +1821,7 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
         if (command != NULL && type == UI_CMD_CONFIRM) {
             command->confirm = c->kind;
             command->choice = choice;
+            command->prompt_id = c->prompt_id;
             command->index = state->sites.selected;
         }
         if (c->kind == UI_CONFIRM_DISCARD) {
@@ -1872,6 +1873,7 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
         if (command != NULL && type == UI_CMD_CONFIRM) {
             command->confirm = c->kind;
             command->choice = choice;
+            command->prompt_id = c->prompt_id;
             command->index = state->sites.selected;
         }
         if (c->kind == UI_CONFIRM_DISCARD)
@@ -2325,6 +2327,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         state->confirm_from_worker = 1;
         open_confirm(state, event->confirm);
         state->confirm.pane = event->pane;
+        state->confirm.prompt_id = event->prompt_id;
         state->confirm.items = event->items;
         state->confirm.item_count = event->item_count;
         state->confirm.existing_count = event->existing_count;

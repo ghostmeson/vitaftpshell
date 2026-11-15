@@ -1012,6 +1012,23 @@ static void test_waiting_lane_cancel(void)
     CHECK(s_state.dock.waiting == 1);
     CHECK(s_state.local_dock.waiting == 0);
     CHECK(s_state.dock_primary == UI_DOCK_LANE_NETWORK);
+
+    /* A worker prompt's identity rides the answer back to the worker. */
+    reset();
+    static const UiConfirmItem one = {"ux0:data/A.TXT", 0, 0};
+    UiStateEvent identified;
+    memset(&identified, 0, sizeof(identified));
+    identified.kind = UI_EVT_CONFIRM_REQUEST;
+    identified.confirm = UI_CONFIRM_DELETE;
+    identified.prompt_id = 42;
+    identified.items = &one;
+    identified.item_count = 1;
+    send_event(&identified);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    send_key(UI_KEY_CROSS);
+    UiCommand *answer = command(UI_CMD_CONFIRM);
+    CHECK(answer != NULL);
+    CHECK(answer->prompt_id == 42);
 }
 
 static void test_paste_guards(void)
