@@ -403,6 +403,7 @@ static void lane_started(UiState *state, UiDock *lane)
         if (!state->dock.active)
             state->dock_primary = UI_DOCK_LANE_LOCAL;
     } else {
+        lane->waiting = 0;
         state->dock_primary = UI_DOCK_LANE_NETWORK;
     }
 }
@@ -415,6 +416,7 @@ static void lane_terminal(UiState *state, UiDock *lane)
         if (!state->dock.active)
             state->dock_primary = UI_DOCK_LANE_LOCAL;
     } else {
+        lane->waiting = 0;
         state->dock_primary = (state->local_shown && state->local_dock.active)
                                   ? UI_DOCK_LANE_LOCAL
                                   : UI_DOCK_LANE_NETWORK;
@@ -1805,10 +1807,15 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
                                                       : UI_CMD_CANCEL_LOCAL;
         }
         if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT) {
-            state->local_shown = 1;
-            state->local_dock.waiting = 1;
-            if (!state->dock.active)
-                state->dock_primary = UI_DOCK_LANE_LOCAL;
+            if (c->pane == UI_PANE_REMOTE) {
+                state->dock.waiting = 1;
+                state->dock_primary = UI_DOCK_LANE_NETWORK;
+            } else {
+                state->local_shown = 1;
+                state->local_dock.waiting = 1;
+                if (!state->dock.active)
+                    state->dock_primary = UI_DOCK_LANE_LOCAL;
+            }
         }
         UiCommand *command = emit(out, max, count, type);
         if (command != NULL && type == UI_CMD_CONFIRM) {
@@ -1851,10 +1858,15 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
                                                       : UI_CMD_CANCEL_LOCAL;
         }
         if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT) {
-            state->local_shown = 1;
-            state->local_dock.waiting = 1;
-            if (!state->dock.active)
-                state->dock_primary = UI_DOCK_LANE_LOCAL;
+            if (c->pane == UI_PANE_REMOTE) {
+                state->dock.waiting = 1;
+                state->dock_primary = UI_DOCK_LANE_NETWORK;
+            } else {
+                state->local_shown = 1;
+                state->local_dock.waiting = 1;
+                if (!state->dock.active)
+                    state->dock_primary = UI_DOCK_LANE_LOCAL;
+            }
         }
         UiCommand *command = emit(out, max, count, type);
         if (command != NULL && type == UI_CMD_CONFIRM) {
@@ -2312,6 +2324,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         }
         state->confirm_from_worker = 1;
         open_confirm(state, event->confirm);
+        state->confirm.pane = event->pane;
         state->confirm.items = event->items;
         state->confirm.item_count = event->item_count;
         state->confirm.existing_count = event->existing_count;

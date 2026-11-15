@@ -132,6 +132,8 @@ struct Worker {
     FsOpPlan *busy_plan;
     char busy_blocker[PATH_MAX_LEN];
     int busy_waiting;
+    /* The network item is held by a local path and retries head-of-line. */
+    int network_waiting;
     LocalBatch local_batch;
     UiCommand batch_preflight[UI_CLIP_MAX];
     /* Existing destinations named by the one prompt the batch may ask. Kept in
@@ -181,6 +183,8 @@ static void queue_pending_action(Worker *worker, const UiCommand *command);
 static void local_batch_advance(Worker *worker);
 static int run_plan_begin(Worker *worker, const UiCommand *command,
                           FsOpPlan *plan);
+static void execute_action(Worker *worker, const UiCommand *command,
+                           FsOpConflict conflict, int high_risk_approved);
 
 static uint64_t now_ms(Worker *worker)
 {
@@ -1459,12 +1463,34 @@ static void request_path_busy(Worker *worker, const UiCommand *command,
     fmt_copy(request.items[0].name, sizeof(request.items[0].name), blocker);
     handoff_confirm_request(worker->handoff, &request);
 
+    request.pane = UI_PANE_LOCAL;
     worker->busy_command = *command;
     worker->busy_plan = plan;
     fmt_copy(worker->busy_blocker, sizeof(worker->busy_blocker), blocker);
     worker->busy_waiting = 0;
     worker->pending.valid = 1;
     worker->pending.kind = 4;
+}
+
+/* The network lane reuses the PATH BUSY prompt. The item stays claimed and
+ * head-of-line; WAIT retries, SKIP drops it, CANCEL clears the queue. */
+static void request_network_path_busy(Worker *worker, const XferItem *item,
+                                      const char *blocker)
+{
+    HandoffConfirm request;
+    memset(&request, 0, sizeof(request));
+    request.kind = UI_CONFIRM_PATH_BUSY;
+    request.pane = UI_PANE_REMOTE;
+    request.valid = 1;
+    fmt_copy(request.context, sizeof(request.context), "PATH IN USE");
+    request.item_count = 1;
+    fmt_copy(request.items[0].name, sizeof(request.items[0].name), blocker);
+    handoff_confirm_request(worker->handoff, &request);
+
+    worker->network_waiting = 0;
+    worker->pending.valid = 1;
+    worker->pending.kind = 5;
+    worker->pending.item = *item;
 }
 
 static void emit_local_progress(Worker *worker)
@@ -1608,14 +1634,16 @@ static void busy_retry(Worker *worker)
         return;
     }
 
+    /* D73: the wait may have changed the destination. Rebuild the plan from
+     * the command so a file that appeared during the wait asks again instead
+     * of being overwritten silently. */
     FsOpPlan *plan = worker->busy_plan;
     UiCommand command = worker->busy_command;
     worker->busy_plan = NULL;
     worker->busy_waiting = 0;
-    if (!run_plan_begin(worker, &command, plan)) {
-        release_local_reservations(worker);
-        free(plan);
-    }
+    free(plan);
+    release_local_reservations(worker);
+    execute_action(worker, &command, FSOP_CONFLICT_ASK, 0);
 }
 
 /* Start a local plan as a resumable run. On success the run or the waiting
@@ -2256,8 +2284,12 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
                             : item->source.text;
     char blocker[PATH_MAX_LEN];
     if (reserve_conflict(&worker->reserve, kind, local, blocker,
-                         sizeof(blocker)))
+                         sizeof(blocker))) {
+        if (!worker->network_waiting)
+            request_network_path_busy(worker, item, blocker);
         return;
+    }
+    worker->network_waiting = 0;
     if (!reserve_add(&worker->reserve, RESERVE_LANE_NETWORK, kind, local)) {
         emit_error(worker, UI_PANE_REMOTE, "TRANSFER TOO LARGE", OP_CAUSE_APP,
                    OP_STAGE_PLAN);
@@ -3136,6 +3168,26 @@ static void handle_command(Worker *worker, const UiCommand *command)
                             : FSOP_CONFLICT_SKIP;
                     worker->local_conflict_set = 1;
                     local_batch_execute(worker);
+                }
+            } else if (pending.kind == 5) {
+                XferItem item = pending.item;
+                if (command->choice == UI_CHOICE_WAIT) {
+                    worker->network_waiting = 1;
+                } else if (command->choice == UI_CHOICE_SKIP) {
+                    xfer_release(&worker->queue, XFER_ITEM_DONE, OP_CAUSE_APP,
+                                 OP_STAGE_TRANSFER, NULL);
+                    worker->batch_done++;
+                    batch_finish(worker);
+                    pump_queue(worker);
+                } else {
+                    xfer_init(&worker->queue);
+                    batch_reset(worker);
+                    worker->network_waiting = 0;
+                    HandoffEvent cancelled;
+                    event_init(&cancelled, HANDOFF_EVT_TRANSFER_CANCELLED);
+                    cancelled.direction = item.direction;
+                    cancelled.direction_known = 1;
+                    emit(worker, &cancelled);
                 }
             } else if (pending.kind == 4) {
                 if (command->choice == UI_CHOICE_WAIT) {

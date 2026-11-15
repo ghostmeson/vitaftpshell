@@ -226,12 +226,11 @@ static void idle_dock(const UiState *state, DockPanel *p)
     }
 }
 
-static void waiting_dock(const UiDock *d, DockPanel *p)
+static void waiting_dock(const char *subject, DockPanel *p)
 {
-    (void)d;
     p->word = "WAITING";
     p->word_color = C_YELLOW;
-    p->subject = "LOCAL";
+    p->subject = subject;
     p->progress_valid = 0;
     p->left = "WAITING FOR A HELD PATH";
     p->left_color = C_YELLOW;
@@ -434,8 +433,8 @@ void dock_draw(const UiState *state)
     memset(&p, 0, sizeof(p));
     p.focused = state->dock.focused;
 
-    if (full == &state->local_dock && full->waiting)
-        waiting_dock(full, &p);
+    if (full->waiting)
+        waiting_dock(full == &state->dock ? "NETWORK" : "LOCAL", &p);
     else if (full->state == UI_DOCK_ACTIVE && full->active)
         active_dock(full, &p);
     else if (full->state == UI_DOCK_DONE)
