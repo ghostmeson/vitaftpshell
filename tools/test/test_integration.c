@@ -51,6 +51,8 @@ typedef struct {
     char cwd[64];
     int hold_data;
     int hold_final;
+    int size_supported;
+    int sizes;
     int listings;
     int retrs;
     int aborts;
@@ -179,7 +181,19 @@ static void peer_serve(Peer *peer)
             peer->listings++;
             peer->data = NULL;
         } else if (strncmp(line, "SIZE ", 5) == 0) {
-            fake_ftpd_reply(&peer->server, 502, "Not implemented.");
+            const char *path = line + 5;
+            peer->sizes++;
+            if (peer->size_supported && peer->exists_path != NULL &&
+                strcmp(path, peer->exists_path) == 0) {
+                char size[32];
+                snprintf(size, sizeof(size), "%llu",
+                         (unsigned long long)peer->exists_size);
+                fake_ftpd_reply(&peer->server, 213, size);
+            } else if (peer->size_supported) {
+                fake_ftpd_reply(&peer->server, 550, "Not found.");
+            } else {
+                fake_ftpd_reply(&peer->server, 502, "Not implemented.");
+            }
         } else if (strncmp(line, "RETR ", 5) == 0) {
             peer->data = fake_net_last_connected();
             if (peer->data == peer->control)
@@ -1571,6 +1585,37 @@ static void test_upload_preflight_unsupported(void)
     app_destroy(app);
 }
 
+/* When MLST is refused, SIZE still detects an existing destination. */
+static void test_upload_preflight_size_fallback(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/UP.TXT";
+    peer.exists_size = 5;
+
+    start_upload(app, &peer);
+    CHECK(peer.sizes == 1);
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+
+    press(app, INPUT_BIT(INPUT_RIGHT)); /* SKIP */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, &peer, 40);
+    CHECK(peer.stors == 0);
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+
+    app_destroy(app);
+}
+
 static void test_upload_preflight_directory(void)
 {
     App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
@@ -2141,6 +2186,7 @@ int main(void)
     test_remote_refresh();
     test_upload_conflict();
     test_upload_preflight_unsupported();
+    test_upload_preflight_size_fallback();
     test_upload_preflight_directory();
     test_upload_preflight_failure();
     test_download_conflict();

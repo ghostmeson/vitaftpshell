@@ -154,6 +154,9 @@ FtpClientResult ftp_client_rmdir(FtpClient *client, const char *path);
 /* MLST: a successful query reports exists/type/size; 500/502 reports
  * unsupported. The op result is OK in both cases; check the event. */
 FtpClientResult ftp_client_mlst(FtpClient *client, const char *path);
+/* SIZE: a 213 reports exists and the size, 550 reports missing, and
+ * 500/502 reports unsupported. Used when MLST is unavailable. */
+FtpClientResult ftp_client_size(FtpClient *client, const char *path);
 FtpClientResult ftp_client_quit(FtpClient *client);
 /* Close the session immediately, without a QUIT round trip or a session-lost
  * event. The machine returns to IDLE. */

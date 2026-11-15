@@ -174,6 +174,10 @@ struct Worker {
     int upload_stat_exists;
     int upload_stat_is_dir;
     int upload_stat_unsupported;
+    /* The preflight has used SIZE for this session (MLST was refused). */
+    int upload_stat_used_size;
+    /* Neither MLST nor SIZE is available; the batch goes straight to STOR. */
+    int upload_stat_disabled;
 
     int server_transfer_active;
     XferDirection server_direction;
@@ -2054,6 +2058,8 @@ static void reset_remote_session(Worker *worker)
     worker->upload_stat_active = 0;
     worker->upload_stat_ready = 0;
     worker->upload_stat_failed = 0;
+    worker->upload_stat_used_size = 0;
+    worker->upload_stat_disabled = 0;
     remote_listing_abort(worker);
     xfer_init(&worker->queue);
     batch_reset(worker);
@@ -2450,7 +2456,33 @@ static void pump_queue(Worker *worker)
                 batch_finish(worker);
                 continue;
             }
-            if (worker->upload_stat_unsupported || !worker->upload_stat_exists) {
+            if (worker->upload_stat_unsupported) {
+                if (worker->upload_stat_used_size) {
+                    /* SIZE is refused too: no probe exists on this server. */
+                    worker->upload_stat_disabled = 1;
+                } else {
+                    /* MLST was refused; ask SIZE before giving up (b37). */
+                    FtpClientResult size = ftp_client_size(
+                        worker->client, item.destination.text);
+                    if (size == FTP_CLIENT_OK) {
+                        worker->upload_stat_used_size = 1;
+                        worker->upload_stat_active = 1;
+                        return;
+                    }
+                    if (size == FTP_CLIENT_BUSY)
+                        return;
+                    emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED",
+                               OP_CAUSE_APP, OP_STAGE_CONNECT);
+                    xfer_release(&worker->queue, XFER_ITEM_FAILED,
+                                 OP_CAUSE_APP, OP_STAGE_CONNECT, NULL);
+                    worker->batch_done++;
+                    batch_finish(worker);
+                    continue;
+                }
+                start_transfer_item(worker, &item);
+                return;
+            }
+            if (!worker->upload_stat_exists) {
                 start_transfer_item(worker, &item);
                 return;
             }
@@ -2509,16 +2541,22 @@ static void pump_queue(Worker *worker)
             return;
         }
 
-        /* Uploads: check the remote destination before the STOR when the
-         * server advertises MLST. A server without it starts the transfer
-         * directly, as before. R41 asks once per batch and applies the answer
-         * to every file. */
+        /* Uploads: check the remote destination before the STOR. Prefer
+         * MLST; a server without it (or one that refuses MLST) falls back to
+         * SIZE. When neither answers, the transfer starts as before. R41 asks
+         * once per batch and applies the answer to every file. */
         if (worker->batch_conflict != XFER_CONFLICT_OVERWRITE_ALL &&
-            ftp_client_has_mlsd(worker->client)) {
+            !worker->upload_stat_disabled) {
+            int use_size = worker->upload_stat_used_size ||
+                           !ftp_client_has_mlsd(worker->client);
             FtpClientResult check =
-                ftp_client_mlst(worker->client, item.destination.text);
+                use_size ? ftp_client_size(worker->client,
+                                           item.destination.text)
+                         : ftp_client_mlst(worker->client,
+                                           item.destination.text);
             if (check == FTP_CLIENT_OK) {
                 worker->upload_stat_active = 1;
+                worker->upload_stat_used_size = use_size;
                 return;
             }
             if (check == FTP_CLIENT_BUSY)

@@ -48,6 +48,7 @@ typedef enum {
     CSTEP_DELE,
     CSTEP_RMD,
     CSTEP_MLST,
+    CSTEP_SIZE_STAT,
     CSTEP_NOOP,
     CSTEP_QUIT
 } ClientStep;
@@ -1214,6 +1215,48 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
         client_fail_server(client, FTP_STAGE_COMMAND, reply->text);
         return;
 
+    case CSTEP_SIZE_STAT:
+        client->stat_exists = 0;
+        client->stat_unsupported = 0;
+        client->stat_is_dir = 0;
+        client->stat_size = 0;
+        client->stat_size_known = 0;
+        if (reply->code == 213) {
+            char *end = NULL;
+            unsigned long long size = strtoull(reply->text, &end, 10);
+            if (end != reply->text) {
+                client->stat_exists = 1;
+                client->stat_size = size;
+                client->stat_size_known = 1;
+                client_emit_op_done(client, 1, FTP_CAUSE_APP,
+                                    FTP_STAGE_COMMAND, NULL);
+            } else {
+                /* A 213 we cannot read is treated as unsupported so the
+                 * transfer proceeds instead of silently skipping the check. */
+                client->stat_unsupported = 1;
+                client_emit_op_done(client, 1, FTP_CAUSE_APP,
+                                    FTP_STAGE_COMMAND, NULL);
+            }
+            client_clear_op(client);
+            return;
+        }
+        if (reply->code == 550) {
+            client_emit_op_done(client, 1, FTP_CAUSE_APP, FTP_STAGE_COMMAND,
+                                NULL);
+            client_clear_op(client);
+            return;
+        }
+        if (reply->code == 500 || reply->code == 501 ||
+            reply->code == 502 || reply->code == 504) {
+            client->stat_unsupported = 1;
+            client_emit_op_done(client, 1, FTP_CAUSE_APP, FTP_STAGE_COMMAND,
+                                NULL);
+            client_clear_op(client);
+            return;
+        }
+        client_fail_server(client, FTP_STAGE_COMMAND, reply->text);
+        return;
+
     case CSTEP_MLST:
         client->stat_exists = 0;
         client->stat_unsupported = 0;
@@ -1773,6 +1816,36 @@ FtpClientResult ftp_client_mlst(FtpClient *client, const char *path)
     if (!client_send(client, "MLST %s", client->pending_path)) {
         /* The control write failed and client_lost already owns the session.
          * Do not leave the worker waiting for a STAT event that cannot come. */
+        client_clear_op(client);
+        return FTP_CLIENT_NOT_CONNECTED;
+    }
+    return FTP_CLIENT_OK;
+}
+
+FtpClientResult ftp_client_size(FtpClient *client, const char *path)
+{
+    if (client == NULL)
+        return FTP_CLIENT_INVALID;
+    if (client->state != FTP_CLIENT_READY)
+        return FTP_CLIENT_NOT_CONNECTED;
+    if (!client_start_op(client, FTP_CLIENT_OP_STAT))
+        return FTP_CLIENT_BUSY;
+    if (!ftp_remote_normalize(client->cwd, path, client->pending_path,
+                              sizeof(client->pending_path)) ||
+        !ftp_remote_path_is_safe(client->pending_path)) {
+        client_clear_op(client);
+        return FTP_CLIENT_INVALID;
+    }
+
+    client->stat_exists = 0;
+    client->stat_is_dir = 0;
+    client->stat_unsupported = 0;
+    client->stat_size = 0;
+    client->stat_size_known = 0;
+    client->stage = FTP_STAGE_COMMAND;
+    client->stage_deadline = now_ms(client) + CLIENT_COMMAND_MS;
+    client->step = CSTEP_SIZE_STAT;
+    if (!client_send(client, "SIZE %s", client->pending_path)) {
         client_clear_op(client);
         return FTP_CLIENT_NOT_CONNECTED;
     }

@@ -1563,6 +1563,44 @@ static void test_mlst_send_failure(void)
     ftp_client_destroy(client);
 }
 
+/* SIZE is the metadata fallback when MLST is unavailable. */
+static void test_size_stat(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+    cap.done = 0;
+
+    CHECK(ftp_client_size(client, "/X.BIN") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /X.BIN");
+    reply(&server, 213, "42");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.op == FTP_CLIENT_OP_STAT);
+    CHECK(cap.exists == 1 && cap.is_dir == 0 && cap.unsupported == 0);
+    CHECK(cap.file_size == 42 && cap.file_size_known == 1);
+
+    cap.done = 0;
+    CHECK(ftp_client_size(client, "/MISSING") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /MISSING");
+    reply(&server, 550, "Not found.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.exists == 0);
+
+    cap.done = 0;
+    CHECK(ftp_client_size(client, "/ANY") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /ANY");
+    reply(&server, 502, "Not implemented.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.unsupported == 1);
+
+    ftp_client_destroy(client);
+}
+
 static void test_mlst(void)
 {
     setup();
@@ -1641,6 +1679,7 @@ int main(void)
     test_nlst();
     test_mlst_send_failure();
     test_mlst();
+    test_size_stat();
     test_keepalive();
     test_idle_control_drop();
     test_keepalive_timeout();
