@@ -1543,10 +1543,12 @@ FtpClientResult ftp_client_download(FtpClient *client,
     if (tr != FS_OK) {
         client->cause = FTP_CAUSE_STORAGE;
         client_set_state(client, FTP_CLIENT_READY);
-        client_emit_op_done(client, 0, FTP_CAUSE_STORAGE,
-                            FTP_STAGE_TRANSFER, "DESTINATION OPEN FAILED");
         client_clear_op(client);
-        return FTP_CLIENT_OK;
+        /* No operation-done event: the worker owns the one failure terminal
+         * for a transfer that never started. */
+        copy_str(client->last_detail, sizeof(client->last_detail),
+                 "DESTINATION OPEN FAILED");
+        return FTP_CLIENT_LOCAL_FAILED;
     }
 
     client->data_kind = CDATA_RETR;
@@ -1586,10 +1588,10 @@ FtpClientResult ftp_client_upload(FtpClient *client,
     if (r != FS_OK) {
         client->cause = FTP_CAUSE_STORAGE;
         client_set_state(client, FTP_CLIENT_READY);
-        client_emit_op_done(client, 0, FTP_CAUSE_STORAGE,
-                            FTP_STAGE_TRANSFER, "SOURCE OPEN FAILED");
         client_clear_op(client);
-        return FTP_CLIENT_OK;
+        copy_str(client->last_detail, sizeof(client->last_detail),
+                 "SOURCE OPEN FAILED");
+        return FTP_CLIENT_LOCAL_FAILED;
     }
 
     FsEntry entry;
@@ -1958,4 +1960,9 @@ int ftp_client_busy(const FtpClient *client)
     return client != NULL &&
            (client->op_active || client->abor_drain > 0 ||
             client->abor_grace || client->keepalive_pending);
+}
+
+const char *ftp_client_last_detail(const FtpClient *client)
+{
+    return client != NULL ? client->last_detail : "";
 }
