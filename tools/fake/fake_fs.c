@@ -8,7 +8,9 @@
 /* Enough nodes for the 2000-row listing-cap test plus the fixture tree. */
 #define FAKE_FS_NODES 2200
 #define FAKE_FS_PATH_MAX 1024
-#define FAKE_FS_CONTENT_MAX 8192
+/* Large enough for a transfer to stay ACTIVE across a tick when the data
+ * socket is not drained; 8 KiB completed inside the first pump. */
+#define FAKE_FS_CONTENT_MAX 16384
 #define FAKE_FS_HANDLES 16
 #define FAKE_FS_VOLUMES 3
 
