@@ -17,7 +17,8 @@
  *
  * Indices use release/acquire so the consumer sees a published record, not a
  * half-written one. The command ring may overflow (the lost count says so),
- * but a server stop and a cancel have dedicated slots and are never lost.
+ * but a server stop and each lane's cancel have dedicated slots and are never
+ * lost; two cancels queued before the worker reads both survive.
  */
 
 #define HANDOFF_CMD_CAP 64
@@ -31,6 +32,14 @@ typedef struct {
     UiCommand command;
     uint32_t seq;
 } HandoffCommand;
+
+/* The two cancel lanes. The single-lane answer (CANCEL_TRANSFER) is kept in
+ * its own slot because the worker resolves it against the lane that is
+ * running; a per-lane answer from the two-lane prompt must not overwrite it. */
+typedef enum {
+    HANDOFF_CANCEL_NETWORK = 0,
+    HANDOFF_CANCEL_LOCAL = 1
+} HandoffCancelLane;
 
 typedef enum {
     HANDOFF_EVT_PROGRESS = 0,
@@ -167,8 +176,10 @@ typedef struct {
 
     int critical_stop_valid;
     HandoffCommand critical_stop;
-    int critical_cancel_valid;
-    HandoffCommand critical_cancel;
+    int critical_cancel_any_valid;
+    HandoffCommand critical_cancel_any;
+    int critical_cancel_lane_valid[2];
+    HandoffCommand critical_cancel_lane[2];
 
     HandoffEvent events[HANDOFF_EVT_CAP];
     uint32_t evt_head;
@@ -195,10 +206,11 @@ typedef struct {
 void handoff_init(Handoff *handoff);
 
 int handoff_command_push(Handoff *handoff, const UiCommand *command);
-/* The queued cancel command type, or UI_CMD_NONE. */
-int handoff_cancel_type(const Handoff *handoff);
+/* The queued cancel type for one lane, or UI_CMD_NONE. A single-lane
+ * CANCEL_TRANSFER answers for either lane; an explicit lane answer wins. */
+int handoff_cancel_type(const Handoff *handoff, HandoffCancelLane lane);
 /* Drop a cancel that the local executor already observed by peeking. */
-int handoff_cancel_consume(Handoff *handoff);
+int handoff_cancel_consume(Handoff *handoff, HandoffCancelLane lane);
 int handoff_command_pop(Handoff *handoff, UiCommand *out);
 unsigned handoff_command_lost(const Handoff *handoff);
 

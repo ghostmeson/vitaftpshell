@@ -455,7 +455,7 @@ static int local_cancel_requested(void *ctx)
     }
     if (worker->handoff == NULL)
         return 0;
-    int type = handoff_cancel_type(worker->handoff);
+    int type = handoff_cancel_type(worker->handoff, HANDOFF_CANCEL_LOCAL);
     if (type != UI_CMD_CANCEL_TRANSFER && type != UI_CMD_CANCEL_LOCAL)
         return 0;
     worker->local_cancel_seen = 1;
@@ -1625,9 +1625,9 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
     }
 
     if (result == FSOP_RUN_CANCELLED) {
-        int type = handoff_cancel_type(worker->handoff);
+        int type = handoff_cancel_type(worker->handoff, HANDOFF_CANCEL_LOCAL);
         if (type == UI_CMD_CANCEL_TRANSFER || type == UI_CMD_CANCEL_LOCAL)
-            handoff_cancel_consume(worker->handoff);
+            handoff_cancel_consume(worker->handoff, HANDOFF_CANCEL_LOCAL);
     }
 
     release_local_reservations(worker);
