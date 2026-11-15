@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-15 — The b57 trace pinned the FTP upload defect: the worker set the legacy global server-busy flag whenever the app's network lane was active, so the server answered 450 to its own client's PASV and to unrelated PC commands. b58 removes the global gate; the reservation table still answers 450 on a held path (D85). Downloads and listings already worked. | Install b58 and retry an upload from FileZilla to a normal folder (not `ux0:data/vitaFTPShell`, which is deliberately excluded) and a transfer in both directions from the app's own client to localhost | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b58.vpk` (263,206 bytes). The b58 hardware retry is the open row; the rest of M1-M13 and the earlier b55/b56 evidence are unchanged. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-15 — b58 fixed and hardware-verified the self-connection upload and download (the 263,206-byte VPK up to `ur0:` and back, both 226). FileZilla now reaches the server but gets `450 Busy` when a second control connection arrives while the app's remote pane holds the one client slot. | Disconnect the app's remote pane (SERVER shows `0 CLIENTS`) and set FileZilla's maximum simultaneous transfers to 1; retry. If `450 Busy` persists with zero clients, decide whether to reopen the one-client scope | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b58.vpk` (263,206 bytes). M5 is PART; the rest of M1-M13 and the earlier b55/b56 evidence are unchanged. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 

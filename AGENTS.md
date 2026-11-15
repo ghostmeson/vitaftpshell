@@ -47,8 +47,9 @@ budgeted transfer pumps, the server session bounds, and the single sidecar
 owner. b56 re-packages that code with the settled launcher icon (D84); b57
 added a server protocol trace, and its console log showed the worker's legacy
 global server-busy gate answering 450 to the app's own client. b58 removes that
-gate (D85), so a transfer is refused only on a held path. M13 and M10 are partly
-observed; M1–M9, M11, and M12 are pending, so
+gate (D85), and the console confirmed both transfer directions between the app's
+own client and server. FileZilla's `450 Busy` is the one-client rule refusing
+its second control connection. M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
 the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
