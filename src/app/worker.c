@@ -24,6 +24,7 @@
 #define WORKER_CMD_BUDGET 8
 #define WORKER_REMOTE_DEPTH 32
 /* One local slice per worker step; the network engine ticks before it. */
+#define WORKER_NET_WAIT_MS 50
 #define WORKER_LOCAL_BYTES_PER_STEP (64u * 1024u)
 #define WORKER_LOCAL_SLICE_MS 6
 #define WORKER_LOCAL_STEPS_MAX 16
@@ -3503,8 +3504,10 @@ void worker_step(Worker *worker)
     ftp_server_set_external_busy(
         worker->server, worker->transfer_active || xfer_busy(&worker->queue) ||
                             worker->pending.valid);
-    ftp_client_tick(worker->client);
-    ftp_server_tick(worker->server);
+    ftp_client_tick(worker->client,
+                    worker->local_run != NULL ? 0 : WORKER_NET_WAIT_MS);
+    ftp_server_tick(worker->server,
+                    worker->local_run != NULL ? 0 : WORKER_NET_WAIT_MS);
     if (worker->refresh_remote && worker->connected &&
         !ftp_client_busy(worker->client)) {
         worker->refresh_remote = 0;

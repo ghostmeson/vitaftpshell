@@ -143,7 +143,7 @@ static FtpClient *make_client(Capture *cap)
 static void tick(FtpClient *client)
 {
     observe(client);
-    ftp_client_tick(client);
+    ftp_client_tick(client, 0);
     observe(client);
 }
 
@@ -515,6 +515,51 @@ static void test_download(void)
     CHECK(cap.done == 2);
     CHECK(strcmp(ftp_client_last_detail(client), "DESTINATION OPEN FAILED") == 0);
     CHECK(!fake_fs_exists("ux0:data/adir.vftp.part"));
+
+    ftp_client_destroy(client);
+}
+
+/* One tick moves more than one 2 KiB chunk: the pump consumes a per-tick
+ * budget instead of a single receive. */
+static void test_download_budget(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/big.bin", "ux0:data/big.bin", 0,
+                                  6144, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/big.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+
+    static char big[6144];
+    memset(big, 'X', sizeof(big));
+    fake_net_queue_rx(data, big, sizeof(big));
+    fake_net_shutdown(data);
+    tick(client);
+    CHECK(cap.bytes == 6144);
+
+    reply(&server, 226, "Transfer complete.");
+    tick_until_settled(client);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
+
+    static char out[6144];
+    size_t n = fake_fs_read_file("ux0:data/big.bin", out, sizeof(out));
+    CHECK(n == 6144);
+    CHECK(memcmp(out, big, sizeof(big)) == 0);
+    CHECK(!fake_fs_exists("ux0:data/big.bin.vftp.part"));
 
     ftp_client_destroy(client);
 }
@@ -1282,6 +1327,7 @@ int main(void)
     test_mlsd_spaces();
     test_cwd();
     test_download();
+    test_download_budget();
     test_upload();
     test_download_reset();
     test_control_drop();

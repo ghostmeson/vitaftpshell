@@ -12,6 +12,8 @@
 
 #define SERVER_TX_MAX 16384
 #define SERVER_DATA_BUF 8192
+#define SERVER_DATA_BYTES_PER_TICK (32u * 1024u)
+#define SERVER_DATA_SLICE_MS 6
 #define SERVER_DATA_IN_BUF 4096
 #define SERVER_LINE_MAX 2048
 #define SERVER_ACCEPT_MS 5000
@@ -75,6 +77,8 @@ struct FtpServer {
     char data_buf[SERVER_DATA_BUF];
     size_t data_len;
     size_t data_off;
+    unsigned data_budget;
+    uint64_t data_slice_start;
     uint64_t transferred;
     uint64_t total;
     int total_known;
@@ -819,7 +823,7 @@ static void server_finish_data(FtpServer *server, int ok, FtpCause cause,
     }
 }
 
-static void server_pump_send(FtpServer *server)
+static int server_pump_send(FtpServer *server)
 {
     if (server->data_off < server->data_len) {
         size_t sent = 0;
@@ -828,55 +832,61 @@ static void server_pump_send(FtpServer *server)
             server->data_buf + server->data_off,
             server->data_len - server->data_off, &sent);
         if (r == NET_WOULD_BLOCK)
-            return;
+            return 0;
         if (r != NET_OK || sent == 0) {
             server_data_error(server, 426, FTP_CAUSE_NETWORK,
                               "DATA CONNECTION LOST");
-            return;
+            return 0;
         }
         server->data_off += sent;
         server->transferred += sent;
         server->data_deadline = server_now(server) + SERVER_DATA_IDLE_MS;
+        server->data_budget = sent >= server->data_budget
+                                  ? 0
+                                  : server->data_budget - (unsigned)sent;
         server_progress_event(server);
         if (server->data_off < server->data_len)
-            return;
+            return 1;
         server->data_len = 0;
         server->data_off = 0;
     }
 
     if (!server->data_eof) {
         if (!server_fill_data(server))
-            return;
+            return 0;
     }
 
-    if (server->data_eof && server->data_len == 0)
+    if (server->data_eof && server->data_len == 0) {
         server_finish_data(server, 1, FTP_CAUSE_APP, NULL);
+        return 0;
+    }
+    return 1;
 }
 
-static void server_pump_stor(FtpServer *server)
+static int server_pump_stor(FtpServer *server)
 {
     char buf[SERVER_DATA_IN_BUF];
     size_t got = 0;
     NetResult r = server->net->receive(server->net->ctx, server->data, buf,
                                        sizeof(buf), &got);
     if (r == NET_WOULD_BLOCK)
-        return;
+        return 0;
 
     if (r == NET_CLOSED) {
         server_finish_data(server, 1, FTP_CAUSE_APP, NULL);
-        return;
+        return 0;
     }
     if (r != NET_OK) {
         server_data_error(server, 426, FTP_CAUSE_NETWORK,
                           "DATA CONNECTION LOST");
-        return;
+        return 0;
     }
 
     if (got > 0) {
         if (server->temp.file == NULL || !server->temp.open) {
             server_data_error(server, 451, FTP_CAUSE_STORAGE,
                               "STORAGE WRITE FAILED");
-            return;
+            return 0;
         }
         size_t total = 0;
         while (total < got) {
@@ -887,14 +897,19 @@ static void server_pump_stor(FtpServer *server)
             if (wr != FS_OK || written == 0) {
                 server_data_error(server, 451, FTP_CAUSE_STORAGE,
                                   "STORAGE WRITE FAILED");
-                return;
+                return 0;
             }
             total += written;
         }
         server->data_deadline = server_now(server) + SERVER_DATA_IDLE_MS;
         server->transferred += got;
+        server->data_budget = got >= server->data_budget
+                                  ? 0
+                                  : server->data_budget - (unsigned)got;
         server_progress_event(server);
+        return 1;
     }
+    return 0;
 }
 
 static void server_pump_data(FtpServer *server)
@@ -902,10 +917,16 @@ static void server_pump_data(FtpServer *server)
     if (server->data_state != FTP_DATA_ACTIVE || server->data == NULL)
         return;
 
-    if (server->data_kind == SDATA_STOR)
-        server_pump_stor(server);
-    else
-        server_pump_send(server);
+    while (server->data_budget > 0) {
+        if (server_now(server) - server->data_slice_start >=
+            SERVER_DATA_SLICE_MS)
+            break;
+        int moved = server->data_kind == SDATA_STOR
+                        ? server_pump_stor(server)
+                        : server_pump_send(server);
+        if (!moved)
+            break;
+    }
 }
 
 static void server_begin_data(FtpServer *server)
@@ -1895,7 +1916,7 @@ void ftp_server_stop(FtpServer *server)
     server_stop_internal(server, NULL);
 }
 
-void ftp_server_tick(FtpServer *server)
+void ftp_server_tick(FtpServer *server, unsigned wait_ms)
 {
     if (server == NULL || server->state == FTP_SERVER_OFF ||
         server->state == FTP_SERVER_BINDING ||
@@ -1903,6 +1924,8 @@ void ftp_server_tick(FtpServer *server)
         return;
 
     uint64_t now = server_now(server);
+    server->data_budget = SERVER_DATA_BYTES_PER_TICK;
+    server->data_slice_start = now;
 
     if (now >= server->next_link_check) {
         server->next_link_check = now + SERVER_LINK_CHECK_MS;
@@ -1924,7 +1947,7 @@ void ftp_server_tick(FtpServer *server)
         set.items[0].socket = server->control_listener;
         set.items[0].flags = NET_WAIT_READ;
         NetReadySet ready;
-        if (server->net->wait(server->net->ctx, &set, 50, &ready) == NET_OK &&
+        if (server->net->wait(server->net->ctx, &set, wait_ms, &ready) == NET_OK &&
             ready.count > 0)
             server_accept_control(server);
         server_flush(server);
@@ -1960,7 +1983,7 @@ void ftp_server_tick(FtpServer *server)
     }
 
     NetReadySet ready;
-    NetResult wr = server->net->wait(server->net->ctx, &set, 50, &ready);
+    NetResult wr = server->net->wait(server->net->ctx, &set, wait_ms, &ready);
     if (wr != NET_OK) {
         server_stop_internal(server, "WAIT FAILED");
         return;
