@@ -293,6 +293,7 @@ static void drain_events(App *app)
             ui.elapsed_known = event.elapsed_known;
             ui.item_index = event.item_index;
             ui.item_total = event.item_total;
+            ui.file_kept = event.file_kept;
             fmt_copy(ui.text, sizeof(ui.text),
                      event.detail[0] != '\0' ? event.detail : event.path);
             feed(app, &ui);
