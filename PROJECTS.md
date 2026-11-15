@@ -27,7 +27,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 3. Protocol engines | done | Client and server machines against scripted peers |
 | 4. Operations and state | done | Queue, planner, executor, reducer, handoff |
 | 5. Screens and composition | done | Seven surfaces, adapters, runtime, host integration test |
-| 6. Hardware verification | in progress | M1-M13 evidence on b57; the server upload defect is the open row |
+| 6. Hardware verification | in progress | b60 proved FileZilla and app-local transfers; the b63 review remediation is host-tested; M1-M13 transcription is the open row |
 
 ## Current state
 
@@ -43,11 +43,13 @@ target console with evidence. Host tests alone cannot promote it.
   `.c`/`.h` under `src/` plus the twenty-one host suites; `./tools/preview/run.sh`
   renders 40 settled states. `./send.sh <vita-ip>` refuses an artifact whose
   build number does not match `BUILD_NUMBER`.
-- **Next:** Install b57, start the server, attempt one upload, and pull
-  `ux0:data/vitaFTPShell/session.log`. The `FTPC`/`FTPR`/`FTPD` lines name the
-  command that stalls (PASV, STOR, 150, data accept, temp open, or write). M5 is
-  the open row; M13's operations and M10's dock words were seen on b43, but the
-  rest of M1-M13 still needs a b57 pass. The project stays `building`.
+- **Next:** Build the review-remediation VPK, install it, and run the M1-M13
+  matrix. The pass fixes the three confirmed P1s (conflict answer, final-reply
+  deadline, armed-slot release), the foreign ABOR, the owner metadata read, the
+  dropped PASS trace, the local terminal badge, and the CLIENT panel pairing.
+  M5 is the open row; M10's dock words and M13's operations were seen on b43/b60,
+  but the rest of M1-M13 still needs a console pass. The project stays
+  `building`.
 - **Product shape:** two live panes on the Vita — local files and a saved FTP
   site — with a site manager, transfer dock, local file manager, and an
   anonymous FTP server.

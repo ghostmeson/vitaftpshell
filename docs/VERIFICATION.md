@@ -11,6 +11,24 @@ This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
 
+## Review remediation (host pass)
+
+**Date:** 2026-11-15
+**Build:** pending (the review-remediation pass)
+**Scope:** the 29 actionable findings from the full review of `96e527a..8e16e72`,
+minus the deferred `worker.c` split.
+
+Host evidence: the layering guard, the asset guard, and twenty-one suites pass
+(`./tools/test/run.sh`); the preview renders the kept-download state; the
+sanitizer run is extended to every suite (U8). The defect tests are
+`test_local_rename_conflict` (U1), `test_download_final_reply_missing` /
+`_short` / `_loses_queue` and `test_upload_final_reply_missing` (U2),
+`test_close_while_armed` / `test_owner_close_active_one_event` /
+`test_foreign_abor_keeps_pasv` (U3), `test_owner_size_while_upload` (U4),
+`test_reserve` and `test_path` (U5), and `test_client_event_pairs_session` plus
+the badge render cases (U6). No console row is claimed; M1–M13 stay pending until
+the build runs on hardware.
+
 ## b63 warning panel removal
 
 **Date:** 2026-11-15

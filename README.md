@@ -105,7 +105,7 @@ The policy and graphics layers run without VitaSDK:
 
 ```sh
 ./tools/test/run.sh        # layering guard + twenty-one host suites
-./tools/preview/run.sh     # renders 36 settled states to build/preview/
+./tools/preview/run.sh     # renders 40 settled states to build/preview/
 ```
 
 The test runner compiles the real core, screens, and runtime against fake

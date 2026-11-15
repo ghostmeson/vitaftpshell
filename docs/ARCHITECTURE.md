@@ -117,8 +117,9 @@ arena.
 - **Server:** `FtpServer` reports `STATE`, `CLIENT`, `PROGRESS`,
   `TRANSFER_DONE`, and `ERROR`. The machine is `OFF`, `BINDING`, `ON`,
   `SESSION`, `REFUSING`, or `STOPPING`; the data side uses the same five
-  sub-states. It binds control and control+1 on the LAN address, accepts one
-  client, refuses a second with 450, drains the data backlog at every PASV,
+  sub-states. It binds control and control+1 on the LAN address, accepts up to
+  four clients with one data transfer at a time (D86), answers 450 to a fifth,
+  drains the data backlog at every PASV,
   accepts a data peer only when its address equals the control peer's, and
   disarms on every non-data command and every refusal. A transfer holds the one
   slot; a data or mutating command during it answers 450. `STOR` writes a temp

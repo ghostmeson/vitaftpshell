@@ -1934,7 +1934,7 @@ operation.
 
 **Consequences:** D30's high-risk prompt, D31's confirmation, D51's high-risk
 worker gate, and the server's app-data/`tai` write denials are superseded. The
-The SERVER warning was trimmed in b62 and removed entirely by D88;
+SERVER warning was trimmed in b62 and removed entirely by D88;
 `boot_config.txt` remains the one file every role refuses.
 
 ## D88. The SERVER warning panel is removed
@@ -1957,3 +1957,44 @@ and the overwrite behavior remain path and transfer rules.
 `boot_config.txt` denial; those remain in the README, the project docs, and the
 path policy. The layout table has five regions. D87's warning sentence is
 superseded. The user accepted the reduced disclosure.
+
+## D89. A transfer that loses its final reply keeps a complete download
+
+**Date:** 2026-11-15
+**Status:** accepted; host-tested; console pending.
+
+**Context:** A server can send every payload byte and then go silent before the
+final 226. The client had no deadline in that state, so the lane latched until
+the user cancelled, and cancelling deleted a complete file. Removing the data
+deadline was deliberate; the payload is finished, only the reply is missing.
+
+**Decision:** Arm a deadline equal to the command timeout when the data socket
+reaches EOF, for RETR and STOR alike. On expiry, keep a download only when the
+expected size is known and met: commit the temp to its final name and report
+`FINAL REPLY MISSING` with the file kept. A short or unknown-size download is
+removed. An explicit cancel still discards (KTD8). The control session ends so a
+late reply cannot be read by the next command; remaining queued items are named
+in the terminal. An upload that loses the reply ends with nothing kept.
+
+**Consequences:** The dock keeps the operation word in yellow for a kept
+download and drops `NO PARTIAL KEPT`. The terminal records a network cause, so
+D33 counts it as network-interrupted, not app-class.
+
+## D90. A session may read metadata for the path it is transferring
+
+**Date:** 2026-11-15
+**Status:** accepted; host-tested; console pending.
+
+**Context:** The path reservation guard answered 450 for the exact file a
+session was uploading, so a PC's `SIZE`/`MLST` of its own destination looked
+busy. The guard is lane-aware only by lane, and four sessions share one lane.
+
+**Decision:** The server lets the owning session read `SIZE`, `MDTM`, and `MLST`
+for the path of its active or pending transfer. An upload destination answers
+550 because the new file does not exist until the commit; the old entry's size
+is never returned. Every write, delete, rename, listing, and every other session
+stays guarded. The reservation check stays lane-blind by design; per-session
+exclusion is the server's job.
+
+**Consequences:** FileZilla can probe its own upload without a false busy. A
+foreign session still gets 450, and no cross-session read is opened.

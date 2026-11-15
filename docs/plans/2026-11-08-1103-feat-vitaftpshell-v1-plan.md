@@ -973,7 +973,7 @@ amendment.
   - After a cancel that leaves 426 then 226 in the stream, the next command's reply is read as its own, not as the abort's.
   - A 227 advertising a foreign address is refused with a server-class reason.
   - A 450 in reply to RETR leaves no armed data connection, so the next RETR opens a fresh one.
-  - A download whose destination folder is inside `ur0:tai` carries the high-risk flag into the plan before the transfer starts.
+  - A download whose destination folder is inside `ur0:tai` is allowed without a second confirmation (D87); the yellow row mark still classifies it.
   - A recursive download into an existing destination folder merges it and applies the file rule per file; the merge and conflict rules are U16/U17, while U6 proves the single-file transfer and the risk result the planner consumes.
 - **Verification:** The scripted server can drive every state in the machine and every mapped failure to a distinct message.
 
@@ -983,7 +983,7 @@ amendment.
 - **Requirements:** R47-R56, KTD11, KTD14.
 - **Dependencies:** U2, U4.
 - **Files:** `src/core/ftp/{ftp,server}.c` and headers, `tools/test/test_server.c`, `tools/fake/fake_ftp_client.c`.
-- **Approach:** Bind the control socket, then the data socket at control plus one. Accept up to four clients; a fifth accept gets a 450 and is closed. Each session owns its login, cwd, line reader, reply buffer, and rename state; one data transfer owns the shared data socket (D86). Commands parse against the table; every path resolves through `path` and re-checks the denial table after normalization. The data phase follows KTD5: PASV arms one connection, a non-data command or a refusal disarms it, and an abort drains its own reply pair. A `STOR` overwrites an existing destination through the templed write and never asks the console (D41); the warning panel discloses it. `ftp.c` holds the shared line reader, remote path normalizer, and templed write so the client and server cannot drift.
+- **Approach:** Bind the control socket, then the data socket at control plus one. Accept up to four clients; a fifth accept gets a 450 and is closed. Each session owns its login, cwd, line reader, reply buffer, and rename state; one data transfer owns the shared data socket (D86). Commands parse against the table; every path resolves through `path` and re-checks the denial table after normalization. The data phase follows KTD5: PASV arms one connection, a non-data command or a refusal disarms it, and an abort drains its own reply pair. A `STOR` overwrites an existing destination through the templed write and never asks the console (D41); the docs disclose it because the SERVER warning panel is removed (D88). `ftp.c` holds the shared line reader, remote path normalizer, and templed write so the client and server cannot drift.
 - **Test scenarios:**
   - Greeting is 220; `USER anonymous` is 331 and `PASS anything` is 230; any other user is 530.
   - `PASV` returns the LAN address and control port plus one.

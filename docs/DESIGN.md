@@ -132,7 +132,9 @@ allowed outside the hazard band.
   `SKIPPED` in dim; a cancelled batch is `CANCELLED` in white. A partial set
   keeps the operation word in yellow and puts the reason on line three; a set
   where nothing succeeded reads `FAILED` in red, never the operation word in
-  red. A single item omits the count.
+  red. A single item omits the count. A download that lost its final reply
+  after every byte arrived keeps the operation word in yellow and puts
+  `FINAL REPLY MISSING` on line three; it is not `NO PARTIAL KEPT` (D89).
 - **Failed:** `FAILED` red; filename; `n OF m`; the bar stops at the failure
   point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure ends
   with `X TO RETRY`; a control failure leaves the reconnect to the pane.
@@ -147,8 +149,9 @@ allowed outside the hazard band.
 - **Two lanes:** one local job may run beside one network transfer. The
   network lane keeps the word, bar, bytes, and rate; the local lane becomes a
   compact badge on line three, right-aligned, with the rate moved left. Badge
-  colours: cyan running, yellow waiting on a held path, white `CANCELLING`,
-  red failed, dim on a clean terminal. When the local lane is alone it takes the
+  colours: cyan running, yellow waiting on a held path, white `CANCELLING`
+  while the cancel is in flight and `LOCAL CANCELLED` once it lands, red
+  `LOCAL FAILED`, dim `LOCAL DONE` on a clean terminal. When the local lane is alone it takes the
   full dock with its own word, bar, bytes, and terminal, and that terminal
   persists until the next local item. A waiting local lane alone takes the full
   dock with the word `WAITING` in yellow, the subject `LOCAL`, and no bar; a
@@ -537,10 +540,6 @@ five-row viewport; a longer set scrolls (D29). The six states are in
 - **Stop the server during a write:** the client’s write and the partial removed;
   KEEP RUNNING / STOP SERVER.
 - **Discard editor changes:** the site, the lost changes; KEEP EDITING / DISCARD.
-- **High-risk write (retired):** the `WRITE INSIDE <PATH>` layout remains in the
-  renderer for history, but no user action opens it after D87. `boot_config.txt`
-  never reaches it; it is denied outright.
-
 ## TEXT ENTRY
 
 The system IME is a Vita surface. The app supplies a contract and never draws the
@@ -589,7 +588,7 @@ look and how focus moves.
 | WORKSPACE | Two live panes, transfer dock, header | local only, connected, disconnected, transferring, empty folder, error |
 | SITES | Saved site list | empty, populated, selected, deleting |
 | SITE EDITOR | Name, host, port, user, password, anonymous | new, edit, invalid field, password warning |
-| SERVER | Start/stop, port, IP, client count, warning | OFF, starting, ON, client connected, stop, error |
+| SERVER | Start/stop, port, IP, client count, access | OFF, starting, ON, client connected, stop, error |
 | ACTIONS | Context actions for the active pane | local, remote, multi-select, read-only |
 | CONFIRM | Destructive confirmation or batch conflict | delete, overwrite all, skip existing, cancel |
 | TEXT INPUT | System IME for paths, names, and fields | open, cancelled, unavailable |
