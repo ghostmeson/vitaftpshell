@@ -49,9 +49,29 @@ struct App {
 
     HandoffConfirm confirm;
     UiConfirmItem confirm_items[HANDOFF_CONFIRM_ITEMS];
+
+    /* One heap-owned command buffer, so the UI thread's dispatch holds no
+     * large frame. The two synthetic events are deferred instead of
+     * re-entering the dispatch. */
+    UiCommand commands[APP_COMMAND_MAX];
+    UiStateEvent pending_event;
+    int pending_event_valid;
 };
 
 static void feed(App *app, const UiStateEvent *event);
+
+/* A synthetic event raised from inside the dispatch is applied on the next
+ * frame; feeding it here would put a second dispatch frame on the stack. */
+static void defer_event(App *app, UiStateEventKind kind, const char *text)
+{
+    memset(&app->pending_event, 0, sizeof(app->pending_event));
+    app->pending_event.kind = kind;
+    app->pending_event.pane = -1;
+    if (text != NULL)
+        snprintf(app->pending_event.text, sizeof(app->pending_event.text),
+                 "%s", text);
+    app->pending_event_valid = 1;
+}
 
 static void apply_listing(App *app, UiPane pane)
 {
@@ -166,10 +186,7 @@ static void open_ime(App *app, const UiCommand *command)
     push_log(app, HANDOFF_LOG_IME, ui_screen_name(app->state.screen), NULL,
              "begin", NULL, "unavailable", 0, request.password, code,
              code != 0);
-    UiStateEvent event;
-    memset(&event, 0, sizeof(event));
-    event.kind = UI_EVT_IME_UNAVAILABLE;
-    feed(app, &event);
+    defer_event(app, UI_EVT_IME_UNAVAILABLE, NULL);
 }
 
 static void app_command(App *app, const UiCommand *command)
@@ -180,23 +197,17 @@ static void app_command(App *app, const UiCommand *command)
         open_ime(app, command);
         return;
     }
-    if (!handoff_command_push(&app->handoff, command)) {
-        UiStateEvent event;
-        memset(&event, 0, sizeof(event));
-        event.kind = UI_EVT_ERROR;
-        event.pane = -1;
-        snprintf(event.text, sizeof(event.text), "COMMAND QUEUE FULL");
-        feed(app, &event);
-    }
+    if (!handoff_command_push(&app->handoff, command))
+        defer_event(app, UI_EVT_ERROR, "COMMAND QUEUE FULL");
 }
 
 static void feed(App *app, const UiStateEvent *event)
 {
-    UiCommand commands[APP_COMMAND_MAX];
-    int count = ui_state_handle(&app->state, event, commands, APP_COMMAND_MAX);
+    int count = ui_state_handle(&app->state, event, app->commands,
+                                APP_COMMAND_MAX);
     for (int i = 0; i < count; ++i) {
-        log_command(app, &commands[i]);
-        app_command(app, &commands[i]);
+        log_command(app, &app->commands[i]);
+        app_command(app, &app->commands[i]);
     }
 }
 
@@ -604,6 +615,10 @@ int app_tick(App *app)
     if (!app->worker_thread)
         worker_step(app->worker);
 
+    if (app->pending_event_valid) {
+        app->pending_event_valid = 0;
+        feed(app, &app->pending_event);
+    }
     drain_events(app);
     drain_ime(app);
     poll_input(app);
