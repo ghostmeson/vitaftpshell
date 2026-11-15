@@ -2192,6 +2192,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
         set_transfer_dock(lane, event, UI_DOCK_DONE);
+        lane->file_kept = 0;
         lane->rate = event->rate;
         lane->rate_known = event->rate_known;
         lane->elapsed_ms = event->elapsed_ms;
@@ -2218,6 +2219,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
         set_transfer_dock(lane, event, UI_DOCK_FAILED);
+        lane->file_kept = event->file_kept;
         lane_terminal(state, lane);
         break;
     }

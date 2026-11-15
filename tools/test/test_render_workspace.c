@@ -275,6 +275,17 @@ static void test_dock_states(void)
                               font_width("NO PARTIAL KEPT", PX_MICRO),
                               483.0f, C_DIM));
 
+    /* A complete download whose final reply never arrived keeps the file, so
+     * the dock keeps the operation word in yellow and drops the no-partial
+     * claim (D89). */
+    s_state.dock.file_kept = 1;
+    snprintf(s_state.dock.message, sizeof(s_state.dock.message),
+             "FINAL REPLY MISSING");
+    render();
+    CHECK(trace_text_at_color("DOWNLOADED", 32.0f, 450.0f, C_YELLOW));
+    CHECK(trace_has_text("FINAL REPLY MISSING"));
+    CHECK(!trace_has_text("NO PARTIAL KEPT"));
+
     /* Both lanes: the network lane keeps the full dock and the local lane is a
      * cyan badge on line three. */
     memset(&s_state.dock, 0, sizeof(s_state.dock));

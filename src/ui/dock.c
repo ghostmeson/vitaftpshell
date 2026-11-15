@@ -356,13 +356,19 @@ static void failed_dock(const UiDock *d, DockPanel *p)
     static char line[192];
     static char index[32];
 
-    p->word = "FAILED";
-    p->word_color = C_RED;
+    /* A download can lose its final reply after every byte arrived. The file
+     * stays, so the dock keeps the operation word in yellow and puts the
+     * reason on line three instead of claiming nothing was kept (D89). */
+    int kept = d->file_kept &&
+               (d->direction == XFER_DIR_DOWNLOAD ||
+                d->direction == XFER_DIR_SERVER_DOWNLOAD);
+    p->word = kept ? direction_done_word(d->direction) : "FAILED";
+    p->word_color = kept ? C_YELLOW : C_RED;
     p->subject = d->name;
     p->progress_valid = d->total_known && d->total > 0;
     p->progress = p->progress_valid ? (float)((double)d->done / (double)d->total)
                                     : 0.0f;
-    p->bar_color = C_DIM;
+    p->bar_color = kept ? C_YELLOW : C_DIM;
 
     if (d->item_index > 0 && d->item_total > 0) {
         snprintf(index, sizeof(index), "%d OF %d", d->item_index,
@@ -375,8 +381,10 @@ static void failed_dock(const UiDock *d, DockPanel *p)
              d->message[0] != '\0' ? d->message : "TRANSFER STOPPED");
     p->left = line;
     p->left_color = C_WHITE;
-    p->right_text = "NO PARTIAL KEPT";
-    p->right_text_color = C_DIM;
+    if (!kept) {
+        p->right_text = "NO PARTIAL KEPT";
+        p->right_text_color = C_DIM;
+    }
 }
 
 static void badge_fill(const UiDock *d, char *out, size_t cap)

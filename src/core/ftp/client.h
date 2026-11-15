@@ -93,6 +93,9 @@ typedef struct {
     int unsupported;
     uint64_t file_size;
     int file_size_known;
+    /* The transfer ended without its final reply but the file is complete and
+     * stays at its destination. Only a download can set this. */
+    int file_kept;
 } FtpClientEvent;
 
 typedef void (*FtpClientEventFn)(void *ctx, const FtpClientEvent *event);

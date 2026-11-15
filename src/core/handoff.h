@@ -73,6 +73,8 @@ typedef struct {
     int batch_cancelled;
     uint64_t rate;
     int rate_known;
+    /* A failed download whose complete file stays at its destination. */
+    int file_kept;
     uint64_t elapsed_ms;
     int elapsed_known;
     uint64_t free_bytes;

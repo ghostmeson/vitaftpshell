@@ -110,6 +110,7 @@ typedef struct {
     int elapsed_known;
     uint64_t rate;
     int rate_known;
+    int file_kept;
     int skipped;
     int failed;
     int cancelled;
@@ -358,6 +359,7 @@ typedef struct {
     int elapsed_known;
     uint64_t rate;
     int rate_known;
+    int file_kept;
     int direction;
     int direction_known;
     unsigned prompt_id;

@@ -288,6 +288,21 @@ static void workspace_states(void)
 
     base(&state);
     state.active_pane = UI_PANE_REMOTE;
+    state.dock.state = UI_DOCK_FAILED;
+    state.dock.direction = XFER_DIR_DOWNLOAD;
+    state.dock.file_kept = 1;
+    snprintf(state.dock.name, sizeof(state.dock.name), "EMACS-29.4.TAR.XZ");
+    snprintf(state.dock.message, sizeof(state.dock.message),
+             "FINAL REPLY MISSING");
+    state.dock.done = 124465971;
+    state.dock.total = 124465971;
+    state.dock.total_known = 1;
+    state.dock.item_index = 1;
+    state.dock.item_total = 1;
+    save_state("workspace-kept", &state);
+
+    base(&state);
+    state.active_pane = UI_PANE_REMOTE;
     state.dock.active = 1;
     state.dock.state = UI_DOCK_ACTIVE;
     state.dock.direction = XFER_DIR_DOWNLOAD;

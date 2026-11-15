@@ -50,6 +50,7 @@ typedef struct {
     char last_stor[256];
     char cwd[64];
     int hold_data;
+    int hold_final;
     int listings;
     int retrs;
     int aborts;
@@ -188,7 +189,8 @@ static void peer_serve(Peer *peer)
                 fake_net_queue_rx(peer->data, peer->payload,
                                   strlen(peer->payload));
                 fake_net_shutdown(peer->data);
-                fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
+                if (!peer->hold_final)
+                    fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
                 peer->data = NULL;
             }
         } else if (strcmp(line, "ABOR") == 0) {
@@ -1529,6 +1531,59 @@ static void test_download_conflict(void)
     app_destroy(app);
 }
 
+/* A download that loses the final reply ends the lane; the remaining queued
+ * item must be named in the one terminal instead of vanishing with the session. */
+static void test_download_final_reply_loses_queue(void)
+{
+    App *app = make_app_ex("ux0:data/SEED.TXT", "SEED", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    static const char *listing =
+        "type=file;size=5;modify=20240101000000; A.BIN\r\n"
+        "type=file;size=5;modify=20240101000000; B.BIN\r\n";
+    Peer peer;
+    connect_site_listing(app, &peer, listing, "HELLO");
+    peer.hold_final = 1;
+    select_remote(app);
+
+    press(app, INPUT_BIT(INPUT_DOWN)); /* A.BIN */
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_DOWN)); /* B.BIN */
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_DOWNLOAD);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.retrs > 0 && app_state(app)->dock.state == UI_DOCK_ACTIVE)
+            break;
+    }
+    CHECK(peer.retrs == 1);
+
+    /* Let the client read the data EOF and enter DRAINING before the clock
+     * jumps; otherwise the stage deadline wins the race. */
+    pump(app, &peer, 10);
+    fake_clock_advance(10001);
+    for (int i = 0; i < 60; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->dock.state == UI_DOCK_FAILED)
+            break;
+    }
+
+    CHECK(peer.retrs == 1);
+    CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
+    CHECK(app_state(app)->dock.file_kept == 1);
+    CHECK(strstr(app_state(app)->dock.message, "FINAL REPLY MISSING") != NULL);
+    CHECK(content_is("ux0:data/B.BIN", "HELLO"));
+    CHECK(!fake_fs_exists("ux0:data/A.BIN"));
+
+    app_destroy(app);
+}
+
 static void test_listing_cap(void)
 {
     App *app = make_app();
@@ -1867,6 +1922,7 @@ int main(void)
     test_upload_preflight_directory();
     test_upload_preflight_failure();
     test_download_conflict();
+    test_download_final_reply_loses_queue();
     test_listing_cap();
     test_local_file_actions();
     test_local_new_folder_without_selection();

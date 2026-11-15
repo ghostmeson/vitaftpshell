@@ -673,14 +673,17 @@ static const char *fs_result_text(FsResult result)
 }
 
 static void emit_transfer_done(Worker *worker, XferDirection direction,
-                               const char *name, int ok, uint64_t bytes,
-                               uint64_t total, int total_known,
+                               const char *name, int ok, int file_kept,
+                               uint64_t bytes, uint64_t total, int total_known,
                                OpCause cause, OpStage stage, uint64_t start_ms,
                                const char *detail)
 {
     HandoffEvent event;
     event_init(&event, HANDOFF_EVT_TRANSFER_DONE);
     event.ok = ok;
+    event.file_kept = file_kept;
+    event.direction = direction;
+    event.direction_known = 1;
     event.bytes = bytes;
     event.total = total;
     event.total_known = total_known;
@@ -702,7 +705,6 @@ static void emit_transfer_done(Worker *worker, XferDirection direction,
     if (detail != NULL)
         fmt_copy(event.detail, sizeof(event.detail), detail);
     emit(worker, &event);
-    (void)direction;
 }
 
 /* --- paths ------------------------------------------------------------- */
@@ -2346,7 +2348,7 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
                      OP_STAGE_TRANSFER, &next);
         reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
         worker->batch_done++;
-        emit_transfer_done(worker, item->direction, item->source.text, 0, 0,
+        emit_transfer_done(worker, item->direction, item->source.text, 0, 0, 0,
                            item->total, item->total_known, cause,
                            OP_STAGE_TRANSFER, 0, detail);
         emit_error(worker,
@@ -2457,7 +2459,7 @@ static void pump_queue(Worker *worker)
                 xfer_release(&worker->queue, XFER_ITEM_FAILED,
                              OP_CAUSE_STORAGE, OP_STAGE_TRANSFER, NULL);
                 worker->batch_done++;
-                emit_transfer_done(worker, item.direction, item.source.text, 0,
+                emit_transfer_done(worker, item.direction, item.source.text, 0, 0,
                                    0, item.total, item.total_known,
                                    OP_CAUSE_STORAGE, OP_STAGE_TRANSFER, 0,
                                    "DESTINATION IS A FOLDER");
@@ -2704,7 +2706,7 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
         cancelled_event.direction_known = 1;
         emit(worker, &cancelled_event);
     } else if (ok) {
-        emit_transfer_done(worker, finished.direction, finished.source.text, 1,
+        emit_transfer_done(worker, finished.direction, finished.source.text, 1, 0,
                            event->bytes, event->total, event->total_known,
                            OP_CAUSE_APP, OP_STAGE_TRANSFER,
                            worker->transfer_start_ms, NULL);
@@ -2726,7 +2728,7 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
         }
     } else {
         emit_transfer_done(worker, finished.direction, finished.source.text, 0,
-                           event->bytes, event->total, event->total_known,
+                           event->file_kept, event->bytes, event->total, event->total_known,
                            event->cause, event->stage,
                            worker->transfer_start_ms, event->detail);
         emit_error(worker,
@@ -2739,6 +2741,15 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
                   worker->connecting_valid ? worker->connecting_site.host : NULL,
                   finished.source.text, op_stage_name(event->stage),
                   op_cause_name(event->cause), event->bytes, event->total);
+        if (event->file_kept && finished.direction == XFER_DIR_DOWNLOAD) {
+            if (strcmp(worker->local_path, "*") == 0) {
+                worker_list_root(worker);
+            } else {
+                Path parent;
+                if (path_parent(finished.destination.text, &parent) == PATH_OK)
+                    worker_list_local(worker, parent.text);
+            }
+        }
     }
 
     batch_finish(worker);
@@ -2817,11 +2828,25 @@ static void client_event(void *ctx, const FtpClientEvent *event)
                              event->cause, event->stage, NULL);
                 reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
                 worker->transfer_active = 0;
+                /* The queue cannot survive the session, so the one terminal
+                 * names what else died with it instead of clearing silently. */
+                char detail[128];
+                int remaining = worker->batch_total - worker->batch_done - 1;
+                const char *text = event->detail != NULL ? event->detail
+                                                         : "CONNECTION LOST";
+                if (remaining > 0) {
+                    snprintf(detail, sizeof(detail),
+                             remaining == 1
+                                 ? "%s - 1 ITEM CANCELLED"
+                                 : "%s - %d ITEMS CANCELLED",
+                             text, remaining);
+                    text = detail;
+                }
                 emit_transfer_done(worker, item.direction, item.source.text, 0,
-                                   event->bytes, event->total,
+                                   event->file_kept, event->bytes, event->total,
                                    event->total_known, event->cause,
                                    event->stage, worker->transfer_start_ms,
-                                   event->detail);
+                                   text);
             }
             reset_remote_session(worker);
         }
@@ -2968,7 +2993,7 @@ static void server_event(void *ctx, const FtpServerEvent *event)
     case FTP_SERVER_EVENT_TRANSFER_DONE:
         worker->server_transfer_active = 0;
         emit_transfer_done(worker, worker->server_direction,
-                           worker->server_name, event->ok, event->bytes,
+                           worker->server_name, event->ok, 0, event->bytes,
                            event->total, event->total_known, event->cause,
                            event->stage, worker->server_transfer_start_ms,
                            event->detail);
