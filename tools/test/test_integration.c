@@ -446,6 +446,47 @@ static void test_two_lanes_progress(void)
     app_destroy(app);
 }
 
+/* Two cancel presses before the worker reads must both land: the network
+ * cancel aborts the download and the local cancel is not an overwrite. */
+static void test_two_cancel_presses(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    Peer peer;
+    connect_site(app, &peer);
+    select_remote(app);
+
+    peer.hold_data = 1;
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.retrs > 0 && app_state(app)->dock.active)
+            break;
+    }
+    CHECK(peer.retrs > 0);
+    CHECK(app_state(app)->dock.active == 1);
+
+    UiCommand cancel;
+    memset(&cancel, 0, sizeof(cancel));
+    cancel.type = UI_CMD_CANCEL_NETWORK;
+    CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
+    memset(&cancel, 0, sizeof(cancel));
+    cancel.type = UI_CMD_CANCEL_LOCAL;
+    CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
+
+    pump(app, &peer, 40);
+    CHECK(peer.aborts > 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+
+    app_destroy(app);
+}
+
 /* D73: a colliding paste answered WAIT resumes when the blocker releases and
  * re-applies the existing-destination rule. */
 static void test_wait_resume_rechecks(void)
@@ -2059,6 +2100,7 @@ int main(void)
 {
     test_download_destination_failure();
     test_two_lanes_progress();
+    test_two_cancel_presses();
     test_wait_resume_rechecks();
     test_connect_list_download();
     test_app_listing_slot_held();

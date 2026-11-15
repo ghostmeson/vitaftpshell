@@ -123,6 +123,46 @@ static void test_latched_server(void)
     CHECK(handoff_server_state(&s_handoff, &run, &clients) == 1);
 }
 
+/* A network and a local cancel queued before the worker reads both survive,
+ * and the single-lane answer answers for whichever lane is running. */
+static void test_cancel_slots(void)
+{
+    handoff_init(&s_handoff);
+    UiCommand net = command(UI_CMD_CANCEL_NETWORK, 0);
+    UiCommand local = command(UI_CMD_CANCEL_LOCAL, 0);
+    CHECK(handoff_command_push(&s_handoff, &net) == 1);
+    CHECK(handoff_command_push(&s_handoff, &local) == 1);
+    CHECK(handoff_cancel_type(&s_handoff, HANDOFF_CANCEL_NETWORK) ==
+          UI_CMD_CANCEL_NETWORK);
+    CHECK(handoff_cancel_type(&s_handoff, HANDOFF_CANCEL_LOCAL) ==
+          UI_CMD_CANCEL_LOCAL);
+
+    UiCommand out;
+    CHECK(handoff_command_pop(&s_handoff, &out) == 1);
+    CHECK(out.type == UI_CMD_CANCEL_NETWORK);
+    CHECK(handoff_command_pop(&s_handoff, &out) == 1);
+    CHECK(out.type == UI_CMD_CANCEL_LOCAL);
+    CHECK(handoff_command_pop(&s_handoff, &out) == 0);
+
+    UiCommand all = command(UI_CMD_CANCEL_TRANSFER, 0);
+    CHECK(handoff_command_push(&s_handoff, &all) == 1);
+    CHECK(handoff_cancel_type(&s_handoff, HANDOFF_CANCEL_NETWORK) ==
+          UI_CMD_CANCEL_TRANSFER);
+    CHECK(handoff_cancel_type(&s_handoff, HANDOFF_CANCEL_LOCAL) ==
+          UI_CMD_CANCEL_TRANSFER);
+    CHECK(handoff_command_pop(&s_handoff, &out) == 1);
+    CHECK(out.type == UI_CMD_CANCEL_TRANSFER);
+    CHECK(handoff_command_pop(&s_handoff, &out) == 0);
+
+    /* The local executor's peek must not take a single-lane answer while the
+     * network lane has its own pending cancel. */
+    CHECK(handoff_command_push(&s_handoff, &net) == 1);
+    CHECK(handoff_command_push(&s_handoff, &all) == 1);
+    CHECK(handoff_cancel_consume(&s_handoff, HANDOFF_CANCEL_LOCAL) == 0);
+    CHECK(handoff_cancel_consume(&s_handoff, HANDOFF_CANCEL_NETWORK) == 1);
+    CHECK(handoff_cancel_consume(&s_handoff, HANDOFF_CANCEL_LOCAL) == 1);
+}
+
 static void test_listing_generations(void)
 {
     handoff_init(&s_handoff);
@@ -508,6 +548,7 @@ int main(void)
     test_event_progress();
     test_latched_server();
     test_listing_generations();
+    test_cancel_slots();
     test_listing_adopt();
     test_log_ring();
     test_bulk();

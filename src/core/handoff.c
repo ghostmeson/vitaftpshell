@@ -34,12 +34,20 @@ int handoff_command_push(Handoff *handoff, const UiCommand *command)
         STORE_REL(&handoff->critical_stop_valid, 1);
         return 1;
     }
-    if (command->type == UI_CMD_CANCEL_TRANSFER ||
-        command->type == UI_CMD_CANCEL_NETWORK ||
+    if (command->type == UI_CMD_CANCEL_TRANSFER) {
+        handoff->critical_cancel_any.command = *command;
+        handoff->critical_cancel_any.seq = ++handoff->cmd_seq;
+        STORE_REL(&handoff->critical_cancel_any_valid, 1);
+        return 1;
+    }
+    if (command->type == UI_CMD_CANCEL_NETWORK ||
         command->type == UI_CMD_CANCEL_LOCAL) {
-        handoff->critical_cancel.command = *command;
-        handoff->critical_cancel.seq = ++handoff->cmd_seq;
-        STORE_REL(&handoff->critical_cancel_valid, 1);
+        int lane = command->type == UI_CMD_CANCEL_NETWORK
+                       ? HANDOFF_CANCEL_NETWORK
+                       : HANDOFF_CANCEL_LOCAL;
+        handoff->critical_cancel_lane[lane].command = *command;
+        handoff->critical_cancel_lane[lane].seq = ++handoff->cmd_seq;
+        STORE_REL(&handoff->critical_cancel_lane_valid[lane], 1);
         return 1;
     }
 
@@ -57,22 +65,70 @@ int handoff_command_push(Handoff *handoff, const UiCommand *command)
     return 1;
 }
 
-int handoff_cancel_type(const Handoff *handoff)
+int handoff_cancel_type(const Handoff *handoff, HandoffCancelLane lane)
 {
-    if (handoff == NULL)
+    if (handoff == NULL || lane < HANDOFF_CANCEL_NETWORK ||
+        lane > HANDOFF_CANCEL_LOCAL)
         return UI_CMD_NONE;
-    if (!LOAD_ACQ(&handoff->critical_cancel_valid))
-        return UI_CMD_NONE;
-    return (int)handoff->critical_cancel.command.type;
+    if (LOAD_ACQ(&handoff->critical_cancel_lane_valid[lane]))
+        return (int)handoff->critical_cancel_lane[lane].command.type;
+    if (LOAD_ACQ(&handoff->critical_cancel_any_valid))
+        return (int)handoff->critical_cancel_any.command.type;
+    return UI_CMD_NONE;
 }
 
-int handoff_cancel_consume(Handoff *handoff)
+int handoff_cancel_consume(Handoff *handoff, HandoffCancelLane lane)
 {
-    if (handoff == NULL)
+    if (handoff == NULL || lane < HANDOFF_CANCEL_NETWORK ||
+        lane > HANDOFF_CANCEL_LOCAL)
         return 0;
-    if (!LOAD_ACQ(&handoff->critical_cancel_valid))
+    if (LOAD_ACQ(&handoff->critical_cancel_lane_valid[lane])) {
+        STORE_REL(&handoff->critical_cancel_lane_valid[lane], 0);
+        return 1;
+    }
+    /* Never take a single-lane answer while the other lane has its own
+     * pending cancel: that answer is for the other lane. */
+    HandoffCancelLane other = lane == HANDOFF_CANCEL_NETWORK
+                                  ? HANDOFF_CANCEL_LOCAL
+                                  : HANDOFF_CANCEL_NETWORK;
+    if (LOAD_ACQ(&handoff->critical_cancel_any_valid) &&
+        !LOAD_ACQ(&handoff->critical_cancel_lane_valid[other])) {
+        STORE_REL(&handoff->critical_cancel_any_valid, 0);
+        return 1;
+    }
+    return 0;
+}
+
+/* The oldest pending cancel, so two lane answers keep their press order. */
+static int take_oldest_cancel(Handoff *handoff, UiCommand *out)
+{
+    int chosen = -1;
+    uint32_t oldest = UINT32_MAX;
+
+    if (LOAD_ACQ(&handoff->critical_cancel_any_valid) &&
+        handoff->critical_cancel_any.seq < oldest) {
+        oldest = handoff->critical_cancel_any.seq;
+        chosen = 2;
+    }
+    for (int lane = 0; lane < 2; ++lane) {
+        if (LOAD_ACQ(&handoff->critical_cancel_lane_valid[lane]) &&
+            handoff->critical_cancel_lane[lane].seq < oldest) {
+            oldest = handoff->critical_cancel_lane[lane].seq;
+            chosen = lane;
+        }
+    }
+    if (chosen < 0)
         return 0;
-    STORE_REL(&handoff->critical_cancel_valid, 0);
+
+    if (chosen == 2) {
+        if (out != NULL)
+            *out = handoff->critical_cancel_any.command;
+        STORE_REL(&handoff->critical_cancel_any_valid, 0);
+    } else {
+        if (out != NULL)
+            *out = handoff->critical_cancel_lane[chosen].command;
+        STORE_REL(&handoff->critical_cancel_lane_valid[chosen], 0);
+    }
     return 1;
 }
 
@@ -87,12 +143,8 @@ int handoff_command_pop(Handoff *handoff, UiCommand *out)
         STORE_REL(&handoff->critical_stop_valid, 0);
         return 1;
     }
-    if (LOAD_ACQ(&handoff->critical_cancel_valid)) {
-        if (out != NULL)
-            *out = handoff->critical_cancel.command;
-        STORE_REL(&handoff->critical_cancel_valid, 0);
+    if (take_oldest_cancel(handoff, out))
         return 1;
-    }
 
     uint32_t head = LOAD_ACQ(&handoff->cmd_head);
     uint32_t tail = LOAD_ACQ(&handoff->cmd_tail);
