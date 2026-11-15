@@ -412,7 +412,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - The system IME is available for text entry. If it cannot load, the app reports the failure and keeps the previous value.
 - `ux0:`, `ur0:`, and `uma0:` may not all be present. An absent volume is normal, not an error.
 - The Vita socket path and the remote volume roots have run on hardware in b37 (operator report, 2026-11-13); b38 and b39 are built but not hardware-tested, and the row-level connect, PASV, transfer, and timeout results still need transcription in `VERIFICATION.md`.
-- The correction pass is planned from the b39 code; b40 and b41 are built after this plan and need their own console runs (M9-M12).
+- The correction pass is planned from the b39 code. b40, b41, b43, b49, and b55 followed; b43 is the last build with a console run (M9-M13 partly), and b49/b55 still need theirs.
 - A project status of `verified` requires hardware evidence; host tests alone cannot promote it.
 
 ### Outstanding Questions
@@ -738,7 +738,7 @@ Every command above that mutates a path, and every data command, answers 450 whe
 
 ### Sequencing
 
-Policy first, adapters last, hardware last. Units 1-9, 15, 16, and 17 need no Vita beyond the compiler; units 10-11 draw; units 12-13 adapt and compose; unit 14 is the only one that claims hardware behavior. The correction pass (units 18-28) stays on the host until b40 and b41 are built; each build gets its own preview approval and console run.
+Policy first, adapters last, hardware last. Units 1-9, 15, 16, and 17 need no Vita beyond the compiler; units 10-11 draw; units 12-13 adapt and compose; unit 14 is the only one that claims hardware behavior. The correction pass (units 18-28) stays on the host; each build gets its own preview approval and console run.
 
 ### Phased Delivery
 
@@ -761,7 +761,16 @@ runs U10 and U11 against the host renderer, U12 in parallel since it depends on 
 engines and not the screens, and U13 last. Phase 6 opens by installing U13's build
 and confirming it launches; that is M1's precondition, not a separate gate.
 
-**Correction pass (2026-11-14).** b40 delivers U18-U24 and U28's b40 rows; b41 delivers U25-U27 and U28's b41 rows. b40's gate is the full host suite green plus approved previews for the cursor slab, the glow, red failures, the dock verbs, the batch terminal, and local cancel. b41's gate is the parallel, collision, wait, and path-scoped 450 scenarios green plus their previews. Both gates add a console run. The project stays `building` until M1-M12 pass.
+**Correction pass (2026-11-14).** b40 delivers U18-U24 and U28's b40 rows; b41 delivers U25-U27 and U28's b41 rows. b40's gate is the full host suite green plus approved previews for the cursor slab, the glow, red failures, the dock verbs, the batch terminal, and local cancel. b41's gate is the parallel, collision, wait, and path-scoped 450 scenarios green plus their previews. Both gates add a console run. The project stays `building` until M1-M13 pass.
+
+**Review remediation (2026-11-15).** A full review of the b49 diff found 29
+findings and five lane-flow gaps. The remediation is a separate plan,
+`docs/plans/2026-11-15-1213-fix-b50-review-remediation-plan.md`; its U1-U12
+landed in b55. It fixes the transfer terminal, the local-action guard U26 left
+in place, prompt identity, the UI stack budget, the pump budget, the server
+session bounds, and the sidecar owner, and it adds the threaded host test. The
+b55 rows in `docs/VERIFICATION.md` are the evidence for those scenarios. The
+matrix remains M1-M13.
 
 ### Risks and accepted costs
 
@@ -781,7 +790,7 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 | Two lanes touch one path | Canonical reservations cover the path and its sidecars, the executor re-checks at commit, and the server answers 450 and disarms. |
 | The collision prompt interrupts a non-destructive action | R67 permits it; the prompt names the blocker and offers wait, skip, or cancel. |
 | The palette collapses selection and failure | Cyan, yellow, and red have separate jobs, and the render tests assert each. |
-| b40 ships before the parallel lane | A local write during a transfer is refused with `TRANSFER IN PROGRESS`, and a transfer start during a local job is refused with `LOCAL JOB IN PROGRESS`; b40 also pauses the client, the queue, and the server listener for the job. b41 removes both refusals. The interim is recorded in `FIXES.md`. |
+| b40 ships before the parallel lane | A local write during a transfer is refused with `TRANSFER IN PROGRESS`, and a transfer start during a local job is refused with `LOCAL JOB IN PROGRESS`; b40 also pauses the client, the queue, and the server listener for the job. b41 removes the transfer-start refusal; the local-action refusal stayed until b55, which removed it under D82. The interim is recorded in `FIXES.md`. |
 
 ### Deferred to Implementation
 
@@ -1219,7 +1228,7 @@ The units above landed with these recorded additions and shapes:
 - **Requirements:** R35, R40, R42, KTD19.
 - **Dependencies:** U19.
 - **Files:** `src/core/fsop_run.c`, `src/core/fsop_run.h`, `src/core/uistate.c`, `src/core/uistate.h`, `src/core/handoff.c`, `src/core/handoff.h`, `src/app/worker.c`, `tools/fake/fake_fs.c`, `tools/fake/fake_fs.h`, `tools/test/test_fsop_run.c`, `tools/test/test_integration.c`.
-- **Approach:** On the CANCEL choice of the cancel-transfer confirm, emit `UI_CMD_CANCEL_TRANSFER` on the dedicated slot. The worker passes a cancel context to the executor that peeks a dedicated request without consuming the critical slot, so a server stop is never swallowed. The callback aborts the temp and the executor rolls back. Add a local branch to `cancel_current_transfer` and make the confirm warning name the lane and the effect. Keep the cancel latched until the job ends, consume it exactly once, and record that it was observed so the same latched command cannot reach the next job. In b40, a transfer start while a local job runs is refused with `LOCAL JOB IN PROGRESS`; the build records that the client ticks, the queue, and the server listener pause for the job, and b41 removes both refusals.
+- **Approach:** On the CANCEL choice of the cancel-transfer confirm, emit `UI_CMD_CANCEL_TRANSFER` on the dedicated slot. The worker passes a cancel context to the executor that peeks a dedicated request without consuming the critical slot, so a server stop is never swallowed. The callback aborts the temp and the executor rolls back. Add a local branch to `cancel_current_transfer` and make the confirm warning name the lane and the effect. Keep the cancel latched until the job ends, consume it exactly once, and record that it was observed so the same latched command cannot reach the next job. In b40, a transfer start while a local job runs is refused with `LOCAL JOB IN PROGRESS`; the build records that the client ticks, the queue, and the server listener pause for the job; b41 removes the transfer-start refusal and b55 removes the local-action refusal (D82).
 - **Patterns to follow:** The executor already checks its callback at every chunk and every step; the critical cancel slot already survives a full command ring.
 - **Test scenarios:**
   - Cancel mid-copy removes the temp, leaves the destination byte-identical, and leaves the source intact.
@@ -1365,7 +1374,7 @@ The units above landed with these recorded additions and shapes:
 - **Patterns to follow:** The existing decision numbering and the fix-row format.
 - **Test scenarios:**
   - The documentation link and code-fence check reports no issues.
-  - No doc claims `verified` without M1-M12 evidence.
+  - No doc claims `verified` without M1-M13 evidence.
   - The design sheet and the rendered preview agree on the slab, the bloom, the dock words, and red.
   - `AGENTS.md` and `PROJECT.md` no longer state that every operation shares one slot.
 - **Verification:** The documentation check passes; the tracker names the current build and the single next action.
@@ -1400,11 +1409,11 @@ The units above landed with these recorded additions and shapes:
 | Preview | `./tools/preview/run.sh` | Every settled state renders on the host, including the new b40 and b41 states |
 | Build | `./build.sh` | One `vitaftpshell-v<version>-b<build>.vpk`, unstripped ELF kept |
 | Docs | the documentation link and code-fence check in `AGENTS.md` | No broken link, no odd fence |
-| Hardware | M1-M12 in `docs/VERIFICATION.md` | The product works on the console |
+| Hardware | M1-M13 in `docs/VERIFICATION.md` | The product works on the console |
 
-b40 adds the cursor, palette, dock, batch, and cancel suites; b41 adds the reservation and interleaving suites. `tools/test/run.sh` discovers them, so no CMake change is needed. The preview must render the new states before each build is flashed. Each hardware row records the build it passed on, and the final build re-runs M1-M12 because b41 changes the client, server, executor, and dock paths.
+b40 adds the cursor, palette, dock, batch, and cancel suites; b41 adds the reservation and interleaving suites; b55 adds the remediation suites and the threaded app test. `tools/test/run.sh` discovers them, so no CMake change is needed. The preview must render the new states before each build is flashed. Each hardware row records the build it passed on, and the final build re-runs M1-M13 because b41, b43, and b55 change the client, server, executor, worker, and dock paths.
 
-A unit is not done because its tests pass; it is done when its scenarios pass, the guard still passes, and the build still produces one artifact. `verified` is a project status granted only by M1-M12.
+A unit is not done because its tests pass; it is done when its scenarios pass, the guard still passes, and the build still produces one artifact. `verified` is a project status granted only by M1-M13.
 
 ---
 
@@ -1419,9 +1428,9 @@ A unit is not done because its tests pass; it is done when its scenarios pass, t
 - The session log never contains a password, proven across every event type.
 - `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `docs/THIRD_PARTY.md`, and `docs/DESIGN.md` match the code; `PROJECTS.md` carries the phase and the next action.
 - Every `[C]` claim lives in an adapter and names the claim and the reason.
-- M1-M12 have run on the console with their evidence in `docs/VERIFICATION.md` before the project moves to `verified`.
+- M1-M13 have run on the console with their evidence in `docs/VERIFICATION.md` before the project moves to `verified`.
 - Every local and network batch ends once, with done, skipped, failed, and cancelled counts; no batch ends green after a failed item.
-- Every hardware row records the build it passed on, and the final build re-runs M1-M12 because b41 changes the client, server, executor, and dock paths.
+- Every hardware row records the build it passed on, and the final build re-runs M1-M13 because b41 changes the client, server, executor, and dock paths.
 - A local cancel stops within 5 s, removes the partial, and leaves the destination byte-identical.
 - One local job and one network transfer can run together when their canonical paths do not overlap; overlapping paths wait or prompt, and a server client gets 450 only on a held path.
 - No screen still draws the old thin-only cursor in the active pane; the inactive pane keeps its thin bar, and no surface paints a neutral notice red.
