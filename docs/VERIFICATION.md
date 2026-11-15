@@ -14,7 +14,8 @@ cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
 ## Review remediation (host pass)
 
 **Date:** 2026-11-15
-**Build:** pending (the review-remediation pass)
+**Build:** `vitaftpshell-v01.00-b65.vpk`
+**SHA-256:** `eb28f708b1ea698cc14441b557ff0bd44096b00bdc6c87cca06f37d965dd6ef8`
 **Scope:** the 29 actionable findings from the full review of `96e527a..8e16e72`,
 minus the deferred `worker.c` split.
 
