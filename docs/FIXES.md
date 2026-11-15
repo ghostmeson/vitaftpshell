@@ -8,7 +8,7 @@ This file is an **index**, not the full evidence record:
 - [`VERIFICATION.md`](VERIFICATION.md) owns the hardware matrix, the logs, the
   core-dump analysis, and the host-test evidence.
 - [`DECISIONS.md`](DECISIONS.md) owns the numbered product and architecture
-  choices (D53–D77 for this period).
+  choices (D53–D90 for this period).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the layering and port rules.
 - [`DESIGN.md`](DESIGN.md) owns the settled layout, states, and input.
 
@@ -17,7 +17,7 @@ This file is an **index**, not the full evidence record:
 | Tag | Meaning |
 |---|---|
 | `HW` | The result was observed on the console in the named build. |
-| `HOST b66` | Host suites pass; the Vita result is not yet proven. |
+| `HOST` | Host suites pass; the Vita result is not yet proven. |
 | `PENDING` | Built but not yet run on hardware. |
 | `PART` | One part is hardware-observed; the named remainder is not. |
 
@@ -45,9 +45,10 @@ matrix passes.
 - **Matrix:** the b58 self-connection upload and download pass on hardware.
   b60 accepts up to four clients with one data transfer at a time (D86);
   FileZilla's browse and transfer connections both connect, and its upload and
-  download pass. b61 is the D87 access-policy build and awaits its hardware
-  retry. M5 remains PART only for a FileZilla rename/delete and the full
-  three-volume browse.
+  download pass. b61–b63 are contained in b66, which is the current artifact;
+  none of them has run on hardware. M5 remains PART only for a FileZilla
+  rename/delete and the full three-volume browse. M10 and M13 are partly
+  observed; M1–M9, M11, and M12 are pending.
 
 ## Review remediation (b66)
 
@@ -191,13 +192,13 @@ here so they do not live only in a review report.
 
 | Item | Why it waited | Status |
 |---|---|---|
-| The `UiState` row pointer can outlive a released listing generation | The fix is a listing-lifetime change; the threaded test exercises the current cycle without a torn frame | `PENDING` |
+| The `UiState` row pointer can outlive a released listing generation | The frame releases the held slot before the next frame renders the same pointer; the b67 pass holds the slot until a newer generation is adopted | `PLANNED b67` |
 | A kept `.vftp.old` is visible but not marked as debris | The row flag and render case are their own UI change (D81) | `PENDING` |
 | A failed aside cleanup still reports a failed commit | The honest notice needs a notice field on the progress record; the rename did happen | `PENDING` |
 | The queue's terminal and conflict latches have no production reader | The queue tests depend on them; removing them is a focused follow-up to D82's one-owner rule | `PENDING` |
 | Confirm resolution is duplicated across the two key branches | The prompt-id fix closed the behavior; the shared resolver is a cleanup | `PENDING` |
 | TSan over the threaded app test | The singleton fakes race; the app is clean under ASan/UBSan | `PENDING` |
-| M1-M13 on b55 | Needs the console | `PENDING` |
+| M1-M13 on b55 | Superseded by the b66 console run | `PENDING` |
 
 ## b55 review remediation
 
@@ -355,7 +356,9 @@ here so they do not live only in a review report.
   advertises it but returns 502 is treated as unsupported.
 - **Download totals trust the listing.** A server that reports a wrong size
   makes the dock total wrong; the bytes-done count remains correct.
-- **M1–M8:** none passed.
+- **M1–M13:** none is fully passed. M5 is PART (FileZilla rename/delete and
+  the three-volume browse unobserved); M10 and M13 are partly observed; the
+  rest await the b66 console run.
 - **Remaining `[C]` claims:** `select` over SceNet, IME masked text, the
   128 KiB pthread stack acceptance, `ur0:`/`uma0:` free space (now reported
   unknown), the fixed `control+1` PASV data port, and the reply-line cap.
