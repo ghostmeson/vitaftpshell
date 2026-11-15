@@ -329,7 +329,7 @@ static void done_dock(const UiDock *d, DockPanel *p)
 
     char size[32];
     fmt_size(size, sizeof(size), d->total_known ? d->total : d->done, 1);
-    if (failed > 0 && d->message[0] != '\0') {
+    if ((failed > 0 || d->notice) && d->message[0] != '\0') {
         snprintf(line, sizeof(line), "%s", d->message);
     } else if (d->elapsed_known) {
         unsigned seconds = (unsigned)(d->elapsed_ms / 1000u);
@@ -340,7 +340,7 @@ static void done_dock(const UiDock *d, DockPanel *p)
         snprintf(line, sizeof(line), "%s", size);
     }
     p->left = line;
-    p->left_color = C_WHITE;
+    p->left_color = d->notice ? C_YELLOW : C_WHITE;
 
     if (d->rate_known) {
         fmt_rate(rate, sizeof(rate), d->rate, 1);

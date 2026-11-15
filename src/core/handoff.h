@@ -84,6 +84,8 @@ typedef struct {
     int rate_known;
     /* A failed download whose complete file stays at its destination. */
     int file_kept;
+    /* A success that left debris worth naming; `detail` carries the text. */
+    int notice;
     uint64_t elapsed_ms;
     int elapsed_known;
     uint64_t free_bytes;

@@ -408,11 +408,11 @@ static int run_rename(FsPort *fs, const FsOpPlan *plan, int step_index,
             return 0;
         }
         if (fs->remove(fs->ctx, aside) != FS_OK) {
-            /* The rename happened; the leftover is reported as a failed
-             * commit until a notice channel exists (docs/FIXES.md). */
-            set_result(progress, OP_CAUSE_STORAGE, OP_STAGE_COMMIT,
-                       "ASIDE CLEANUP FAILED");
-            return 0;
+            /* The rename happened; only the old copy is left. Report it as a
+             * notice, not a failed commit: the step still counts as done. */
+            snprintf(progress->notice, sizeof(progress->notice),
+                     "ASIDE CLEANUP FAILED - OLD COPY KEPT AS %.60s",
+                     base_name(aside));
         }
     } else {
         if (fs->rename(fs->ctx, source, dest) != FS_OK) {
