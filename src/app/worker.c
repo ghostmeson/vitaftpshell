@@ -141,7 +141,7 @@ struct Worker {
     unsigned event_lost_seen;
     int local_batch_cancel_requested;
     /* U26: reservations between the lanes, and the item waiting on one. */
-    Reserve reserve;
+    Reserve *reserve;
     UiCommand busy_command;
     FsOpPlan *busy_plan;
     char busy_blocker[PATH_MAX_LEN];
@@ -217,7 +217,7 @@ static int server_path_guard(void *ctx, FtpGuardAction action,
         return 0;
 
     if (action == FTP_GUARD_RELEASE) {
-        reserve_release(&worker->reserve, RESERVE_LANE_SERVER);
+        reserve_release(worker->reserve, RESERVE_LANE_SERVER);
         return 0;
     }
     if (path == NULL)
@@ -226,13 +226,13 @@ static int server_path_guard(void *ctx, FtpGuardAction action,
     ReserveKind kind =
         tree ? RESERVE_TREE : (write ? RESERVE_WRITE : RESERVE_READ);
     if (action == FTP_GUARD_HOLD) {
-        return reserve_add(&worker->reserve, RESERVE_LANE_SERVER, kind, path)
+        return reserve_add(worker->reserve, RESERVE_LANE_SERVER, kind, path)
                    ? 0
                    : 1;
     }
 
     char blocker[PATH_MAX_LEN];
-    return reserve_conflict(&worker->reserve, kind, path, blocker,
+    return reserve_conflict(worker->reserve, kind, path, blocker,
                             sizeof(blocker));
 }
 
@@ -1416,7 +1416,7 @@ static int build_dest_facts(Worker *worker, const char *source,
 
 static void release_local_reservations(Worker *worker)
 {
-    reserve_release(&worker->reserve, RESERVE_LANE_LOCAL);
+    reserve_release(worker->reserve, RESERVE_LANE_LOCAL);
 }
 
 static ReserveKind step_source_kind(FsOpStepKind kind)
@@ -1449,14 +1449,14 @@ static int reserve_local_plan(Worker *worker, const FsOpPlan *plan,
         if (kind != FSOP_STEP_MKDIR) {
             const char *src = fsop_plan_step_source(plan, i);
             if (src[0] != '\0' &&
-                reserve_conflict(&worker->reserve, step_source_kind(kind), src,
+                reserve_conflict(worker->reserve, step_source_kind(kind), src,
                                  blocker, cap))
                 return 0;
         }
         if (kind != FSOP_STEP_DELETE_FILE && kind != FSOP_STEP_DELETE_DIR) {
             const char *dst = fsop_plan_step_dest(plan, i);
             if (dst[0] != '\0' &&
-                reserve_conflict(&worker->reserve, step_dest_kind(kind), dst,
+                reserve_conflict(worker->reserve, step_dest_kind(kind), dst,
                                  blocker, cap))
                 return 0;
         }
@@ -1468,7 +1468,7 @@ static int reserve_local_plan(Worker *worker, const FsOpPlan *plan,
         if (kind != FSOP_STEP_MKDIR) {
             const char *src = fsop_plan_step_source(plan, i);
             if (src[0] != '\0' &&
-                !reserve_add(&worker->reserve, RESERVE_LANE_LOCAL,
+                !reserve_add(worker->reserve, RESERVE_LANE_LOCAL,
                              step_source_kind(kind), src)) {
                 release_local_reservations(worker);
                 return -1;
@@ -1477,7 +1477,7 @@ static int reserve_local_plan(Worker *worker, const FsOpPlan *plan,
         if (kind != FSOP_STEP_DELETE_FILE && kind != FSOP_STEP_DELETE_DIR) {
             const char *dst = fsop_plan_step_dest(plan, i);
             if (dst[0] != '\0' &&
-                !reserve_add(&worker->reserve, RESERVE_LANE_LOCAL,
+                !reserve_add(worker->reserve, RESERVE_LANE_LOCAL,
                              step_dest_kind(kind), dst)) {
                 release_local_reservations(worker);
                 return -1;
@@ -2297,14 +2297,14 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
                             ? item->destination.text
                             : item->source.text;
     char blocker[PATH_MAX_LEN];
-    if (reserve_conflict(&worker->reserve, kind, local, blocker,
+    if (reserve_conflict(worker->reserve, kind, local, blocker,
                          sizeof(blocker))) {
         if (!worker->network_waiting)
             request_network_path_busy(worker, item, blocker);
         return;
     }
     worker->network_waiting = 0;
-    if (!reserve_add(&worker->reserve, RESERVE_LANE_NETWORK, kind, local)) {
+    if (!reserve_add(worker->reserve, RESERVE_LANE_NETWORK, kind, local)) {
         emit_error(worker, UI_PANE_REMOTE, "TOO MANY FILES TO TRACK", OP_CAUSE_APP,
                    OP_STAGE_PLAN);
         xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
@@ -2346,7 +2346,7 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
         memset(&next, 0, sizeof(next));
         xfer_release(&worker->queue, XFER_ITEM_FAILED, cause,
                      OP_STAGE_TRANSFER, &next);
-        reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
+        reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
         worker->batch_done++;
         emit_transfer_done(worker, item->direction, item->source.text, 0, 0, 0,
                            item->total, item->total_known, cause,
@@ -2694,7 +2694,7 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
         outcome = XFER_ITEM_FAILED;
 
     xfer_release(&worker->queue, outcome, event->cause, event->stage, NULL);
-    reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
+    reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
     worker->transfer_active = 0;
     worker->transfer_cancelled = 0;
     worker->batch_done++;
@@ -2826,7 +2826,7 @@ static void client_event(void *ctx, const FtpClientEvent *event)
                 (void)xfer_active(&worker->queue, &item);
                 xfer_release(&worker->queue, XFER_ITEM_FAILED,
                              event->cause, event->stage, NULL);
-                reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
+                reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
                 worker->transfer_active = 0;
                 /* The queue cannot survive the session, so the one terminal
                  * names what else died with it instead of clearing silently. */
@@ -3410,6 +3410,11 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
 
     worker->ports = *ports;
     worker->handoff = handoff;
+    worker->reserve = reserve_create();
+    if (worker->reserve == NULL) {
+        free(worker);
+        return NULL;
+    }
     worker->last_site_index = -1;
     worker->rows = calloc((size_t)UI_PANE_COUNT * HANDOFF_LIST_GENS *
                               WORKER_LIST_CAP,
@@ -3431,6 +3436,7 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
         ftp_client_destroy(worker->client);
         ftp_server_destroy(worker->server);
         free(worker->rows);
+        reserve_destroy(worker->reserve);
         free(worker);
         return NULL;
     }
@@ -3454,6 +3460,7 @@ void worker_destroy(Worker *worker)
         return;
     ftp_client_destroy(worker->client);
     ftp_server_destroy(worker->server);
+    reserve_destroy(worker->reserve);
     free(worker->rows);
     free(worker);
 }
