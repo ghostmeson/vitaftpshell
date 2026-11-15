@@ -102,9 +102,9 @@ static void test_sidecars(void)
                       "ux0:data/a.bin.vftp.part"));
     CHECK(conflicts(RESERVE_WRITE, "ux0:data/a.bin"));
 
-    CHECK(reserve_is_sidecar("UX0:DATA/A.BIN.VFTP.PART"));
-    CHECK(reserve_is_sidecar("a.vftp.old"));
-    CHECK(!reserve_is_sidecar("a.bin"));
+    CHECK(path_is_sidecar("UX0:DATA/A.BIN.VFTP.PART"));
+    CHECK(path_is_sidecar("a.vftp.old"));
+    CHECK(!path_is_sidecar("a.bin"));
 }
 
 static void test_release(void)

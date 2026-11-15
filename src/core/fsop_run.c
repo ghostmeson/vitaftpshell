@@ -36,6 +36,16 @@ struct FsOpRun {
     char buffer[FSOP_COPY_BUF];
 };
 
+static const char *base_name(const char *path)
+{
+    const char *name = path;
+    for (const char *p = path; *p != '\0'; ++p) {
+        if (*p == '/' || *p == ':')
+            name = p + 1;
+    }
+    return name;
+}
+
 static void set_result(FsOpProgress *progress, OpCause cause, OpStage stage,
                        const char *message)
 {
@@ -62,12 +72,6 @@ static int count_files(const FsOpPlan *plan)
             count++;
     }
     return count;
-}
-
-static int build_aside(const char *target, char *out, size_t cap)
-{
-    int n = snprintf(out, cap, "%s.vftp.old", target);
-    return n > 0 && (size_t)n < cap;
 }
 
 static int stat_type(FsPort *fs, const char *path, FsEntryType *out)
@@ -373,7 +377,8 @@ static int run_rename(FsPort *fs, const FsOpPlan *plan, int step_index,
 
     if (target_exists && !fs->rename_replaces(fs->ctx)) {
         char aside[PATH_MAX_LEN];
-        if (!build_aside(dest, aside, sizeof(aside))) {
+        if (!path_sidecar_path(aside, sizeof(aside), dest,
+                               PATH_SIDECAR_ASIDE)) {
             set_result(progress, OP_CAUSE_STORAGE, OP_STAGE_COMMIT,
                        "NAME TOO LONG");
             return 0;
@@ -389,12 +394,22 @@ static int run_rename(FsPort *fs, const FsOpPlan *plan, int step_index,
             return 0;
         }
         if (fs->rename(fs->ctx, source, dest) != FS_OK) {
-            fs->rename(fs->ctx, aside, dest);
-            set_result(progress, OP_CAUSE_STORAGE, OP_STAGE_COMMIT,
-                       "RENAME FAILED - NOTHING CHANGED");
+            if (fs->rename(fs->ctx, aside, dest) != FS_OK) {
+                char message[192];
+                snprintf(message, sizeof(message),
+                         "RENAME FAILED - OLD COPY KEPT AS %.100s",
+                         base_name(aside));
+                set_result(progress, OP_CAUSE_STORAGE, OP_STAGE_COMMIT,
+                           message);
+            } else {
+                set_result(progress, OP_CAUSE_STORAGE, OP_STAGE_COMMIT,
+                           "RENAME FAILED - NOTHING CHANGED");
+            }
             return 0;
         }
         if (fs->remove(fs->ctx, aside) != FS_OK) {
+            /* The rename happened; the leftover is reported as a failed
+             * commit until a notice channel exists (docs/FIXES.md). */
             set_result(progress, OP_CAUSE_STORAGE, OP_STAGE_COMMIT,
                        "ASIDE CLEANUP FAILED");
             return 0;

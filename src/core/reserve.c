@@ -61,38 +61,8 @@ static int path_is_ancestor(const char *a, const char *b)
 
 static int sidecar_matches(const char *held, const char *candidate)
 {
-    static const char *const suffixes[] = {".vftp.part", ".vftp.old"};
-    char with_suffix[PATH_MAX_LEN];
-    for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
-        int n = snprintf(with_suffix, sizeof(with_suffix), "%s%s", held,
-                         suffixes[i]);
-        if (n > 0 && (size_t)n < sizeof(with_suffix) &&
-            ci_equal(candidate, with_suffix))
-            return 1;
-        n = snprintf(with_suffix, sizeof(with_suffix), "%s%s", candidate,
-                     suffixes[i]);
-        if (n > 0 && (size_t)n < sizeof(with_suffix) &&
-            ci_equal(held, with_suffix))
-            return 1;
-    }
-    return 0;
-}
-
-static int has_suffix(const char *text, const char *suffix)
-{
-    size_t n = strlen(text);
-    size_t m = strlen(suffix);
-    if (m > n)
-        return 0;
-    return ci_equal(text + (n - m), suffix);
-}
-
-int reserve_is_sidecar(const char *name_or_path)
-{
-    if (name_or_path == NULL)
-        return 0;
-    return has_suffix(name_or_path, ".vftp.part") ||
-           has_suffix(name_or_path, ".vftp.old");
+    return path_is_sidecar_of(candidate, held) ||
+           path_is_sidecar_of(held, candidate);
 }
 
 void reserve_reset(Reserve *reserve)

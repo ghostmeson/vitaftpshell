@@ -727,14 +727,20 @@ static int server_next_listing_line(FtpServer *server, char *out, size_t cap)
         return 0;
 
     FsEntry entry;
-    FsResult r = server->fs->list_next(server->fs->ctx, server->dir, &entry);
-    if (r == FS_END)
-        return 0;
-    if (r != FS_OK)
-        return -1;
-    return format_listing_line(server->data_kind, &entry, entry.name, out, cap)
-               ? 1
-               : -1;
+    for (;;) {
+        FsResult r =
+            server->fs->list_next(server->fs->ctx, server->dir, &entry);
+        if (r == FS_END)
+            return 0;
+        if (r != FS_OK)
+            return -1;
+        if (path_sidecar_kind(entry.name) == PATH_SIDECAR_PART)
+            continue;
+        return format_listing_line(server->data_kind, &entry, entry.name, out,
+                                   cap)
+                   ? 1
+                   : -1;
+    }
 }
 
 static void server_data_error(FtpServer *server, int code, FtpCause cause,

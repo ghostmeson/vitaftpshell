@@ -192,13 +192,6 @@ int ftp_text_contains(const char *text, const char *needle)
     return 0;
 }
 
-static int build_sidecar(char *out, size_t cap, const char *base,
-                         const char *suffix)
-{
-    int n = snprintf(out, cap, "%s%s", base, suffix);
-    return n > 0 && (size_t)n < cap;
-}
-
 static void recover(FsPort *fs, const char *target, const char *aside)
 {
     FsEntry entry;
@@ -226,10 +219,10 @@ FsResult ftp_temp_open(FsPort *fs, const char *target, FtpTempWrite *out)
         existing.type == FS_ENTRY_DIR)
         return FS_INVALID;
 
-    if (!build_sidecar(out->temp.text, sizeof(out->temp.text),
-                       out->target.text, ".vftp.part") ||
-        !build_sidecar(out->aside.text, sizeof(out->aside.text),
-                       out->target.text, ".vftp.old"))
+    if (!path_sidecar_path(out->temp.text, sizeof(out->temp.text),
+                           out->target.text, PATH_SIDECAR_TEMP) ||
+        !path_sidecar_path(out->aside.text, sizeof(out->aside.text),
+                           out->target.text, PATH_SIDECAR_ASIDE))
         return FS_INVALID;
 
     recover(fs, out->target.text, out->aside.text);
