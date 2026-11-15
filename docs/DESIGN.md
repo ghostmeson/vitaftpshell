@@ -66,7 +66,9 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
 - **Band:** title at `y+8` (px 2, tracked 2); path at `y+26` (px 1.5); a hairline
   at `y+43`; rows from `y+48`.
 - **Row:** 30 px pitch; ten visible. Name at `x+40` (px 2). Type or size
-  right-aligned at `x+w-14` (px 1.5): `DIR`, `UP`, a size, or `--`. The mark
+  right-aligned at `x+w-14` (px 1.5): `DIR`, `UP`, `ASIDE`, a size, or `--`. A
+  kept `.vftp.old` copy draws `ASIDE` in yellow instead of a size, so the debris
+  is reachable and never mistaken for the user's file (D81). The mark
   square is 6×6 at `x+19`; the risk diamond is 6×6 at `x+27`; the scrollbar is
   2 px at `x+w-6`. The name column starts at `x+40` on every row so names stay
   aligned when a risk mark appears. The active cursor row is a cyan slab from

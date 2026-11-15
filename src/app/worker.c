@@ -1048,6 +1048,8 @@ static void worker_list_local(Worker *worker, const char *path)
                                                        : UI_ROW_FILE);
         row->size = entry.size;
         row->size_known = entry.size_known;
+        row->debris =
+            (uint8_t)(path_sidecar_kind(entry.name) == PATH_SIDECAR_OLD);
         row->risk = (uint8_t)row_risk(canonical.text, entry.name);
     }
     worker->ports.fs->list_close(worker->ports.fs->ctx, dir);
@@ -1130,6 +1132,8 @@ static void remote_listing_row(Worker *worker, const ListingEntry *entry)
                     : (entry->type == LISTING_FILE ? UI_ROW_FILE : UI_ROW_FILE);
     row->size = entry->size;
     row->size_known = entry->size_known;
+    row->debris =
+        (uint8_t)(path_sidecar_kind(entry->name) == PATH_SIDECAR_OLD);
     row->unsafe = (uint8_t)!path_name_is_safe(entry->name);
 }
 

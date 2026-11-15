@@ -233,6 +233,11 @@ static void row_draw(const UiState *state, UiPane pane, const LayoutRect *r,
         snprintf(value, sizeof(value), "DIR");
     } else if (row->type == UI_ROW_VOLUME) {
         snprintf(value, sizeof(value), "DRIVE");
+    } else if (row->debris) {
+        /* A kept aside is reachable but is never mistaken for the user's
+         * file: it names itself in place of a size (D81). */
+        snprintf(value, sizeof(value), "ASIDE");
+        value_color = slab ? C_FIELD : C_YELLOW;
     } else {
         fmt_size(value, sizeof(value), row->size, row->size_known);
         value_color = row->size_known ? C_WHITE : C_DIM;
