@@ -17,6 +17,13 @@
  * names and mtimes are reported with their uncertainty explicit.
  */
 
+/*
+ * [C] The Vita filesystem's treatment of trailing dots and spaces is
+ * unverified. path_canonicalize does not fold them, so a spelling such as
+ * "ur0:tai/boot_config.txt." reaches sceIo as written; if this layer folds it
+ * to the denied name, the denial must reject the spelling before the call.
+ * Confirm on hardware before relying on either behavior.
+ */
 #define PSP2_FS_HANDLES 16
 #define PSP2_FS_FILE_MODE 0666
 #define PSP2_FS_DIR_MODE 0777

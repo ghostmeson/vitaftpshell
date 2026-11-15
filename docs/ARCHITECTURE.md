@@ -493,13 +493,13 @@ asserts:
 - queue order, the active network item, the conflict decision, and
   the fake-job walk;
 - planner order, merge, the conflict gate, the copy-into-itself refusal, the
-  volume-root refusal, protected deletes, risk flags, and the plan caps;
+  volume-root refusal, protected deletes, and the plan caps;
 - executor overwrite with and without replace-on-rename, stale-aside recovery,
   cancel mid-copy, a kill at each write step, the destination sync, per-file
   move semantics, rollback, partial delete reporting, and `MOVE INCOMPLETE`;
 - the input repeat decoder, every input-table row, marks across CWD/L/R, volume
-  and connection clearing, dock focus, confirm scrolling, high-risk focus, IME
-  cancel, and the volume-root delete refusal;
+  and connection clearing, dock focus, confirm scrolling, IME cancel, and the
+  volume-root delete refusal;
 - the handoff: a producer faster than the consumer, a full ring, a coalesced
   progress stream, a latched server state, three listing generations, and the
   UI log ring;
@@ -508,8 +508,7 @@ asserts:
 - `tools/test/tsan.sh` builds the handoff with plain stores and requires a
   ThreadSanitizer race, so the release/acquire on the publish index is proven
   necessary rather than assumed;
-- the reducer's transitions, marks, dock focus, confirm scrolling, and the
-  high-risk confirmation;
+- the reducer's transitions, marks, dock focus, and confirm scrolling;
 - the recorded draw calls and strings for every render state:
   WORKSPACE, SITES, SITE EDITOR, SERVER, ACTIONS, CONFIRM, and TEXT ENTRY;
 - the app/worker integration: connect, list, mark, download, cancel, a failed

@@ -39,7 +39,7 @@ Implemented and covered by host tests today:
   conflict decision recorded once per batch, and a latched terminal outcome;
 - the pure local operation planner: recursive copy, move, delete, mkdir and
   rename; parent-before-child order; merge; copy-into-itself refusal; protected
-  paths; conflict gate; and per-step risk flags;
+  paths; the conflict gate; and the shared path rules;
 - the executor: templed writes, destination sync, aside recovery, rollback,
   per-file cross-volume moves, and `DELETED n OF m` on a partial recursive
   delete;

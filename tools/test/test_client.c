@@ -708,6 +708,43 @@ static void test_download_final_reply_short(void)
 }
 
 /* An upload that loses its final reply must end bounded too. */
+/* No expected size means completeness cannot be established: a silent final
+ * reply must not keep the file. */
+static void test_download_final_reply_unknown_size(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/nosize.bin",
+                                  "ux0:data/nosize.bin", 0, 0};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/nosize.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+    fake_net_queue_rx(data, "hello", 5);
+    fake_net_shutdown(data);
+    tick(client);
+    tick(client);
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(ftp_client_state(client) == FTP_CLIENT_LOST);
+    CHECK(cap.file_kept == 0);
+    CHECK(!fake_fs_exists("ux0:data/nosize.bin"));
+
+    ftp_client_destroy(client);
+}
+
 static void test_upload_final_reply_missing(void)
 {
     setup();
@@ -1448,6 +1485,7 @@ int main(void)
     test_download_final_reply_missing();
     test_download_final_reply_short();
     test_upload_final_reply_missing();
+    test_download_final_reply_unknown_size();
     test_download_budget();
     test_upload();
     test_download_reset();

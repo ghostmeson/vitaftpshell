@@ -132,9 +132,7 @@ typedef struct {
     UiChoice choices[3];
     int choice_count;
     int choice_focus;
-    int high_risk;
     int existing_count;
-    char risk_path[PATH_MAX_LEN];
     char title[64];
     char context[128];
     char warning[160];

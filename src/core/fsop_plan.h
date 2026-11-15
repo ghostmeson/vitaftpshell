@@ -13,7 +13,7 @@
 /*
  * Local operation planning (U16). The planner never touches the filesystem:
  * the caller supplies the directory facts and gets an ordered plan, a rollback
- * list, and the risk flags. That keeps the whole recursive operation testable
+ * list, and the path checks. That keeps the whole recursive operation testable
  * on the host and keeps every filesystem call in the executor.
  *
  * Paths live in a fixed arena. A plan that would overflow the arena or the
