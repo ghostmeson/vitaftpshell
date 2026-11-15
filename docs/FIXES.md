@@ -29,21 +29,24 @@ matrix passes.
 
 - **Current artifact:** `vitaftpshell-v01.00-b60.vpk`, 265,539 bytes,
   SHA-256 `91e1b8c45dd6c5f09b54cc4d77979d70d7ec9478a06bab5faff1f9e17cc2145a`.
-- **Last hardware-observed build:** b43 (operator report, 2026-11-14): copy,
-  paste, new folder, rename, and download work and the dock words read correctly.
-  b49 adds the b41 parallel lanes, is built, and is host-tested, not tested on hardware. b40 crashed; its four
-  core dumps are analysed in `VERIFICATION.md`. b28, b32, b36, b38, and b39 were
-  not separately tested.
-- **Latest hardware evidence:** `logs/session-b57.log` (the b57 trace: the
-  app's own client's `transfer_start` → `PASV` → `450 Transfer in progress`,
-  the FileZilla `CWD` denial of the app folder, and successful downloads and
-  listings); `logs/b20/` (complete worker-stack core); `logs/b18/` (first
-  diagnostic log and truncated core). The `logs/` tree is local and git-ignored;
-  copy it with `tools/logs/pull.sh <vita-ip>`.
+- **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
+  FileZilla upload and download work with two sessions; the app-local client
+  transfers on all three volumes. The session log is `logs/session-b60.log`.
+- **Previous hardware-observed build:** b43 (operator report, 2026-11-14):
+  copy, paste, new folder, rename, and download work and the dock words read
+  correctly. b49 added the parallel lanes; b40 crashed (four core dumps analysed
+  in `VERIFICATION.md`). b28, b32, b36, b38, and b39 were not separately tested.
+- **Latest hardware evidence:** `logs/session-b60.log` (FileZilla two sessions;
+  STOR 265,539 and 786 bytes, RETR 786 bytes, all 226; app-local transfers on
+  `ux0:`, `ur0:`, and `uma0:`); `logs/session-b57.log` (the old global-busy
+  failure); `logs/b20/` (worker-stack core); `logs/b18/` (first diagnostic log).
+  The `logs/` tree is local and git-ignored; copy it with
+  `tools/logs/pull.sh <vita-ip>`.
 - **Matrix:** the b58 self-connection upload and download pass on hardware.
-  b60 accepts up to four clients with one data transfer at a time (D86), so
-  FileZilla's browse and transfer connections can both connect. M5 remains PART
-  until the b60 FileZilla retry.
+  b60 accepts up to four clients with one data transfer at a time (D86);
+  FileZilla's browse and transfer connections both connect, and its upload and
+  download pass. M5 remains PART only for a FileZilla rename/delete and the
+  full three-volume browse.
 
 ## Upload defect (b57 → b58)
 
@@ -52,7 +55,7 @@ matrix passes.
 | b57 | **FTP server uploads never start.** FileZilla queues a file until it fails; MKD, rename, delete, and listings work, and the app's own client to localhost fails the same way. | The server traces every command, reply, data accept, temp open, first read, commit, and close to `ux0:data/vitaFTPShell/session.log`; `PASS` is masked. The log showed `transfer_start` → `FTPC PASV` → `FTPR 450 Transfer in progress` on the app's own client. | `HW b57` |
 | b58 | The server refused every data and mutating command while the app's network lane was active, because the worker set the legacy global `external_busy` flag. The app's client therefore deadlocked against its own server, and a PC was refused on unrelated paths. | Remove `ftp_server_set_external_busy` and the global gate; the path guard still answers 450 on a held path (D85). | `test_held_path`; b57 trace; b58 console: app-local upload of the 263,206-byte VPK and download both 226 | `HW b58` |
 | b58 | **FileZilla `450 Busy`.** The server already had a client (the app's remote pane), and FileZilla's extra control connection was refused. | The server accepted one client at a time (D41). | b58 session log: app client connected while FileZilla got 450 Busy | `HW b58` |
-| b60 | **FileZilla cannot hold its browse and transfer control connections at the same time.** | Accept up to four sessions, each with its own login, cwd, line reader, reply buffer, idle deadline, and rename state; one data transfer owns the PASV/data port at a time; a fifth connection gets 450; closing a non-owner does not abort the transfer (D86). Also fix the guard order: a free path returned before the HOLD, so no server transfer ever held its path (D86). | `test_two_clients` (holds the STOR path, a non-owner MLST gets 450, a non-owner close leaves the transfer running), `test_client_limit`; ASan/UBSan; hardware retest pending | `PENDING b60` |
+| b60 | **FileZilla cannot hold its browse and transfer control connections at the same time.** | Accept up to four sessions, each with its own login, cwd, line reader, reply buffer, idle deadline, and rename state; one data transfer owns the PASV/data port at a time; a fifth connection gets 450; closing a non-owner does not abort the transfer (D86). Also fix the guard order: a free path returned before the HOLD, so no server transfer ever held its path (D86). | `test_two_clients`, `test_client_limit`, ASan/UBSan; b60 console: FileZilla `clients=2`, STOR 265,539 and 786 bytes, RETR 786 bytes, all 226; app-local all volumes | `HW b60` |
 
 ## Build and install
 

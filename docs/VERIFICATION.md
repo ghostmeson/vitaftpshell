@@ -5,7 +5,7 @@
 **ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b57 traced the upload defect, b58 fixed the app-local transfer, and b60 adds four server sessions so FileZilla can hold its browse and transfer connections; b60 hardware retry pending; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b57 traced the upload defect, b58 fixed the app-local transfer, and b60 adds four server sessions so FileZilla can hold its browse and transfer connections and has run on the console; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
@@ -37,8 +37,16 @@ listings, a second session's PASV refused during the first transfer, the STOR
 path held against a non-owner's MLST, a non-owner close that leaves the
 transfer running, and a new session after); `test_client_limit` (four accepted,
 fifth refused, count drops on QUIT). ASan/UBSan clean, including the server
-suite. The b58 hardware result and the b60 retry are separate rows; M5 stays PART
-until FileZilla completes an upload and download on b60.
+suite.
+
+**Console result (b60):** FileZilla held two control sessions at once
+(`server_client ... clients=2`), uploaded `vitaftpshell-v01.00-b60.vpk`
+(265,539 bytes) with `FTPD STOR OPEN` and `COMMIT r=0` followed by 226,
+uploaded `iconlayout.ini` (786 bytes) with 226, and downloaded `iconlayout.ini`
+with 226. The app's own client transferred the same VPK between `ux0:`, `ur0:`,
+and `uma0:` with 226. The capture is `logs/session-b60.log`. M5 is PART: the log
+shows upload and download, but not every volume through FileZilla or a
+FileZilla rename/delete.
 
 ## b58 server upload fix
 
@@ -260,7 +268,7 @@ evidence are recorded here. The project therefore stays `building`.
 | M2 | LAN server with MLSD | MLSD is used, browse and download complete | pending | pending | PENDING |
 | M3 | LAN server with MLSD disabled | LIST fallback parses, browse and download complete | pending | pending | PENDING |
 | M4 | DOS-listing server | Names, sizes, and folders parse; a download completes | pending | pending | PENDING |
-| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete | List, MKD, rename, delete pass; the app-local upload and download pass; b58 refused FileZilla's second control connection; b60 accepts four sessions with one data transfer at a time | Install b60 and retry a FileZilla upload and download while the app remote pane is connected | PART |
+| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete | FileZilla held two sessions at once on b60; upload of the 265,539-byte VPK and 786-byte `iconlayout.ini`, and download of `iconlayout.ini`, all 226; app-local transfers pass on all three volumes. FileZilla rename/delete and the full three-volume browse are not in the log | Complete the three-volume browse and a FileZilla rename/delete, then mark PASS | PART |
 | M6 | Denials through the server | `boot_config.txt`, `ux0:tai` upload, volume-root delete all refuse, and nothing is created | pending | pending | PENDING |
 | M7 | Second client and stop-during-write | 450 to the second client; stop during a write confirms and leaves no partial | pending | pending | PENDING |
 | M8 | Network loss and cancel | Server stops and reports; cancel takes effect within 5 s; no crash dump | pending | pending | PENDING |
