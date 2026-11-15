@@ -574,6 +574,37 @@ static void test_login(void)
     ftp_server_destroy(server);
 }
 
+/* A DHCP change after start must move the advertised PASV endpoint; an
+ * unknown address keeps the last one rather than advertising zero. */
+static void test_pasv_follows_link_address(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    char text[512];
+    command_text(server, &client, "PASV", 227, text, sizeof(text));
+    CHECK(strstr(text, "(192,168,1,42,5,58)") != NULL);
+
+    fake_net_set_link(1, 1, 0xC0A80163u, 0);
+    fake_clock_advance(1001);
+    ftp_server_tick(server, 0);
+    command_text(server, &client, "PASV", 227, text, sizeof(text));
+    CHECK(strstr(text, "(192,168,1,99,5,58)") != NULL);
+    CHECK(ftp_server_lan_address(server).addr == 0xC0A80163u);
+
+    fake_net_set_link(1, 0, 0, 0);
+    fake_clock_advance(1001);
+    ftp_server_tick(server, 0);
+    command_text(server, &client, "PASV", 227, text, sizeof(text));
+    CHECK(strstr(text, "(192,168,1,99,5,58)") != NULL);
+
+    ftp_server_destroy(server);
+}
+
 static void test_list_mlsd_nlst(void)
 {
     setup();
@@ -1661,6 +1692,7 @@ int main(void)
     test_start_and_bind();
     test_login();
     test_list_mlsd_nlst();
+    test_pasv_follows_link_address();
     test_root_listing();
     test_retr();
     test_stor();
