@@ -300,6 +300,54 @@ int handoff_listing_acquire(Handoff *handoff, UiPane pane, const void **rows,
     return 1;
 }
 
+int handoff_listing_adopt(Handoff *handoff, UiPane pane, const void **rows,
+                          int *row_count, uint32_t *generation)
+{
+    if (handoff == NULL || pane >= UI_PANE_COUNT)
+        return 0;
+
+    HandoffListings *listings = &handoff->listings[pane];
+    int chosen = -1;
+    uint32_t newest = 0;
+    for (int i = 0; i < HANDOFF_LIST_GENS; ++i) {
+        HandoffListing *slot = &listings->slots[i];
+        if (LOAD_ACQ(&slot->writing) || !LOAD_ACQ(&slot->published))
+            continue;
+        if (chosen < 0 || slot->generation > newest) {
+            chosen = i;
+            newest = slot->generation;
+        }
+    }
+    if (chosen < 0)
+        return 0;
+
+    if (listings->reader_slot >= 0) {
+        HandoffListing *held = &listings->slots[listings->reader_slot];
+        if (held->generation >= newest) {
+            if (rows != NULL)
+                *rows = held->rows;
+            if (row_count != NULL)
+                *row_count = held->row_count;
+            if (generation != NULL)
+                *generation = held->generation;
+            return 1;
+        }
+        STORE_REL(&held->held, 0);
+        listings->reader_slot = -1;
+    }
+
+    HandoffListing *slot = &listings->slots[chosen];
+    STORE_REL(&slot->held, 1);
+    listings->reader_slot = chosen;
+    if (rows != NULL)
+        *rows = slot->rows;
+    if (row_count != NULL)
+        *row_count = slot->row_count;
+    if (generation != NULL)
+        *generation = slot->generation;
+    return 1;
+}
+
 void handoff_listing_release(Handoff *handoff, UiPane pane)
 {
     if (handoff == NULL || pane >= UI_PANE_COUNT)
