@@ -783,6 +783,55 @@ static int tree_guard(void *ctx, FtpGuardAction action, const char *path,
     return 0;
 }
 
+static int s_retr_guard_checks;
+
+static int retr_owner_guard(void *ctx, FtpGuardAction action, const char *path,
+                            int write, int tree)
+{
+    (void)ctx;
+    (void)path;
+    (void)write;
+    (void)tree;
+    if (action != FTP_GUARD_CHECK)
+        return 0;
+    /* Let the transfer's own check through; refuse the later foreign probe. */
+    s_retr_guard_checks++;
+    return s_retr_guard_checks > 1;
+}
+
+/* The owner may read metadata for its own RETR source while the guard refuses
+ * every other session. */
+static void test_owner_size_while_download(void)
+{
+    setup();
+    static char big[8192];
+    memset(big, 'X', sizeof(big));
+    fake_fs_seed_file("ux0:data/own.bin", big, sizeof(big));
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    s_retr_guard_checks = 0;
+    ftp_server_set_guard(server, retr_owner_guard, NULL);
+
+    FakeFtpClient b;
+    FakeFtpClient a;
+    connect_session(server, &b);
+    connect_second_session(server, &a, PEER_ADDR + 1, PEER_PORT + 20);
+
+    pasv(server, &a);
+    /* Leave the data peer unqueued: the transfer stays PENDING, which is the
+     * state the owner exemption must cover. */
+    fake_ftp_client_send(&a, "RETR ux0:/data/own.bin");
+    ftp_server_tick(server, 0);
+
+    char text[128];
+    command_text(server, &a, "SIZE ux0:/data/own.bin", 213, text, sizeof(text));
+    CHECK(strstr(text, "8192") != NULL);
+    command_text(server, &b, "SIZE ux0:/data/own.bin", 450, text, sizeof(text));
+
+    ftp_server_destroy(server);
+}
+
 /* A rename may not create a transfer sidecar name. */
 static void test_rename_sidecar_refused(void)
 {
@@ -1500,6 +1549,7 @@ int main(void)
     test_storage_failure_451();
     test_tree_command_releases();
     test_rename_sidecar_refused();
+    test_owner_size_while_download();
     test_trace_masks_password();
     test_owner_size_while_upload();
     test_held_path();
