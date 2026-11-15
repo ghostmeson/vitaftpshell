@@ -569,6 +569,34 @@ static void test_wait_resume_rechecks(void)
 /* The app holds the listing slot its rows point at across frames. A refresh
  * publishes a newer generation; the app adopts it and releases the old slot in
  * the same step, so the worker can never rewrite a visible row. */
+/* A kept `.vftp.old` is visible and marked; the never-valid `.part` is not
+ * listed at all (D81). */
+static void test_aside_debris_row(void)
+{
+    App *app = make_app_ex("ux0:data/K.BIN.VFTP.OLD", "KEEP", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/A.TXT", "A", 1);
+    fake_fs_seed_file("ux0:data/K.BIN.VFTP.PART", "X", 1);
+
+    enter_ux0_data(app);
+    const UiPaneState *local = &app_state(app)->panes[UI_PANE_LOCAL];
+    int aside = -1;
+    int part = -1;
+    for (int i = 0; i < local->row_count; ++i) {
+        if (strcmp(local->rows[i].name, "K.BIN.VFTP.OLD") == 0)
+            aside = i;
+        if (strcmp(local->rows[i].name, "K.BIN.VFTP.PART") == 0)
+            part = i;
+    }
+    CHECK(aside >= 0);
+    CHECK(part < 0);
+    if (aside >= 0)
+        CHECK(local->rows[aside].debris == 1);
+
+    app_destroy(app);
+}
+
 static void test_app_listing_slot_held(void)
 {
     App *app = make_app();
@@ -2104,6 +2132,7 @@ int main(void)
     test_wait_resume_rechecks();
     test_connect_list_download();
     test_app_listing_slot_held();
+    test_aside_debris_row();
     test_remote_navigation();
     test_remote_mutations();
     test_remote_disconnect_and_reconnect();

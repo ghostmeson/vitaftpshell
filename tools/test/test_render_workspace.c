@@ -113,6 +113,19 @@ static void test_ten_rows_and_scroll(void)
     CHECK(!trace_text_at("F00", 58.0f, 132.0f));
 }
 
+/* A kept aside names itself instead of showing a size (D81). */
+static void test_aside_debris_mark(void)
+{
+    setup();
+    row_init(2, "K.BIN.VFTP.OLD", UI_ROW_FILE, 5, 1, 0);
+    s_rows[2].debris = 1;
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_rows, 3, 0);
+    render();
+    CHECK(trace_has_text("K.BIN.VFTP.OLD"));
+    CHECK(trace_has_text("ASIDE"));
+    CHECK(!trace_has_text("5 B"));
+}
+
 static void test_truncation_and_value(void)
 {
     setup();
@@ -459,6 +472,7 @@ int main(void)
 {
     test_ten_rows_and_scroll();
     test_truncation_and_value();
+    test_aside_debris_mark();
     test_active_pane();
     test_first_2000();
     test_risk_mark();
