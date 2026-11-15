@@ -387,6 +387,12 @@ static void failed_dock(const UiDock *d, DockPanel *p)
     }
 }
 
+static int local_terminal_visible(const UiDock *d)
+{
+    return d->active || d->waiting || d->state == UI_DOCK_DONE ||
+           d->state == UI_DOCK_FAILED;
+}
+
 static void badge_fill(const UiDock *d, char *out, size_t cap)
 {
     out[0] = '\0';
@@ -454,13 +460,9 @@ void dock_draw(const UiState *state)
 
     static char badge[256];
     int local_full = state->dock_primary == UI_DOCK_LANE_LOCAL &&
-                     (state->local_dock.active || state->local_dock.waiting ||
-                      state->local_dock.state == UI_DOCK_DONE ||
-                      state->local_dock.state == UI_DOCK_FAILED);
+                     local_terminal_visible(&state->local_dock);
     if (state->local_shown && !local_full &&
-        (state->local_dock.active || state->local_dock.waiting ||
-         state->local_dock.state == UI_DOCK_DONE ||
-         state->local_dock.state == UI_DOCK_FAILED)) {
+        local_terminal_visible(&state->local_dock)) {
         badge_fill(&state->local_dock, badge, sizeof(badge));
         p.badge = badge;
         p.badge_color = badge_color(&state->local_dock);

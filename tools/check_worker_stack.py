@@ -60,7 +60,7 @@ def read_depth():
 
 
 def self_test():
-    if parse_depth("#define WORKER_REMOTE_DEPTH 32\n") != 32:
+    if parse_depth("#define WORKER_REMOTE_DEPTH 7\n") != 7:
         return False
     if parse_depth("/* WORKER_REMOTE_DEPTH 32 */\n") is not None:
         return False

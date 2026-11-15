@@ -14,7 +14,8 @@
 /*
  * Anonymous passive FTP server. OFF is the resting state. The machine binds
  * the control port and control+1 on the LAN address, accepts up to four
- * clients, and runs one data command at a time (D86). Every path resolves through the shared path
+ * clients, and runs one data command at a time (D86). Every path resolves
+ * through the shared path
  * table; a denial answers exactly as a missing path and creates nothing.
  */
 

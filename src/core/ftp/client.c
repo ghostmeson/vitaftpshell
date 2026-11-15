@@ -325,7 +325,6 @@ static void client_close_data(FtpClient *client)
     client->data_off = 0;
 }
 
-/* The payload is finished; only the server's closing reply is outstanding. */
 static void client_begin_draining(FtpClient *client)
 {
     client->data_state = FTP_DATA_DRAINING;
@@ -771,18 +770,8 @@ static void client_finish_without_reply(FtpClient *client)
         client->file_kept = 1;
     }
 
-    client_abort_local(client);
-    client_close_data(client);
-    client_close_control(client);
-    client->cause = FTP_CAUSE_NETWORK;
-    client->stage = FTP_STAGE_TRANSFER;
-    copy_str(client->last_detail, sizeof(client->last_detail),
-             "FINAL REPLY MISSING");
-    client_set_state(client, FTP_CLIENT_LOST);
-    client_emit_listing_end(client, 0);
-    client_emit_op_done(client, 0, FTP_CAUSE_NETWORK, FTP_STAGE_TRANSFER,
-                        "FINAL REPLY MISSING");
-    client_clear_op(client);
+    client_enter_terminal(client, FTP_CLIENT_LOST, FTP_CAUSE_NETWORK,
+                          FTP_STAGE_TRANSFER, "FINAL REPLY MISSING");
 }
 
 static void client_protocol_error(FtpClient *client, const char *detail)

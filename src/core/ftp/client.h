@@ -141,7 +141,6 @@ FtpClientResult ftp_client_connect(FtpClient *client,
 FtpClientResult ftp_client_list(FtpClient *client, const char *path);
 FtpClientResult ftp_client_nlst(FtpClient *client, const char *path);
 FtpClientResult ftp_client_cwd(FtpClient *client, const char *path);
-/* A denied destination returns DENIED. */
 FtpClientResult ftp_client_download(FtpClient *client,
                                     const FtpClientTransfer *transfer,
                                     PathRisk *out_risk);

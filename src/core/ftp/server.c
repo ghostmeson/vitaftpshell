@@ -108,7 +108,6 @@ struct FtpServer {
     uint64_t total;
     int total_known;
 
-    char last_command[16];
     FtpServerGuardFn guard;
     void *guard_ctx;
     int root_index;
@@ -175,10 +174,8 @@ static void server_client_event(FtpServer *server)
     ServerSession *session = server_session_at(server, server->active_session);
     if (session == NULL)
         session = server_most_recent_session(server);
-    if (server->active_session < 0 && session != NULL)
+    if (session != NULL)
         event.session_index = server_session_index(server, session);
-    else if (session != NULL)
-        event.session_index = server->active_session;
 
     if (session != NULL) {
         event.peer = session->peer;
@@ -298,7 +295,6 @@ static void server_close_transfer(FtpServer *server);
 static void server_control_failed(FtpServer *server, ServerSession *session);
 static void server_close_session(FtpServer *server, ServerSession *session,
                                  int send_221, const char *detail);
-static int ci_equal(const char *a, const char *b);
 
 static void server_reply(ServerSession *session, int code, const char *fmt, ...)
 {
@@ -452,13 +448,27 @@ static int server_own_transfer_path(FtpServer *server,
 {
     return server->data_session == server_session_index(server, session) &&
            (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) &&
-           ci_equal(local, server->active_local);
+           path_ci_equal(local, server->active_local);
 }
 
 static int server_path_held(ServerSession *session, const char *local,
                             ServerPathAccess access)
 {
     FtpServer *server = session->server;
+
+    /* A session may ask about the path it is transferring. The stat decides
+     * whether the answer is a size or a not-found; an upload destination is
+     * answered not-found here because the new file does not exist until the
+     * commit, whatever the guard says. */
+    if (access == SERVER_PATH_READ &&
+        server_own_transfer_path(server, session, local)) {
+        if (server->data_kind == SDATA_STOR) {
+            server_reply(session, 550, "Not found.");
+            return 1;
+        }
+        return 0;
+    }
+
     if (server->guard == NULL)
         return 0;
 
@@ -469,14 +479,6 @@ static int server_path_held(ServerSession *session, const char *local,
     int hold = access == SERVER_PATH_DATA_READ ||
                access == SERVER_PATH_DATA_WRITE ||
                access == SERVER_PATH_TREE_WRITE;
-
-    /* A session may ask about the path it is transferring. The stat decides
-     * whether the answer is a size or a not-found; an upload destination is
-     * answered not-found by its command handler because the new file does not
-     * exist yet. */
-    if (access == SERVER_PATH_READ &&
-        server_own_transfer_path(server, session, local))
-        return 0;
 
     if (server->guard(server->guard_ctx, FTP_GUARD_CHECK, local, write, tree)) {
         server_reply(session, 450, "Path busy.");
@@ -1375,11 +1377,6 @@ static void server_mlst(ServerSession *session, const char *arg)
     if (!is_root) {
         if (server_path_held(session, local.text, SERVER_PATH_READ))
             return;
-        if (server->data_kind == SDATA_STOR &&
-            server_own_transfer_path(server, session, local.text)) {
-            server_reply(session, 550, "Not found.");
-            return;
-        }
         PathRisk risk = PATH_RISK_NORMAL;
         if (path_check_read(local.text, 1, &risk) != PATH_OK ||
             server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK) {
@@ -1662,13 +1659,6 @@ static void server_handle_size(ServerSession *session, const char *arg)
 
     if (server_path_held(session, local.text, SERVER_PATH_READ))
         return;
-    if (server->data_kind == SDATA_STOR &&
-        server_own_transfer_path(server, session, local.text)) {
-        /* The destination is a sidecar until the upload commits; the old entry
-         * is not what the client is writing. */
-        server_reply(session, 550, "Not found.");
-        return;
-    }
 
     PathRisk risk = PATH_RISK_NORMAL;
     FsEntry entry;
@@ -1697,11 +1687,6 @@ static void server_handle_mdtm(ServerSession *session, const char *arg)
 
     if (server_path_held(session, local.text, SERVER_PATH_READ))
         return;
-    if (server->data_kind == SDATA_STOR &&
-        server_own_transfer_path(server, session, local.text)) {
-        server_reply(session, 550, "Not found.");
-        return;
-    }
 
     PathRisk risk = PATH_RISK_NORMAL;
     FsEntry entry;
@@ -1772,7 +1757,6 @@ static void server_handle_command(ServerSession *session, const char *line,
     }
     cmd[cmd_len] = '\0';
 
-    snprintf(server->last_command, sizeof(server->last_command), "%s", cmd);
     server->active_session = index;
     if (strcmp(session->last_command, cmd) != 0) {
         /* The verb only; arguments never reach the panel. */
@@ -2370,7 +2354,11 @@ NetAddress ftp_server_peer(const FtpServer *server)
 
 const char *ftp_server_last_command(const FtpServer *server)
 {
-    return server != NULL ? server->last_command : "";
+    if (server == NULL)
+        return "";
+    ServerSession *session =
+        server_session_at((FtpServer *)server, server->active_session);
+    return session != NULL ? session->last_command : "";
 }
 
 NetAddress ftp_server_lan_address(const FtpServer *server)

@@ -301,8 +301,6 @@ static void test_two_clients(void)
     ftp_server_destroy(server);
 }
 
-/* A client that arms PASV and then closes must not keep the one data slot.
- * The surviving session is connected first so slot reuse cannot hide it (U3). */
 /* The CLIENT event carries the peer and verb of the session that spoke last,
  * and falls back to a live session when that one closes. */
 static void test_client_event_pairs_session(void)
@@ -368,8 +366,8 @@ static void test_close_while_armed(void)
     ftp_server_destroy(server);
 }
 
-/* An active transfer whose owner disappears ends in exactly one failed event
- * and frees the slot. */
+/* A client that arms PASV and then closes must not keep the one data slot.
+ * B is connected first so slot reuse cannot hide it. */
 static void test_owner_close_active_one_event(void)
 {
     setup();
