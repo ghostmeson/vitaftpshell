@@ -1885,7 +1885,7 @@ the network lane" clause are superseded; the held-path clause stands.
 ## D86. The server accepts four clients, one data transfer at a time
 
 **Date:** 2026-11-15
-**Status:** accepted; b60.
+**Status:** accepted; b60, hardware-observed.
 
 **Context:** FileZilla opens a separate control connection for transfers and
 keeps another for browsing. The one-client server refused the second connection

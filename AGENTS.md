@@ -49,8 +49,10 @@ added a server protocol trace, and its console log showed the worker's legacy
 global server-busy gate answering 450 to the app's own client. b58 removes that
 gate (D85), and the console confirmed both transfer directions between the app's
 own client and server. b60 accepts up to four server sessions, one data
-transfer at a time (D86), so FileZilla's browse and transfer connections can
-both connect. M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
+transfer at a time (D86), and has run on the console: FileZilla held two
+sessions and uploaded and downloaded successfully; the app-local client moved
+files across all three volumes. M13 and M10 are partly observed; M1–M9, M11, and
+M12 are pending, so
 the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
