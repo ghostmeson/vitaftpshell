@@ -310,6 +310,8 @@ static void drain_events(App *app)
             break;
         case HANDOFF_EVT_TRANSFER_CANCELLED:
             ui.kind = UI_EVT_TRANSFER_CANCELLED;
+            ui.direction = (int)event.direction;
+            ui.direction_known = event.direction_known;
             feed(app, &ui);
             break;
         case HANDOFF_EVT_BATCH_DONE:

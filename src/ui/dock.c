@@ -226,6 +226,17 @@ static void idle_dock(const UiState *state, DockPanel *p)
     }
 }
 
+static void waiting_dock(const UiDock *d, DockPanel *p)
+{
+    (void)d;
+    p->word = "WAITING";
+    p->word_color = C_YELLOW;
+    p->subject = "LOCAL";
+    p->progress_valid = 0;
+    p->left = "WAITING FOR A HELD PATH";
+    p->left_color = C_YELLOW;
+}
+
 static void active_dock(const UiDock *d, DockPanel *p)
 {
     static char total_text[96];
@@ -423,7 +434,9 @@ void dock_draw(const UiState *state)
     memset(&p, 0, sizeof(p));
     p.focused = state->dock.focused;
 
-    if (full->state == UI_DOCK_ACTIVE && full->active)
+    if (full == &state->local_dock && full->waiting)
+        waiting_dock(full, &p);
+    else if (full->state == UI_DOCK_ACTIVE && full->active)
         active_dock(full, &p);
     else if (full->state == UI_DOCK_DONE)
         done_dock(full, &p);
@@ -434,7 +447,7 @@ void dock_draw(const UiState *state)
 
     static char badge[256];
     int local_full = state->dock_primary == UI_DOCK_LANE_LOCAL &&
-                     state->local_dock.active;
+                     (state->local_dock.active || state->local_dock.waiting);
     if (state->local_shown && !local_full &&
         (state->local_dock.active || state->local_dock.waiting)) {
         badge_fill(&state->local_dock, badge, sizeof(badge));

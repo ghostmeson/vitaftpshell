@@ -968,6 +968,34 @@ static void test_two_lane_dock(void)
     CHECK(command(UI_CMD_CANCEL_LOCAL) != NULL);
 }
 
+/* A waiting local lane is a live lane: a solo waiter opens the two-choice
+ * cancel instead of being invisible. */
+static void test_waiting_lane_cancel(void)
+{
+    reset();
+    s_state.local_shown = 1;
+    s_state.local_dock.waiting = 1;
+    s_state.dock.active = 0;
+    s_state.dock.state = UI_DOCK_IDLE;
+    s_state.dock_primary = UI_DOCK_LANE_LOCAL;
+    set_focus_for_test(&s_state, UI_FOCUS_DOCK);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_CANCEL_XFER);
+    CHECK(s_state.confirm.choices[1] == UI_CHOICE_CANCEL);
+
+    /* A waiting lane beside a live network lane offers both lanes. */
+    reset();
+    s_state.local_shown = 1;
+    s_state.local_dock.waiting = 1;
+    s_state.dock.active = 1;
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    set_focus_for_test(&s_state, UI_FOCUS_DOCK);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_CANCEL_LANES);
+    CHECK(s_state.confirm.choices[2] == UI_CHOICE_CANCEL_LOCAL);
+}
+
 static void test_paste_guards(void)
 {
     reset();
@@ -1580,6 +1608,7 @@ int main(void)
     test_confirm_busy_guard();
     test_path_busy_prompt();
     test_two_lane_dock();
+    test_waiting_lane_cancel();
     test_paste_guards();
     test_dock_cancel_and_site_delete();
     test_listing_and_dock();

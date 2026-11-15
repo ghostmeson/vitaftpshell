@@ -79,6 +79,7 @@ typedef struct {
     int free_known;
     int port;
     XferDirection direction;
+    int direction_known;
     int value;
     char address[32];
     int address_known;

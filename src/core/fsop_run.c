@@ -141,7 +141,7 @@ static void enter_failure(FsOpRun *run)
         if (run->cancelled)
             progress->cause = OP_CAUSE_USER;
         progress->stage = OP_STAGE_TRANSFER;
-        finish(run, FSOP_RUN_PARTIAL);
+        finish(run, run->cancelled ? FSOP_RUN_CANCELLED : FSOP_RUN_PARTIAL);
         return;
     }
 
