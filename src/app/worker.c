@@ -32,6 +32,7 @@
 typedef struct {
     int valid;
     int kind; /* 1 transfer, 2 local action */
+    unsigned prompt_id;
     UiCommand command;
     XferItem item;
     FsOpConflict conflict;
@@ -132,6 +133,7 @@ struct Worker {
     FsOpPlan *busy_plan;
     char busy_blocker[PATH_MAX_LEN];
     int busy_waiting;
+    unsigned prompt_seq;
     /* The network item is held by a local path and retries head-of-line. */
     int network_waiting;
     LocalBatch local_batch;
@@ -236,6 +238,15 @@ static void event_init(HandoffEvent *event, HandoffEventKind kind)
 static void emit(Worker *worker, const HandoffEvent *event)
 {
     handoff_event_push(worker->handoff, event);
+}
+
+/* Every worker prompt gets one identity; the answer must echo it so a local
+ * dialog can never consume a deferred transfer prompt. */
+static void confirm_request(Worker *worker, HandoffConfirm *request)
+{
+    request->id = ++worker->prompt_seq;
+    worker->pending.prompt_id = request->id;
+    handoff_confirm_request(worker->handoff, request);
 }
 
 static void emit_error(Worker *worker, UiPane pane, const char *text,
@@ -534,7 +545,7 @@ static void local_batch_preflight(Worker *worker)
     for (int i = 0; i < existing_count; ++i)
         fmt_copy(request.items[i].name, sizeof(request.items[i].name),
                  worker->batch_existing[i].text);
-    handoff_confirm_request(worker->handoff, &request);
+    confirm_request(worker, &request);
 
     worker->pending.valid = 1;
     worker->pending.kind = 3;
@@ -1229,7 +1240,7 @@ static void request_local_conflict(Worker *worker, const UiCommand *command,
                      : "-");
         request.items[i].size_known = 0;
     }
-    handoff_confirm_request(worker->handoff, &request);
+    confirm_request(worker, &request);
 
     worker->pending.valid = 1;
     worker->pending.kind = 2;
@@ -1249,7 +1260,7 @@ static void request_transfer_conflict(Worker *worker, const XferItem *item)
     fmt_copy(request.items[0].name, sizeof(request.items[0].name), last_name(item->destination.text));
     request.items[0].size = item->total;
     request.items[0].size_known = item->total_known;
-    handoff_confirm_request(worker->handoff, &request);
+    confirm_request(worker, &request);
 
     worker->pending.valid = 1;
     worker->pending.kind = 1;
@@ -1461,7 +1472,7 @@ static void request_path_busy(Worker *worker, const UiCommand *command,
     fmt_copy(request.context, sizeof(request.context), "PATH IN USE");
     request.item_count = 1;
     fmt_copy(request.items[0].name, sizeof(request.items[0].name), blocker);
-    handoff_confirm_request(worker->handoff, &request);
+    confirm_request(worker, &request);
 
     request.pane = UI_PANE_LOCAL;
     worker->busy_command = *command;
@@ -1485,7 +1496,7 @@ static void request_network_path_busy(Worker *worker, const XferItem *item,
     fmt_copy(request.context, sizeof(request.context), "PATH IN USE");
     request.item_count = 1;
     fmt_copy(request.items[0].name, sizeof(request.items[0].name), blocker);
-    handoff_confirm_request(worker->handoff, &request);
+    confirm_request(worker, &request);
 
     worker->network_waiting = 0;
     worker->pending.valid = 1;
@@ -1759,7 +1770,7 @@ static void request_high_risk(Worker *worker, const UiCommand *command,
     request.valid = 1;
     request.high_risk = 1;
     fmt_copy(request.risk_path, sizeof(request.risk_path), plan->risk_path.text);
-    handoff_confirm_request(worker->handoff, &request);
+    confirm_request(worker, &request);
 
     worker->pending.valid = 1;
     worker->pending.kind = 2;
@@ -3131,7 +3142,8 @@ static void handle_command(Worker *worker, const UiCommand *command)
         handle_action(worker, command);
         break;
     case UI_CMD_CONFIRM:
-        if (worker->pending.valid) {
+        if (worker->pending.valid &&
+            command->prompt_id == worker->pending.prompt_id) {
             PendingWork pending = worker->pending;
             worker->pending.valid = 0;
             if (pending.kind == 1) {

@@ -476,6 +476,7 @@ static void drain_events(App *app)
         request.kind = UI_EVT_CONFIRM_REQUEST;
         request.confirm = confirm.kind;
         request.pane = confirm.pane;
+        request.prompt_id = confirm.id;
         request.items = app->confirm_items;
         request.item_count = confirm.item_count;
         request.high_risk = confirm.high_risk;

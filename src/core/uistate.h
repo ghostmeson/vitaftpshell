@@ -123,6 +123,8 @@ typedef struct {
 
 typedef struct {
     UiConfirmKind kind;
+    int pane;
+    unsigned prompt_id;
     const UiConfirmItem *items;
     int item_count;
     int item_scroll;
@@ -355,6 +357,7 @@ typedef struct {
     int rate_known;
     int direction;
     int direction_known;
+    unsigned prompt_id;
     int existing_count;
     int batch_skipped;
     int batch_failed;

@@ -121,6 +121,7 @@ typedef struct {
     uint64_t total;
     int total_known;
     unsigned batch_id;
+    unsigned prompt_id;
     int batch_index;
     int batch_total;
     int batch_last;
