@@ -1556,9 +1556,8 @@ static void test_download_final_reply_loses_queue(void)
     peer.hold_final = 1;
     select_remote(app);
 
-    press(app, INPUT_BIT(INPUT_DOWN)); /* A.BIN */
-    press(app, INPUT_BIT(INPUT_SQUARE));
-    press(app, INPUT_BIT(INPUT_DOWN)); /* B.BIN */
+    press(app, INPUT_BIT(INPUT_SQUARE)); /* A.BIN is row 0 */
+    press(app, INPUT_BIT(INPUT_DOWN));   /* B.BIN */
     press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     CHECK(app_state(app)->actions.selected == UI_ACTION_DOWNLOAD);
@@ -1587,8 +1586,9 @@ static void test_download_final_reply_loses_queue(void)
     CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
     CHECK(app_state(app)->dock.file_kept == 1);
     CHECK(strstr(app_state(app)->dock.message, "FINAL REPLY MISSING") != NULL);
-    CHECK(content_is("ux0:data/B.BIN", "HELLO"));
-    CHECK(!fake_fs_exists("ux0:data/A.BIN"));
+    CHECK(strstr(app_state(app)->dock.message, "1 ITEM CANCELLED") != NULL);
+    CHECK(content_is("ux0:data/A.BIN", "HELLO"));
+    CHECK(!fake_fs_exists("ux0:data/B.BIN"));
 
     app_destroy(app);
 }

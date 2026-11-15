@@ -11,6 +11,19 @@ This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
 
+## Open-issues pass (b67, host)
+
+**Date:** 2026-11-15
+**Build:** pending
+**Scope:** the b66 review's deferred data-loss preflight, the sidecar rename
+denial, the listing-slot lifetime, and the two missing tests.
+
+Host evidence: `test_download_size_preflight` (a stale 100-byte hint replaced by
+a 5-byte SIZE), `test_rename_sidecar_refused`, `test_listing_adopt`,
+`test_owner_size_while_download`, and the corrected two-item
+`test_download_final_reply_loses_queue`. The per-PASV data-port identity is a
+recorded decision, not code. No console row is claimed.
+
 ## Review remediation (host pass)
 
 **Date:** 2026-11-15
