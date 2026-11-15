@@ -27,8 +27,8 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b56.vpk`, 263,198 bytes,
-  SHA-256 `5f5fe87e5cd4d0328e552eb6ca55454d4383a18099d4c183a0800c79bc149be5`.
+- **Current artifact:** `vitaftpshell-v01.00-b57.vpk`, 263,998 bytes,
+  SHA-256 `e51af216cc17c69a9252824f703b0fad91e192b3bb8742aafbdb3ae19817e398`.
 - **Last hardware-observed build:** b43 (operator report, 2026-11-14): copy,
   paste, new folder, rename, and download work and the dock words read correctly.
   b49 adds the b41 parallel lanes, is built, and is host-tested, not tested on hardware. b40 crashed; its four
@@ -39,8 +39,14 @@ matrix passes.
   PASV data refusal); `logs/b20/` (complete worker-stack core); `logs/b18/`
   (first diagnostic log and truncated core). The `logs/` tree is local and
   git-ignored; copy it with `tools/logs/pull.sh <vita-ip>`.
-- **Matrix:** no M1–M8 row has passed. The FTP server works on hardware; the
-  local manager and FTP client still need the hardware pass.
+- **Matrix:** no M1–M13 row has passed on b57. The server browses, and local
+  MKD/rename/delete work on hardware; a server upload is the open defect (M5).
+
+## Open defects
+
+| Build | Symptom | Instrument | Status |
+|---|---|---|---|
+| b57 | **FTP server uploads never start.** FileZilla queues a file until it fails; MKD, rename, delete, and listings work, and the app's own client to localhost fails the same way. Downloads are not yet reported. | The server traces every command, reply, data accept, temp open, first read, commit, and close to `ux0:data/vitaFTPShell/session.log`; `PASS` is masked. `test_server` asserts the trace and the masking. | `PENDING b57` |
 
 ## Build and install
 

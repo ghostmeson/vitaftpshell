@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-15 — Phase 6 review remediation (b55/b56): a full review of the b49 diff found 29 findings and five lane-flow gaps; the remediation plan is `docs/plans/2026-11-15-1213-fix-b50-review-remediation-plan.md`, and U1-U10 landed: the failed-transfer terminal, the two-lane local guard and WAIT prompts, prompt identity, the UI stack budget (dispatch 80 B), budgeted transfer pumps, the server accept/reply/idle bounds, the single sidecar owner, and the dead-surface cleanup. b56 re-packages the same code with the settled launcher icon (D84). Twenty-one host suites, 40 preview states, ASan/UBSan clean, gate green | Install b56 and run M1-M13, including the new failed-transfer, two-lane, prompt, server-session, and sidecar rows | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b56.vpk` (263,198 bytes) links the real app. M13/M10 are PART; M1-M9, M11, M12 are pending, so not `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-15 — Phase 6 hardware pass found a server upload defect: FileZilla and the app's own client list, create folders, rename, and delete, but an upload never starts and eventually fails. b57 adds a server command/reply/data trace to `ux0:data/vitaFTPShell/session.log` (`PASS` masked) plus `test_server` coverage, to find the stall on the console | Install b57, start the server, attempt one upload from FileZilla (and, if possible, the app's own client to localhost), then pull `ux0:data/vitaFTPShell/session.log` and share the `FTPC`/`FTPR`/`FTPD` lines | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b57.vpk` (263,998 bytes). The upload row is the blocked one; the rest of M1-M13 and the earlier b55/b56 evidence are unchanged. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
@@ -27,7 +27,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 3. Protocol engines | done | Client and server machines against scripted peers |
 | 4. Operations and state | done | Queue, planner, executor, reducer, handoff |
 | 5. Screens and composition | done | Seven surfaces, adapters, runtime, host integration test |
-| 6. Hardware verification | in progress | M1-M13 evidence on b55; project becomes `verified` |
+| 6. Hardware verification | in progress | M1-M13 evidence on b57; the server upload defect is the open row |
 
 ## Current state
 
@@ -43,12 +43,11 @@ target console with evidence. Host tests alone cannot promote it.
   `.c`/`.h` under `src/` plus the twenty-one host suites; `./tools/preview/run.sh`
   renders 40 settled states. `./send.sh <vita-ip>` refuses an artifact whose
   build number does not match `BUILD_NUMBER`.
-- **Next:** Install b49 and run M12: a local copy beside an unrelated
-  download, a colliding paste with WAIT/SKIP/CANCEL, a server `STOR` on a held
-  path answering 450 while a sibling succeeds, and unrelated `PASV`/`LIST`. The
-  b43 operator report covers M13's operations and M10's dock words; M1–M9, M11,
-  and M12 still need row-level observations. The project stays `building` until
-  every row is a recorded PASS.
+- **Next:** Install b57, start the server, attempt one upload, and pull
+  `ux0:data/vitaFTPShell/session.log`. The `FTPC`/`FTPR`/`FTPD` lines name the
+  command that stalls (PASV, STOR, 150, data accept, temp open, or write). M5 is
+  the open row; M13's operations and M10's dock words were seen on b43, but the
+  rest of M1-M13 still needs a b57 pass. The project stays `building`.
 - **Product shape:** two live panes on the Vita — local files and a saved FTP
   site — with a site manager, transfer dock, local file manager, and an
   anonymous FTP server.
@@ -137,6 +136,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 2026-11-13 | Phase 6 — b37 hardware run (U14) | The operator reported the b37 VPK installed and exercised on the console. The b37 fix rows moved from `HOST` to `HW` in `docs/FIXES.md`; row-level M1–M8 observations are still to be transcribed. No log was pulled with the report. The project remains `building`. |
 | 2026-11-13 | Phase 6 — remote volume-root fix (U14) | b38 fixes the b37 regression where the remote pane could not enter its own server's `UX0:`, `UR0:`, or `UMA0:` roots. The unsafe-name guard refused Cross on every row containing `:`, including directories; navigation builds no local path. A directory row now opens, while files still refuse `UNSAFE NAME` and Square still refuses marking. Added reducer and integration `test_remote_volume_root_open`; both were red before the fix. D67. Build `vitaftpshell-v01.00-b38.vpk`; not hardware-tested yet. |
 | 2026-11-14 | Phase 6 — b40 correction pass (U18–U24) | Cursor COPY/MOVE, one batch terminal with past-tense dock words, one conflict prompt per batch, full local cancel, the cyan cursor slab, the active-pane glow, and red failures. `vitaftpshell-v01.00-b40.vpk`; not hardware-tested yet. |
+| 2026-11-15 | Server upload defect (b57) | The b56 console pass found that the anonymous FTP server will not accept an upload: FileZilla queues the file and fails, while listings, MKD, rename, and delete work; the app's client to localhost fails the same way. Added a protocol trace (`FTPC`/`FTPR`/`FTPD`, PASS masked) to the session log and a server test for it. `vitaftpshell-v01.00-b57.vpk`; root cause pending the console log. |
 | 2026-11-15 | Launcher icon (b56) | Replaced the placeholder icon with the settled centred two-arrow mark: true black field, yellow network arrow over cyan local arrow, mask-safe 70×60 box, indexed 8-bit for the installer guard (D84). `vitaftpshell-v01.00-b56.vpk`; code unchanged from b55, M1–M13 pending. |
 | 2026-11-15 | Phase 6 — review remediation (b55) | Planned and landed U1–U12 of the b49 review remediation: one failed terminal for a local open failure, the local lane beside the network lane with WAIT on either, prompt identity, the UI dispatch off the stack (80 B), budgeted transfer pumps, the server accept/reply/idle bounds, the single sidecar owner, dead-surface cleanup, the docs truth pass, and the threaded app test plus ASan script. `vitaftpshell-v01.00-b55.vpk`; M1–M13 pending. |
 | 2026-11-14 | Phase 6 — parallel lanes (b49) | Implemented U25–U27: resumable executor and worker interleave; canonical-path reservations with WAIT/SKIP/CANCEL, network claims, and server 450/disarm; two-lane dock with a local badge and KEEP/CANCEL NETWORK/CANCEL LOCAL. `vitaftpshell-v01.00-b49.vpk`; host-tested, M12 pending. |
