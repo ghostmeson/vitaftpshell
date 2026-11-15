@@ -17,7 +17,7 @@ This file is an **index**, not the full evidence record:
 | Tag | Meaning |
 |---|---|
 | `HW` | The result was observed on the console in the named build. |
-| `HOST b65` | Host suites pass; the Vita result is not yet proven. |
+| `HOST b66` | Host suites pass; the Vita result is not yet proven. |
 | `PENDING` | Built but not yet run on hardware. |
 | `PART` | One part is hardware-observed; the named remainder is not. |
 
@@ -27,8 +27,8 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b65.vpk`, 264,427 bytes,
-  SHA-256 `eb28f708b1ea698cc14441b557ff0bd44096b00bdc6c87cca06f37d965dd6ef8`.
+- **Current artifact:** `vitaftpshell-v01.00-b66.vpk`, 263,333 bytes,
+  SHA-256 `a659db8a072f44133c61a0b2ed16b1db2ce711805abee810811c48485b623818`.
 - **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
   FileZilla upload and download work with two sessions; the app-local client
   transfers on all three volumes. The session log is `logs/session-b60.log`.
@@ -49,20 +49,27 @@ matrix passes.
   retry. M5 remains PART only for a FileZilla rename/delete and the full
   three-volume browse.
 
-## Review remediation (b65)
+## Review remediation (b66)
 
 | Build | Symptom | Cause and fix | Evidence | Status |
 |---|---|---|---|---|
-| b65 | **A rename onto an existing name opened the conflict prompt, and the answer ran nothing.** | The single-item conflict producer survived while its answer branch was deleted; the prompt frees the plan, so the answer must re-plan. Restore the branch, count a refused re-plan as failed, and key the prompt kind on an enum (U1, R1). | `test_local_rename_conflict`; host run | `HOST b65` |
-| b65 | **A download that received every byte then waited forever for the final 226.** | No deadline covered the draining state; the stage deadline had been cleared and the data deadline removed. Arm a final-reply deadline, keep a known-complete download, remove a short one, end the session, and name the remaining queue (U2, R2, D89). | `test_download_final_reply_missing`, `test_download_final_reply_short`, `test_upload_final_reply_missing`, `test_download_final_reply_loses_queue`, render kept case; host run | `HOST b65` |
-| b65 | **A client that dropped between PASV and its data command kept the only data slot; every other client got 450.** | The close test counted only an active transfer or a pending accept. Release any non-idle slot the closing session owns, emit an event only for an active transfer, and delegate the control-failed path to the close path (U3, R3). | `test_close_while_armed`, `test_owner_close_active_one_event`; host run | `HOST b65` |
-| b65 | **A foreign ABOR disarmed the owner's armed PASV.** | The third ABOR branch disarmed any session's slot. Only the owner may disarm it (U3, R4). | `test_foreign_abor_keeps_pasv`; host run | `HOST b65` |
-| b65 | **The server answered 450 for the file the same session was uploading.** | The guard could not exclude one session. Let the owner read metadata for its own transfer path; an upload destination answers 550, never the old size; other sessions stay guarded (U4, R5, D90). | `test_owner_size_while_upload`; host run | `HOST b65` |
-| b65 | **A dropped PASS command wrote its argument to the session log.** | The drop path traced the raw line before the mask. Mask by a case-insensitive first token before the backlog branch (U4, R6). | host review; `test_trace_masks_password` covers the accepted path | `HOST b65` |
-| b65 | **The local terminal badge vanished while the network lane ran.** | The inline badge predicate accepted only active or waiting. Share one predicate and name the terminal words (U6, R8). | `test_render_workspace`; host run | `HOST b65` |
-| b65 | **The CLIENT panel paired one peer with another session's command.** | The panel read server-global peer and command fields. Carry the session index, peer, masked verb, and path on the event; fall back to the live session on close (U6, R8). | `test_client_event_pairs_session`; host run | `HOST b65` |
-| b65 | **Reservation logic duplicated the path module's case folding and ancestry, and the header exposed its 288 KiB layout.** | Export `path_ci_equal`/`path_is_ancestor`; make `Reserve` opaque with create/destroy; state the lane-blind contract (U5, R7). | `test_reserve`, `test_path`; host run | `HOST b65` |
-| b65 | **The stack gate copied the worker recursion depth; the sanitizer covered 3 of 21 suites and nothing ran it.** | Read the depth from one header and fail closed; run every suite under ASan/UBSan and add a CI step (U8, R11). | `test_asan`; gate self-test; host run | `HOST b65` |
+| b66 | **A rename onto an existing name opened the conflict prompt, and the answer ran nothing.** | The single-item conflict producer survived while its answer branch was deleted; the prompt frees the plan, so the answer must re-plan. Restore the branch, count a refused re-plan as failed, and key the prompt kind on an enum (U1, R1). | `test_local_rename_conflict`; host run | `HOST b66` |
+| b66 | **A download that received every byte then waited forever for the final 226.** | No deadline covered the draining state; the stage deadline had been cleared and the data deadline removed. Arm a final-reply deadline, keep a known-complete download, remove a short one, end the session, and name the remaining queue (U2, R2, D89). | `test_download_final_reply_missing`, `test_download_final_reply_short`, `test_upload_final_reply_missing`, `test_download_final_reply_loses_queue`, render kept case; host run | `HOST b66` |
+| b66 | **A client that dropped between PASV and its data command kept the only data slot; every other client got 450.** | The close test counted only an active transfer or a pending accept. Release any non-idle slot the closing session owns, emit an event only for an active transfer, and delegate the control-failed path to the close path (U3, R3). | `test_close_while_armed`, `test_owner_close_active_one_event`; host run | `HOST b66` |
+| b66 | **A foreign ABOR disarmed the owner's armed PASV.** | The third ABOR branch disarmed any session's slot. Only the owner may disarm it (U3, R4). | `test_foreign_abor_keeps_pasv`; host run | `HOST b66` |
+| b66 | **The server answered 450 for the file the same session was uploading.** | The guard could not exclude one session. Let the owner read metadata for its own transfer path; an upload destination answers 550, never the old size; other sessions stay guarded (U4, R5, D90). | `test_owner_size_while_upload`; host run | `HOST b66` |
+| b66 | **A dropped PASS command wrote its argument to the session log.** | The drop path traced the raw line before the mask. Mask by a case-insensitive first token before the backlog branch (U4, R6). | Code inspection; `test_trace_masks_password` covers the accepted path. The fake cannot wedge the reply buffer, so the drop path has no host test. | `HOST b66` |
+| b66 | **The local terminal badge vanished while the network lane ran.** | The inline badge predicate accepted only active or waiting. Share one predicate and name the terminal words (U6, R8). | `test_render_workspace`; host run | `HOST b66` |
+| b66 | **The CLIENT panel paired one peer with another session's command.** | The panel read server-global peer and command fields. Carry the session index, peer, masked verb, and path on the event; fall back to the live session on close (U6, R8). | `test_client_event_pairs_session`; host run | `HOST b66` |
+| b66 | **Reservation logic duplicated the path module's case folding and ancestry, and the header exposed its 288 KiB layout.** | Export `path_ci_equal`/`path_is_ancestor`; make `Reserve` opaque with create/destroy; state the lane-blind contract (U5, R7). | `test_reserve`, `test_path`; host run | `HOST b66` |
+| b66 | **The stack gate copied the worker recursion depth; the sanitizer covered 3 of 21 suites and nothing ran it.** | Read the depth from one header and fail closed; run every suite under ASan/UBSan and add a CI step (U8, R11). | `test_asan`; gate self-test; host run | `HOST b66` |
+
+**Still open from the b65 review, recorded rather than built:**
+
+- The download keep rule uses the listing size; a per-transfer SIZE/MLST preflight is deferred (review #7, data-loss direction).
+- No host test drives the owner's own RETR metadata read with a busy guard (review #11).
+- `test_download_final_reply_loses_queue` queues one item, so the "N ITEMS CANCELLED" suffix has no test (review #13).
+- The reply-backlog PASS drop path has no fake seam, so its mask rests on code inspection (review #9).
 
 **Still open from the b63 review, recorded rather than built** (U7):
 
@@ -104,17 +111,17 @@ matrix passes.
 
 | Build | Symptom → cause | Fix | Evidence | Status |
 |---|---|---|---|---|
-| b19 | At `ux0:`, every selected child inherited `VOLUME ROOT`, so copy/move/rename/delete were dead | Classify the selected source, not the pane path; only the root itself is locked | `test_local_actions_inside_volume_root` | `HOST b65` |
-| b19 | A run stayed on ACTIONS, which has no status line, so success and failure looked identical | Return to WORKSPACE after a run/confirm; show `state->status` in the idle and ACTIONS docks | `test_action_returns_to_workspace` | `HOST b65` |
-| b22 | With the cursor on `..` or an empty folder, actions silently targeted the current folder from inside it | `UiActions.has_selection`; no selection disables every action except NEW FOLDER; ledger/target/dock say `NO SELECTION`; a guard refuses a manually enabled action | `test_actions_no_selection`, `test_local_new_folder_without_selection` | `HOST b65` |
-| b24 | COPY/MOVE always used the current folder as destination; MOVE could not work and COPY offered to overwrite its own source | VitaShell-style clipboard: COPY/MOVE freeze the marks, the user navigates, PASTE runs into the new folder; CLEAR discards; same-folder MOVE is disabled | `test_clipboard_copy`, `test_clipboard_move` | `HOST b65` |
-| b24 | Deleted marks stayed in the pane, so the next DELETE confirmation listed already-deleted files | `prune_marks` drops a mark whose folder is being listed and whose row is gone; marks in other folders survive | `test_delete_confirm_fresh`, `test_marks_pruned_after_delete` | `HOST b65` |
-| b24 | DELETE showed bare names, ambiguous when marks came from different folders | Confirmation lists the full path of every source (`UiConfirm.local_paths`) | `test_delete_confirm_fresh`, `test_delete_high_risk_and_protected` | `HOST b65` |
-| b24 | A high-risk delete skipped the item list and showed only one risk path | One DELETE dialog carries the full list, `high_risk`, and the risk path; the DELETE choice sets `value=1` for the worker | `test_delete_high_risk_and_protected` | `HOST b65` |
-| b24 | `boot_config.txt` and protected paths needed a single gate before the dialog | Refuse before the confirmation; the worker repeats the plan-time check | `test_delete_high_risk_and_protected` | `HOST b65` |
-| b24 | A local delete rendered as `MOVE` in the dock | Add `XFER_DIR_LOCAL_DELETE`; the dock says `DELETE` | host suites | `HOST b65` |
+| b19 | At `ux0:`, every selected child inherited `VOLUME ROOT`, so copy/move/rename/delete were dead | Classify the selected source, not the pane path; only the root itself is locked | `test_local_actions_inside_volume_root` | `HOST b66` |
+| b19 | A run stayed on ACTIONS, which has no status line, so success and failure looked identical | Return to WORKSPACE after a run/confirm; show `state->status` in the idle and ACTIONS docks | `test_action_returns_to_workspace` | `HOST b66` |
+| b22 | With the cursor on `..` or an empty folder, actions silently targeted the current folder from inside it | `UiActions.has_selection`; no selection disables every action except NEW FOLDER; ledger/target/dock say `NO SELECTION`; a guard refuses a manually enabled action | `test_actions_no_selection`, `test_local_new_folder_without_selection` | `HOST b66` |
+| b24 | COPY/MOVE always used the current folder as destination; MOVE could not work and COPY offered to overwrite its own source | VitaShell-style clipboard: COPY/MOVE freeze the marks, the user navigates, PASTE runs into the new folder; CLEAR discards; same-folder MOVE is disabled | `test_clipboard_copy`, `test_clipboard_move` | `HOST b66` |
+| b24 | Deleted marks stayed in the pane, so the next DELETE confirmation listed already-deleted files | `prune_marks` drops a mark whose folder is being listed and whose row is gone; marks in other folders survive | `test_delete_confirm_fresh`, `test_marks_pruned_after_delete` | `HOST b66` |
+| b24 | DELETE showed bare names, ambiguous when marks came from different folders | Confirmation lists the full path of every source (`UiConfirm.local_paths`) | `test_delete_confirm_fresh`, `test_delete_high_risk_and_protected` | `HOST b66` |
+| b24 | A high-risk delete skipped the item list and showed only one risk path | One DELETE dialog carries the full list, `high_risk`, and the risk path; the DELETE choice sets `value=1` for the worker | `test_delete_high_risk_and_protected` | `HOST b66` |
+| b24 | `boot_config.txt` and protected paths needed a single gate before the dialog | Refuse before the confirmation; the worker repeats the plan-time check | `test_delete_high_risk_and_protected` | `HOST b66` |
+| b24 | A local delete rendered as `MOVE` in the dock | Add `XFER_DIR_LOCAL_DELETE`; the dock says `DELETE` | host suites | `HOST b66` |
 | b24 | Basic local rename/delete after the fix | Same actions, no stale state | b27 log: IME rename and DELETE confirm/run completed with `transfer_done` | `HW b27` basic path |
-| b25 | A worker confirmation arriving while a local confirm or IME was open was taken and dropped as `CONFIRM BUSY`; the worker stayed pending and all later actions froze | Leave the handoff confirm latched until the screen is free and the IME is inactive; then feed it | host suites | `HOST b65` |
+| b25 | A worker confirmation arriving while a local confirm or IME was open was taken and dropped as `CONFIRM BUSY`; the worker stayed pending and all later actions froze | Leave the handoff confirm latched until the screen is free and the IME is inactive; then feed it | host suites | `HOST b66` |
 
 ## IME
 
@@ -142,9 +149,9 @@ matrix passes.
 
 | Build | Symptom → cause | Fix | Evidence | Status |
 |---|---|---|---|---|
-| b20 | `connect_fail` recorded only `stage=connect cls=network`, not why TCP failed | Add `FtpClientEvent.net` and log it as `value=` | `test_connect_refused` | `HOST b65` |
+| b20 | `connect_fail` recorded only `stage=connect cls=network`, not why TCP failed | Add `FtpClientEvent.net` and log it as `value=` | `test_connect_refused` | `HOST b66` |
 | b26 | External site failed at the old 3 s connect deadline; no resolved IP, raw result, or connecting UI | 12 s connect, 5 s greeting/login, session budget; log resolved IPv4/port and raw `NetResult`; resolver-zero fallback; `CONNECTING` in SITES and remote pane | b27 `connect path=127.0.0.1`; control/login worked | `HW b27` control path |
-| b27 | `CONNECTING` could stick after a remote error or an unrelated site-book save | Clear on remote error/session loss/login failure; not on a successful site-book save | host suites | `HOST b65` |
+| b27 | `CONNECTING` could stick after a remote error or an unrelated site-book save | Clear on remote error/session loss/login failure; not on a successful site-book save | host suites | `HOST b66` |
 | b28 | Localhost control/login worked, then `stage=data cls=server`: the server's PASV LAN address differed from the client's `127.0.0.1` control peer and was refused | Ignore the PASV host; connect to the control peer with the reply port; first listing 10 s, command 10 s, data idle 20 s, session 35 s; log the data `NetResult` | `test_reply` PASV peer/port, `test_client` `test_pasv_nat` | `PENDING b28` |
 
 ## Remote pane

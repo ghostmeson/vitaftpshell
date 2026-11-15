@@ -2749,8 +2749,6 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
                   worker->connecting_valid ? worker->connecting_site.host : NULL,
                   finished.source.text, op_stage_name(event->stage),
                   op_cause_name(event->cause), event->bytes, event->total);
-        if (event->file_kept && finished.direction == XFER_DIR_DOWNLOAD)
-            refresh_local_after_download(worker, &finished);
     }
 
     batch_finish(worker);
@@ -2848,6 +2846,9 @@ static void client_event(void *ctx, const FtpClientEvent *event)
                                    event->total_known, event->cause,
                                    event->stage, worker->transfer_start_ms,
                                    text);
+                if (event->file_kept &&
+                    item.direction == XFER_DIR_DOWNLOAD)
+                    refresh_local_after_download(worker, &item);
             }
             reset_remote_session(worker);
         }
@@ -2965,8 +2966,9 @@ static void server_event(void *ctx, const FtpServerEvent *event)
         if (!worker->server_transfer_active) {
             worker->server_transfer_active = 1;
             worker->server_transfer_start_ms = now_ms(worker);
-            const char *command = ftp_server_last_command(worker->server);
-            worker->server_direction = strcmp(command, "STOR") == 0
+            const char *command = event->op;
+            worker->server_direction =
+                command != NULL && strcmp(command, "STOR") == 0
                                            ? XFER_DIR_SERVER_UPLOAD
                                            : XFER_DIR_SERVER_DOWNLOAD;
             fmt_copy(worker->server_name, sizeof(worker->server_name),
@@ -3409,6 +3411,16 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
     worker->handoff = handoff;
     worker->reserve = reserve_create();
     if (worker->reserve == NULL) {
+        /* U5: a failed allocation refuses both lanes with one record instead of
+         * running unguarded or looking like a crash. */
+        if (ports->log != NULL) {
+            LogRecord record;
+            logev_init(&record, LOGEV_LOG);
+            record.detail = "worker: reservation allocation failed";
+            record.cls = "app";
+            (void)logev_emit(ports->log,
+                             ports->clock->now_ms(ports->clock->ctx), &record);
+        }
         free(worker);
         return NULL;
     }

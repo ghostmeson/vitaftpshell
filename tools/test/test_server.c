@@ -61,6 +61,8 @@ static void capture_event(void *ctx, const FtpServerEvent *event)
         cap->peer_addr = event->peer.addr;
         snprintf(cap->op, sizeof(cap->op), "%s",
                  event->op != NULL ? event->op : "");
+        snprintf(cap->path, sizeof(cap->path), "%s",
+                 event->path != NULL ? event->path : "");
         break;
     case FTP_SERVER_EVENT_PROGRESS:
         cap->progress++;
@@ -319,6 +321,7 @@ static void test_client_event_pairs_session(void)
     CHECK(cap.session_index == 0);
     CHECK(cap.peer_addr == PEER_ADDR);
     CHECK(strcmp(cap.op, "PWD") == 0);
+    CHECK(strcmp(cap.path, "/") == 0);
 
     command(server, &a, "CWD /UX0:", 250);
     CHECK(cap.session_index == 1);
@@ -764,6 +767,43 @@ static void test_owner_size_while_upload(void)
     command_text(server, &a, "SIZE ux0:/data/old.bin", 550, text, sizeof(text));
     CHECK(strstr(text, "3") == NULL);
 
+    ftp_server_destroy(server);
+}
+
+static int s_tree_holds;
+
+static int tree_guard(void *ctx, FtpGuardAction action, const char *path,
+                      int write, int tree)
+{
+    (void)ctx;
+    (void)path;
+    (void)write;
+    if (action == FTP_GUARD_HOLD && tree)
+        s_tree_holds++;
+    return 0;
+}
+
+/* A tree command checks the path but must not leave a hold behind; a leaked
+ * hold makes the next rename on the path answer 450. */
+static void test_tree_command_releases(void)
+{
+    setup();
+    fake_fs_seed_file("ux0:data/a.bin", "A", 1);
+    fake_fs_seed_file("ux0:data/b.bin", "B", 1);
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    s_tree_holds = 0;
+    ftp_server_set_guard(server, tree_guard, NULL);
+    FakeFtpClient a;
+    connect_session(server, &a);
+
+    command(server, &a, "DELE ux0:/data/a.bin", 250);
+    command(server, &a, "RNFR ux0:/data/b.bin", 350);
+    command(server, &a, "RNTO ux0:/data/c.bin", 250);
+    CHECK(s_tree_holds == 0);
+
+    command(server, &a, "QUIT", 221);
     ftp_server_destroy(server);
 }
 
@@ -1438,6 +1478,7 @@ int main(void)
     test_owner_close_active_one_event();
     test_foreign_abor_keeps_pasv();
     test_storage_failure_451();
+    test_tree_command_releases();
     test_trace_masks_password();
     test_owner_size_while_upload();
     test_held_path();

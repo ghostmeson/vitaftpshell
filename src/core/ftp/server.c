@@ -76,7 +76,6 @@ struct FtpServer {
     NetSocket *data_listener;
 
     ServerSession sessions[SERVER_MAX_CLIENTS];
-    NetAddress last_peer;
     int active_session;
     unsigned accept_counter;
 
@@ -121,6 +120,7 @@ struct FtpServer {
 static ServerSession *server_session_at(FtpServer *server, int index);
 static int server_session_index(FtpServer *server,
                                 const ServerSession *session);
+static ServerSession *server_data_owner(FtpServer *server);
 
 static uint64_t server_now(FtpServer *server)
 {
@@ -196,6 +196,8 @@ static void server_progress_event(FtpServer *server)
     event.clients = server->clients;
     event.data_state = server->data_state;
     event.stage = FTP_STAGE_DATA;
+    ServerSession *owner = server_data_owner(server);
+    event.op = owner != NULL ? owner->last_command : NULL;
     event.path = server->active_virtual;
     event.bytes = server->transferred;
     event.total = server->total;
@@ -393,6 +395,8 @@ static void server_close_transfer(FtpServer *server)
     server->data_off = 0;
     server->listing_root = 0;
     server->listing_single = 0;
+    server->active_virtual[0] = '\0';
+    server->active_local[0] = '\0';
     server->listing_single_used = 0;
     server->root_index = 0;
     server->data_session = -1;
@@ -434,10 +438,11 @@ static void server_release_owned_data(FtpServer *server,
  * flipped call read as a different operation with no compiler help. */
 typedef enum {
     SERVER_PATH_READ = 0,   /* metadata read: no hold */
-    SERVER_PATH_DATA_READ,  /* listing or download: hold a read */
+    SERVER_PATH_DATA_READ,  /* MLSD/NLST/RETR: hold a read */
+    SERVER_PATH_LIST_READ,  /* LIST: a read check without a hold */
     SERVER_PATH_CHECK_WRITE,/* upload precheck: check a write, no hold */
     SERVER_PATH_DATA_WRITE, /* upload: hold a write */
-    SERVER_PATH_TREE_WRITE  /* delete/mkdir/rmdir/rename: hold a write tree */
+    SERVER_PATH_TREE_WRITE  /* delete/mkdir/rmdir/rename: check a write tree */
 } ServerPathAccess;
 
 /* The one transfer path this session owns right now (RETR source or STOR
@@ -476,9 +481,11 @@ static int server_path_held(ServerSession *session, const char *local,
                 access == SERVER_PATH_DATA_WRITE ||
                 access == SERVER_PATH_TREE_WRITE;
     int tree = access == SERVER_PATH_TREE_WRITE;
+    /* Tree commands finish inside their handler, so they check but never
+     * hold; a hold there would outlive the command and refuse the next
+     * rename on the path (the base behavior this enum restores). */
     int hold = access == SERVER_PATH_DATA_READ ||
-               access == SERVER_PATH_DATA_WRITE ||
-               access == SERVER_PATH_TREE_WRITE;
+               access == SERVER_PATH_DATA_WRITE;
 
     if (server->guard(server->guard_ctx, FTP_GUARD_CHECK, local, write, tree)) {
         server_reply(session, 450, "Path busy.");
@@ -1279,8 +1286,10 @@ static int server_data_command(ServerSession *session, ServerDataKind kind,
     server->data_session = server_session_index(server, session);
     if (!is_root &&
         server_path_held(session, local.text,
-                         kind == SDATA_STOR ? SERVER_PATH_DATA_WRITE
-                                            : SERVER_PATH_DATA_READ))
+                         kind == SDATA_STOR
+                             ? SERVER_PATH_DATA_WRITE
+                             : (kind == SDATA_LIST ? SERVER_PATH_LIST_READ
+                                                    : SERVER_PATH_DATA_READ)))
         return 0;
 
     snprintf(server->active_virtual, sizeof(server->active_virtual), "%s",
@@ -1727,7 +1736,7 @@ static void server_handle_command(ServerSession *session, const char *line,
     int index = server_session_index(server, session);
 
     char cmd[16];
-    const char *space = strchr(line, ' ');
+    const char *space = strpbrk(line, " \t");
     size_t cmd_len = space != NULL ? (size_t)(space - line) : strlen(line);
     if (cmd_len == 0) {
         server_reply(session, 500, "Command not understood.");
@@ -1770,7 +1779,7 @@ static void server_handle_command(ServerSession *session, const char *line,
         server_trace(server, "FTPC %s", line);
 
     const char *arg = space != NULL ? space + 1 : "";
-    while (*arg == ' ')
+    while (*arg == ' ' || *arg == '\t')
         arg++;
 
     if (strcmp(cmd, "ABOR") == 0) {
@@ -2084,7 +2093,6 @@ static void server_accept_control(FtpServer *server)
     session->cwd[1] = '\0';
     session->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
     ftp_line_init(&session->lines);
-    server->last_peer = peer;
     server->clients++;
     server->state = FTP_SERVER_SESSION;
     server_emit_state_and_client(server);
@@ -2344,12 +2352,6 @@ int ftp_server_busy(const FtpServer *server)
 uint16_t ftp_server_control_port(const FtpServer *server)
 {
     return server != NULL ? server->control_port : 0;
-}
-
-NetAddress ftp_server_peer(const FtpServer *server)
-{
-    NetAddress none = {0, 0};
-    return server != NULL ? server->last_peer : none;
 }
 
 const char *ftp_server_last_command(const FtpServer *server)

@@ -271,8 +271,7 @@ static void plan_file_move(FsOpPlan *plan, const char *source, const char *dest,
         }
     }
 
-    PathRisk risk = PATH_RISK_NORMAL;
-    PathResult pr = path_check_rename(source, dest, 0, &risk);
+    PathResult pr = path_check_rename(source, dest, 0, NULL);
     if (pr != PATH_OK) {
         fail(plan, path_reason(pr, dest));
         return;
@@ -320,14 +319,13 @@ static void plan_file_copy(FsOpPlan *plan, const char *source,
         }
     }
 
-    PathRisk risk = PATH_RISK_NORMAL;
-    PathResult pr = path_check_read(source, 0, &risk);
+    PathResult pr = path_check_read(source, 0, NULL);
     if (pr != PATH_OK) {
         fail(plan, path_reason(pr, source));
         return;
     }
 
-    pr = path_check_write(dest, 0, &risk);
+    pr = path_check_write(dest, 0, NULL);
     if (pr != PATH_OK) {
         fail(plan, path_reason(pr, dest));
         return;
@@ -404,8 +402,7 @@ static void plan_tree(FsOpPlan *plan, const char *source, const char *dest,
     }
 
     if (!dest_exists) {
-        PathRisk risk = PATH_RISK_NORMAL;
-        PathResult pr = path_check_write(dest, 0, &risk);
+        PathResult pr = path_check_write(dest, 0, NULL);
         if (pr != PATH_OK) {
             fail(plan, path_reason(pr, dest));
             return;
@@ -421,8 +418,7 @@ static void plan_tree(FsOpPlan *plan, const char *source, const char *dest,
         return;
 
     if (move) {
-        PathRisk risk = PATH_RISK_NORMAL;
-        PathResult pr = path_check_delete(source, 0, &risk);
+        PathResult pr = path_check_delete(source, 0, NULL);
         if (pr != PATH_OK) {
             fail(plan, path_reason(pr, source));
             return;
@@ -513,9 +509,8 @@ static void plan_copy_or_move(FsOpPlan *plan, const FsOpRequest *request)
             int dest_exists = fact_exists(request->facts, dest.text, &dest_fact);
 
             if (same_volume && !dest_exists) {
-                PathRisk risk = PATH_RISK_NORMAL;
                 PathResult pr =
-                    path_check_rename(source.text, dest.text, 0, &risk);
+                    path_check_rename(source.text, dest.text, 0, NULL);
                 if (pr != PATH_OK) {
                     fail(plan, path_reason(pr, dest.text));
                     return;
@@ -544,8 +539,7 @@ static void plan_delete_tree(FsOpPlan *plan, const char *path,
         return;
     }
 
-    PathRisk risk = PATH_RISK_NORMAL;
-    PathResult pr = path_check_delete(path, 0, &risk);
+    PathResult pr = path_check_delete(path, 0, NULL);
     if (pr != PATH_OK) {
         fail(plan, path_reason(pr, path));
         return;
@@ -624,8 +618,7 @@ static void plan_mkdir(FsOpPlan *plan, const FsOpRequest *request)
         return;
     }
 
-    PathRisk risk = PATH_RISK_NORMAL;
-    PathResult pr = path_check_write(dest.text, 0, &risk);
+    PathResult pr = path_check_write(dest.text, 0, NULL);
     if (pr != PATH_OK) {
         fail(plan, path_reason(pr, dest.text));
         return;
@@ -682,8 +675,7 @@ static void plan_rename(FsOpPlan *plan, const FsOpRequest *request)
         }
     }
 
-    PathRisk risk = PATH_RISK_NORMAL;
-    PathResult pr = path_check_rename(source.text, dest.text, 0, &risk);
+    PathResult pr = path_check_rename(source.text, dest.text, 0, NULL);
     if (pr != PATH_OK) {
         fail(plan, path_reason(pr, dest.text));
         return;

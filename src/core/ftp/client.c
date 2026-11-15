@@ -207,6 +207,9 @@ static void client_state_event(FtpClient *client)
     event.operation = client->op;
     event.detail = client->last_detail[0] != '\0' ? client->last_detail : NULL;
     event.file_kept = client->file_kept;
+    event.bytes = client->transferred;
+    event.total = client->total;
+    event.total_known = client->total_known;
     client_emit(client, &event);
 }
 
@@ -771,7 +774,9 @@ static void client_finish_without_reply(FtpClient *client)
     }
 
     client_enter_terminal(client, FTP_CLIENT_LOST, FTP_CAUSE_NETWORK,
-                          FTP_STAGE_TRANSFER, "FINAL REPLY MISSING");
+                          client->data_kind == CDATA_LIST ? FTP_STAGE_DATA
+                                                          : FTP_STAGE_TRANSFER,
+                          "FINAL REPLY MISSING");
 }
 
 static void client_protocol_error(FtpClient *client, const char *detail)

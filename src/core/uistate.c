@@ -1572,7 +1572,6 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             UiConfirm *confirm = &state->confirm;
             confirm->items = confirm->local_items;
             confirm->item_count = source_count;
-            confirm->high_risk = 0;
             snprintf(confirm->title, sizeof(confirm->title), "DELETE %d ITEM%s",
                      source_count, source_count == 1 ? "" : "S");
             fmt_copy(confirm->context, sizeof(confirm->context), destination);
