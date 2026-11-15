@@ -146,6 +146,8 @@ matrix passes.
 | b55 | The server drains foreign data peers, reports a reply backlog, checks its 450, and closes a 30 s idle session | `test_peer_check`, `test_peer_check_recovers`, `test_control_idle` | `HOST b55` |
 | b55 | The transfer sidecar has one owner; a failed restore names the kept copy; `.part` is hidden | `test_path`, `test_reserve`, `test_fsop_run` | `HOST b55` |
 | b55 | Dead exports removed, sites seeded by events, protected-root flag, action context, rename SKIP and capacity wording | suites; `test_fsop_plan` | `HOST b55` |
+| b55 | The real worker pthread is exercised on the host: listing through the handoff, quit, join, ASan/UBSan clean | `test_app_thread`, `tools/test/asan.sh` | `HOST b55` |
+| b55 | TSan reports a race in the singleton fake clock, not the app | `test_app_thread` under TSan | `PENDING` |
 
 ## b41 parallel lanes (b49)
 

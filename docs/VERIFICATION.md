@@ -17,7 +17,12 @@ cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
 **Build:** `vitaftpshell-v01.00-b55.vpk`
 **SHA-256:** `84e5ed73a8a6d6be73973d544cb4f19dd1dfe401bd972892542821907e4d2349`
 
-Twenty host suites pass with zero warnings and the preview renders 39 states.
+Twenty-one host suites pass with zero warnings and the preview renders 39
+states. The threaded app test runs the real worker pthread, observes the first
+listing through the handoff, and joins on quit. The ASan/UBSan build of the
+integration suite and the threaded test is clean. A TSan run of the threaded
+test reports a data race in the singleton fake clock, not in the app; the fakes
+are not thread-safe, so TSan is not a gate until they are.
 The stack gate reports `handle_action` 6,656 B, the fixed chain 21,628 B, the
 folder-scan product 1,188 B, and the UI dispatch frame 80 B. The U1-U10 work
 adds the local-open failure and retry, two lanes with a held download, the
