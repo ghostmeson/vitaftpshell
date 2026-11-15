@@ -18,9 +18,6 @@
  * refused. The containing directory is not locked (D72 amendment).
  */
 
-#define RESERVE_MAX 4096
-#define RESERVE_ARENA_MAX (256 * 1024)
-
 typedef enum {
     RESERVE_LANE_LOCAL = 0,
     RESERVE_LANE_NETWORK,
@@ -34,19 +31,12 @@ typedef enum {
     RESERVE_TREE
 } ReserveKind;
 
-typedef struct {
-    uint8_t lane;
-    uint8_t kind;
-    uint32_t off;
-} ReserveEntry;
+/* Opaque: the table and arena are an implementation detail. One allocation at
+ * start, one free at shutdown (about 288 KiB). */
+typedef struct Reserve Reserve;
 
-typedef struct {
-    ReserveEntry entries[RESERVE_MAX];
-    int count;
-    char arena[RESERVE_ARENA_MAX];
-    size_t used;
-} Reserve;
-
+Reserve *reserve_create(void);
+void reserve_destroy(Reserve *reserve);
 void reserve_reset(Reserve *reserve);
 
 /* Canonicalize and store. 1 on success; 0 when the table or arena is full. */
@@ -57,8 +47,10 @@ int reserve_add(Reserve *reserve, ReserveLane lane, ReserveKind kind,
 void reserve_release(Reserve *reserve, ReserveLane lane);
 
 /*
- * 1 when `lane` may not take `kind` on `path`. Writes the blocking path into
- * `blocker` when it is non-NULL and large enough.
+ * 1 when any lane holds a reservation that conflicts with `kind` on `path`,
+ * including the caller's own lane; the caller must not check a path it already
+ * holds. Writes the blocking path into `blocker` when it is non-NULL and large
+ * enough.
  */
 int reserve_conflict(const Reserve *reserve, ReserveKind kind, const char *path,
                      char *blocker, size_t cap);

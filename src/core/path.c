@@ -35,6 +35,30 @@ static int ci_prefix(const char *text, const char *prefix)
     return 1;
 }
 
+int path_ci_equal(const char *a, const char *b)
+{
+    return ci_equal(a, b);
+}
+
+int path_is_ancestor(const char *a, const char *b)
+{
+    if (a == NULL || b == NULL || a[0] == '\0' || b[0] == '\0')
+        return 0;
+
+    size_t len = strlen(a);
+    while (len > 0 && a[len - 1] == '/')
+        len--;
+    if (len == 0)
+        return 0;
+    if (!ci_prefix(b, a))
+        return 0;
+    if (b[len] == '\0')
+        return 0;
+    if (a[len - 1] == ':')
+        return 1;
+    return b[len] == '/';
+}
+
 static int is_under(const char *path, const char *dir)
 {
     size_t n = strlen(dir);

@@ -170,6 +170,17 @@ static void test_sidecar_names(void)
     CHECK(path_check_write("ux0:data/A.BIN", 0, NULL) == PATH_OK);
 }
 
+/* The reservation module consumes these; one rule, one owner. */
+static void test_shared_helpers(void)
+{
+    CHECK(path_ci_equal("ux0:data/A.TXT", "UX0:DATA/a.txt"));
+    CHECK(!path_ci_equal("ux0:data/a", "ux0:data/b"));
+    CHECK(path_is_ancestor("ux0:", "ux0:data"));
+    CHECK(path_is_ancestor("ux0:data", "ux0:data/a.bin"));
+    CHECK(!path_is_ancestor("ux0:data/a", "ux0:data/a"));
+    CHECK(!path_is_ancestor("ux0:data/a", "ux0:data/ab"));
+}
+
 int main(void)
 {
     test_canonical();
@@ -178,6 +189,7 @@ int main(void)
     test_safety();
     test_denials_and_risk();
     test_sidecar_names();
+    test_shared_helpers();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_path: %d failure(s)\n", s_failures);

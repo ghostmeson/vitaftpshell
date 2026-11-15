@@ -3,60 +3,33 @@
 #include "core/reserve.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-static int lower_ascii(int c)
+#define RESERVE_MAX 4096
+#define RESERVE_ARENA_MAX (256 * 1024)
+
+typedef struct {
+    uint8_t lane;
+    uint8_t kind;
+    uint32_t off;
+} ReserveEntry;
+
+struct Reserve {
+    ReserveEntry entries[RESERVE_MAX];
+    int count;
+    char arena[RESERVE_ARENA_MAX];
+    size_t used;
+};
+
+Reserve *reserve_create(void)
 {
-    return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
+    return calloc(1, sizeof(Reserve));
 }
 
-static int ci_equal(const char *a, const char *b)
+void reserve_destroy(Reserve *reserve)
 {
-    if (a == NULL || b == NULL)
-        return 0;
-    while (*a != '\0' && *b != '\0') {
-        if (lower_ascii((unsigned char)*a) != lower_ascii((unsigned char)*b))
-            return 0;
-        a++;
-        b++;
-    }
-    return *a == '\0' && *b == '\0';
-}
-
-static int ci_prefix(const char *text, const char *prefix)
-{
-    if (text == NULL || prefix == NULL)
-        return 0;
-    while (*prefix != '\0') {
-        if (*text == '\0' ||
-            lower_ascii((unsigned char)*text) !=
-                lower_ascii((unsigned char)*prefix))
-            return 0;
-        text++;
-        prefix++;
-    }
-    return 1;
-}
-
-/* a is a proper ancestor of b. A volume root ("ux0:") is an ancestor of its
- * contents without a separator. */
-static int path_is_ancestor(const char *a, const char *b)
-{
-    if (a == NULL || b == NULL || a[0] == '\0' || b[0] == '\0')
-        return 0;
-
-    size_t len = strlen(a);
-    while (len > 0 && a[len - 1] == '/')
-        len--;
-    if (len == 0)
-        return 0;
-    if (!ci_prefix(b, a))
-        return 0;
-    if (b[len] == '\0')
-        return 0; /* equal, not an ancestor */
-    if (a[len - 1] == ':')
-        return 1;
-    return b[len] == '/';
+    free(reserve);
 }
 
 static int sidecar_matches(const char *held, const char *candidate)
@@ -94,7 +67,7 @@ int reserve_add(Reserve *reserve, ReserveLane lane, ReserveKind kind,
         const ReserveEntry *entry = &reserve->entries[i];
         if (entry->lane == (uint8_t)lane &&
             entry->kind == (uint8_t)kind &&
-            ci_equal(reserve->arena + entry->off, text))
+            path_ci_equal(reserve->arena + entry->off, text))
             return 1; /* already held by this lane */
     }
 
@@ -152,7 +125,7 @@ int reserve_conflict(const Reserve *reserve, ReserveKind kind, const char *path,
         const ReserveEntry *entry = &reserve->entries[i];
         const char *held = reserve->arena + entry->off;
 
-        int equal = ci_equal(held, text);
+        int equal = path_ci_equal(held, text);
         int sidecar = sidecar_matches(held, text);
 
         int conflict = 0;
