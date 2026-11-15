@@ -395,7 +395,7 @@ static void badge_fill(const UiDock *d, char *out, size_t cap)
         return;
     }
     if (d->cancelled) {
-        snprintf(out, cap, "LOCAL CANCELLING");
+        snprintf(out, cap, d->active ? "LOCAL CANCELLING" : "LOCAL CANCELLED");
         return;
     }
     if (!d->active && d->state == UI_DOCK_FAILED) {
@@ -454,9 +454,13 @@ void dock_draw(const UiState *state)
 
     static char badge[256];
     int local_full = state->dock_primary == UI_DOCK_LANE_LOCAL &&
-                     (state->local_dock.active || state->local_dock.waiting);
+                     (state->local_dock.active || state->local_dock.waiting ||
+                      state->local_dock.state == UI_DOCK_DONE ||
+                      state->local_dock.state == UI_DOCK_FAILED);
     if (state->local_shown && !local_full &&
-        (state->local_dock.active || state->local_dock.waiting)) {
+        (state->local_dock.active || state->local_dock.waiting ||
+         state->local_dock.state == UI_DOCK_DONE ||
+         state->local_dock.state == UI_DOCK_FAILED)) {
         badge_fill(&state->local_dock, badge, sizeof(badge));
         p.badge = badge;
         p.badge_color = badge_color(&state->local_dock);

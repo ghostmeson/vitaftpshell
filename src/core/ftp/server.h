@@ -13,8 +13,8 @@
 
 /*
  * Anonymous passive FTP server. OFF is the resting state. The machine binds
- * the control port and control+1 on the LAN address, accepts one client, and
- * runs one data command at a time. Every path resolves through the shared path
+ * the control port and control+1 on the LAN address, accepts up to four
+ * clients, and runs one data command at a time (D86). Every path resolves through the shared path
  * table; a denial answers exactly as a missing path and creates nothing.
  */
 
@@ -48,6 +48,11 @@ typedef struct {
     uint64_t total;
     int total_known;
     int ok;
+    /* CLIENT: the session whose record this is, so the panel never pairs one
+     * peer with another session's command. */
+    int session_index;
+    NetAddress peer;
+    const char *op;
 } FtpServerEvent;
 
 typedef void (*FtpServerEventFn)(void *ctx, const FtpServerEvent *event);

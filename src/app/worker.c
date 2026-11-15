@@ -2938,14 +2938,11 @@ static void server_event(void *ctx, const FtpServerEvent *event)
         client.ok = event->clients > 0;
         client.clients = event->clients;
         char peer[32] = "--";
-        if (event->clients > 0) {
-            NetAddress address = ftp_server_peer(worker->server);
-            if (address.addr != 0)
-                format_peer(address, peer, sizeof(peer));
-        }
+        if (event->clients > 0 && event->peer.addr != 0)
+            format_peer(event->peer, peer, sizeof(peer));
         fmt_copy(client.detail, sizeof(client.detail), peer);
         fmt_copy(client.op, sizeof(client.op),
-                 server_op_name(ftp_server_last_command(worker->server)));
+                 server_op_name(event->op != NULL ? event->op : ""));
         fmt_copy(client.path, sizeof(client.path),
                  event->path != NULL ? event->path : "");
         client.bytes = event->bytes;

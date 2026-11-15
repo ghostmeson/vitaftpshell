@@ -29,6 +29,9 @@ typedef struct {
     int clients;
     int state_changes;
     int client_events;
+    int session_index;
+    uint32_t peer_addr;
+    char op[16];
     int errors;
     char detail[128];
     int done;
@@ -54,6 +57,10 @@ static void capture_event(void *ctx, const FtpServerEvent *event)
     case FTP_SERVER_EVENT_CLIENT:
         cap->clients = event->clients;
         cap->client_events++;
+        cap->session_index = event->session_index;
+        cap->peer_addr = event->peer.addr;
+        snprintf(cap->op, sizeof(cap->op), "%s",
+                 event->op != NULL ? event->op : "");
         break;
     case FTP_SERVER_EVENT_PROGRESS:
         cap->progress++;
@@ -296,6 +303,39 @@ static void test_two_clients(void)
 
 /* A client that arms PASV and then closes must not keep the one data slot.
  * The surviving session is connected first so slot reuse cannot hide it (U3). */
+/* The CLIENT event carries the peer and verb of the session that spoke last,
+ * and falls back to a live session when that one closes. */
+static void test_client_event_pairs_session(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+
+    FakeFtpClient b;
+    FakeFtpClient a;
+    connect_session(server, &b);
+    connect_second_session(server, &a, PEER_ADDR + 1, PEER_PORT + 20);
+
+    command(server, &b, "PWD", 257);
+    CHECK(cap.session_index == 0);
+    CHECK(cap.peer_addr == PEER_ADDR);
+    CHECK(strcmp(cap.op, "PWD") == 0);
+
+    command(server, &a, "CWD /UX0:", 250);
+    CHECK(cap.session_index == 1);
+    CHECK(cap.peer_addr == PEER_ADDR + 1);
+    CHECK(strcmp(cap.op, "CWD") == 0);
+
+    command(server, &a, "QUIT", 221);
+    CHECK(ftp_server_clients(server) == 1);
+    CHECK(cap.session_index == 0);
+    CHECK(cap.peer_addr == PEER_ADDR);
+
+    command(server, &b, "QUIT", 221);
+    ftp_server_destroy(server);
+}
+
 static void test_close_while_armed(void)
 {
     setup();
@@ -1370,6 +1410,7 @@ int main(void)
     test_stor();
     test_stor_connect_after_command();
     test_two_clients();
+    test_client_event_pairs_session();
     test_close_while_armed();
     test_owner_close_active_one_event();
     test_foreign_abor_keeps_pasv();
