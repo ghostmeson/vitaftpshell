@@ -332,12 +332,18 @@ int handoff_listing_adopt(Handoff *handoff, UiPane pane, const void **rows,
                 *generation = held->generation;
             return 1;
         }
-        STORE_REL(&held->held, 0);
-        listings->reader_slot = -1;
     }
 
+    /* Claim the new slot before releasing the old one: if the writer started
+     * into it between the scan and the claim, keep the current listing. */
     HandoffListing *slot = &listings->slots[chosen];
     STORE_REL(&slot->held, 1);
+    if (LOAD_ACQ(&slot->writing) || slot->generation != newest) {
+        STORE_REL(&slot->held, 0);
+        return 0;
+    }
+    if (listings->reader_slot >= 0)
+        STORE_REL(&listings->slots[listings->reader_slot].held, 0);
     listings->reader_slot = chosen;
     if (rows != NULL)
         *rows = slot->rows;

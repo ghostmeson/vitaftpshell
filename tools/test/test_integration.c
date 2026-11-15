@@ -51,7 +51,6 @@ typedef struct {
     char cwd[64];
     int hold_data;
     int hold_final;
-    uint64_t size_override;
     int listings;
     int retrs;
     int aborts;
@@ -180,14 +179,7 @@ static void peer_serve(Peer *peer)
             peer->listings++;
             peer->data = NULL;
         } else if (strncmp(line, "SIZE ", 5) == 0) {
-            if (peer->size_override > 0) {
-                char size[32];
-                snprintf(size, sizeof(size), "%llu",
-                         (unsigned long long)peer->size_override);
-                fake_ftpd_reply(&peer->server, 213, size);
-            } else {
-                fake_ftpd_reply(&peer->server, 502, "Not implemented.");
-            }
+            fake_ftpd_reply(&peer->server, 502, "Not implemented.");
         } else if (strncmp(line, "RETR ", 5) == 0) {
             peer->data = fake_net_last_connected();
             if (peer->data == peer->control)

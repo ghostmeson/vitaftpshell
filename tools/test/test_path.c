@@ -151,6 +151,10 @@ static void test_denials_and_risk(void)
           PATH_DENIED);
     CHECK(path_check_rename("ux0:data/a", "ux0:data/a.VFTP.OLD", 0, &risk) ==
           PATH_DENIED);
+    CHECK(path_check_rename("ux0:data/a.vftp.part", "ux0:data/a", 0, &risk) ==
+          PATH_DENIED);
+    CHECK(path_check_rename("ux0:data/a.vftp.old", "ux0:data/a", 0, &risk) ==
+          PATH_OK);
 }
 
 static void test_sidecar_names(void)

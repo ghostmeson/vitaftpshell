@@ -758,8 +758,10 @@ static void client_data_failure(FtpClient *client, FtpCause cause,
  * way, so a late reply cannot be read as the next command's answer. */
 static void client_finish_without_reply(FtpClient *client)
 {
+    /* At least the expected size means the payload is complete; a file that
+     * grew after the preflight must not be deleted as short. */
     int keep = client->data_kind == CDATA_RETR && client->total_known &&
-               client->transferred == client->total;
+               client->transferred >= client->total;
 
     if (keep) {
         FtpCommitStep step = FTP_COMMIT_OK;
@@ -1093,7 +1095,8 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
     }
 
     case CSTEP_SIZE: {
-        if (reply->code == 213) {
+        if (reply->code == 213 && reply->text[0] >= '0' &&
+            reply->text[0] <= '9') {
             char *end = NULL;
             unsigned long long size = strtoull(reply->text, &end, 10);
             if (end != reply->text) {
@@ -1866,7 +1869,7 @@ FtpClientResult ftp_client_cancel(FtpClient *client)
     if (client->state != FTP_CLIENT_LISTING &&
         client->state != FTP_CLIENT_TRANSFERRING)
         return FTP_CLIENT_INVALID;
-    if (client->data_state == FTP_DATA_NONE)
+    if (client->data_state == FTP_DATA_NONE && client->step != CSTEP_SIZE)
         return FTP_CLIENT_INVALID;
 
     client_begin_abort(client, FTP_CAUSE_USER, client->stage, "CANCELLED");
