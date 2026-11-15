@@ -705,6 +705,30 @@ static void test_stor_connect_after_command(void)
     ftp_server_destroy(server);
 }
 
+/* The destination of an in-flight upload has no new file yet: the owner gets
+ * not-found, not the busy reply, and never the old file's size. */
+static void test_owner_size_while_upload(void)
+{
+    setup();
+    fake_fs_seed_file("ux0:data/old.bin", "OLD", 3);
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient a;
+    connect_session(server, &a);
+
+    pasv(server, &a);
+    queue_data_peer();
+    NetSocket *data = data_command(server, &a, "STOR ux0:/data/old.bin", 150);
+    CHECK(data != NULL);
+
+    char text[128];
+    command_text(server, &a, "SIZE ux0:/data/old.bin", 550, text, sizeof(text));
+    CHECK(strstr(text, "3") == NULL);
+
+    ftp_server_destroy(server);
+}
+
 static char s_trace[8192];
 
 static void trace_line(void *ctx, const char *line)
@@ -1350,6 +1374,7 @@ int main(void)
     test_owner_close_active_one_event();
     test_foreign_abor_keeps_pasv();
     test_trace_masks_password();
+    test_owner_size_while_upload();
     test_held_path();
     test_held_rename();
     test_denials();
