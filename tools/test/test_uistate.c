@@ -540,21 +540,6 @@ static void test_confirm(void)
 
     memset(&event, 0, sizeof(event));
     event.kind = UI_EVT_CONFIRM_REQUEST;
-    event.confirm = UI_CONFIRM_HIGH_RISK;
-    event.high_risk = 1;
-    snprintf(event.risk_path, sizeof(event.risk_path), "ur0:tai/x.suprx");
-    send_event(&event);
-    CHECK(s_state.confirm.high_risk == 1);
-    CHECK(s_state.confirm.choice_focus == 0);
-    CHECK(s_state.confirm.choices[0] == UI_CHOICE_CANCEL);
-    CHECK(strcmp(s_state.confirm.risk_path, "ur0:tai/x.suprx") == 0);
-    send_key(UI_KEY_RIGHT);
-    CHECK(s_state.confirm.choice_focus == 1);
-    send_key(UI_KEY_CROSS);
-    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_CONTINUE);
-
-    memset(&event, 0, sizeof(event));
-    event.kind = UI_EVT_CONFIRM_REQUEST;
     event.confirm = UI_CONFIRM_DELETE;
     event.items = s_confirm_items;
     event.item_count = 12;
@@ -576,7 +561,6 @@ static void test_high_risk_action(void)
     send_key(UI_KEY_CROSS);
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
     CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
-    CHECK(s_state.confirm.high_risk == 0);
     CHECK(s_state.confirm.item_count == 1);
     CHECK(strcmp(s_state.confirm.items[0].name, "ur0:tai/x.suprx") == 0);
     CHECK(s_state.confirm_from_worker == 0);
@@ -1492,10 +1476,8 @@ static void test_high_risk_delete_warning(void)
 
     CHECK(s_state.screen == UI_SCREEN_CONFIRM);
     CHECK(s_state.confirm.kind == UI_CONFIRM_DELETE);
-    CHECK(s_state.confirm.high_risk == 0);
     CHECK(strstr(s_state.confirm.warning, "UNDONE") != NULL);
     CHECK(strstr(s_state.confirm.warning, "BOOTING") == NULL);
-    CHECK(s_state.confirm.risk_path[0] == '\0');
 }
 
 static void test_remote_volume_root_open(void)

@@ -477,25 +477,6 @@ static void test_confirm(void)
     CHECK(trace_has_text("CANCEL"));
 
     memset(confirm, 0, sizeof(*confirm));
-    confirm->kind = UI_CONFIRM_HIGH_RISK;
-    snprintf(confirm->title, sizeof(confirm->title),
-             "WRITE INSIDE HIGH-RISK PATH");
-    snprintf(confirm->risk_path, sizeof(confirm->risk_path),
-             "ur0:tai/x.suprx");
-    confirm->high_risk = 1;
-    confirm->choices[0] = UI_CHOICE_CANCEL;
-    confirm->choices[1] = UI_CHOICE_CONTINUE;
-    confirm->choice_count = 2;
-    confirm->choice_focus = 0;
-    render();
-    CHECK(trace_text_at("ur0:tai/x.suprx", 210.0f, 168.0f));
-    CHECK(trace_text_at("A BAD EDIT CAN STOP THE CONSOLE BOOTING.", 210.0f,
-                        196.0f));
-    CHECK(trace_text_at_color("THERE IS NO UNDO.", 210.0f, 220.0f, C_YELLOW));
-    CHECK(trace_has_text("CANCEL"));
-    CHECK(trace_has_text("CONTINUE"));
-
-    memset(confirm, 0, sizeof(*confirm));
     confirm->kind = UI_CONFIRM_CANCEL_XFER;
     snprintf(confirm->title, sizeof(confirm->title), "CANCEL THE TRANSFER");
     snprintf(confirm->context, sizeof(confirm->context), "FILE.BIN");

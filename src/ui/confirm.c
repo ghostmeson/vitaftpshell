@@ -146,12 +146,6 @@ static void body_draw(const UiConfirm *confirm)
         font_text("UNSAVED CHANGES ARE LOST.", CONFIRM_ITEM_X, y, PX_LABEL,
                   C_YELLOW);
         break;
-    case UI_CONFIRM_HIGH_RISK:
-        font_text("A BAD EDIT CAN STOP THE CONSOLE BOOTING.", CONFIRM_ITEM_X,
-                  y, PX_LABEL, C_WHITE);
-        font_text("THERE IS NO UNDO.", CONFIRM_ITEM_X, y + 24.0f, PX_LABEL,
-                  C_YELLOW);
-        break;
     case UI_CONFIRM_DELETE_SITE:
         font_text("THE SITE IS REMOVED FROM THE BOOK.", CONFIRM_ITEM_X, y,
                   PX_LABEL, C_DIM);
@@ -220,10 +214,6 @@ static void options_draw(const UiConfirm *confirm)
             label = "DISCARD";
             primary = 1;
             break;
-        case UI_CHOICE_CONTINUE:
-            label = "CONTINUE";
-            primary = 1;
-            break;
         case UI_CHOICE_STOP:
             label = "STOP SERVER";
             primary = 1;
@@ -288,10 +278,7 @@ void confirm_draw(const UiState *state)
 
     font_text(confirm->title, CONFIRM_ITEM_X, 140.0f, PX_VALUE, C_YELLOW);
 
-    if (confirm->high_risk && confirm->risk_path[0] != '\0') {
-        font_text(confirm->risk_path, CONFIRM_ITEM_X, 168.0f, PX_MICRO,
-                  C_CYAN_DIM);
-    } else if (confirm->context[0] != '\0') {
+    if (confirm->context[0] != '\0') {
         font_text(confirm->context, CONFIRM_ITEM_X, 168.0f, PX_MICRO,
                   C_CYAN_DIM);
     }
@@ -301,7 +288,7 @@ void confirm_draw(const UiState *state)
     else
         body_draw(confirm);
 
-    if (confirm->warning[0] != '\0' && confirm->kind != UI_CONFIRM_HIGH_RISK)
+    if (confirm->warning[0] != '\0')
         font_text(confirm->warning, CONFIRM_ITEM_X, 336.0f, PX_LABEL, C_YELLOW);
 
     options_draw(confirm);

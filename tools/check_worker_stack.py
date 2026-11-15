@@ -11,6 +11,7 @@ ELF and enforces the budget the design states (D77).
 Usage: check_worker_stack.py build/vitaftpshell
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -35,11 +36,37 @@ FIXED_CHAIN = (
     "local_batch_emit_done",
 )
 
-# The folder scan recurses to this depth; the product must stay small. Keep in
-# sync with WORKER_REMOTE_DEPTH in src/app/worker.c.
+# The folder scan recurses to this depth; the product must stay small. The value
+# lives in the worker header both sides name, so a split cannot leave the gate
+# checking a stale copy (U8).
 RECURSION_FRAME = "fact_tree"
-RECURSION_DEPTH = 32
+DEPTH_HEADER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                            "src", "app", "worker.h")
 RECURSION_MAX = 8 * 1024
+
+
+def parse_depth(text):
+    match = re.search(r"^#define\s+WORKER_REMOTE_DEPTH\s+(\d+)\s*$", text,
+                      re.MULTILINE)
+    return int(match.group(1)) if match else None
+
+
+def read_depth():
+    try:
+        with open(DEPTH_HEADER, encoding="utf-8") as header:
+            return parse_depth(header.read())
+    except OSError:
+        return None
+
+
+def self_test():
+    if parse_depth("#define WORKER_REMOTE_DEPTH 32\n") != 32:
+        return False
+    if parse_depth("/* WORKER_REMOTE_DEPTH 32 */\n") is not None:
+        return False
+    if parse_depth("#define WORKER_REMOTE_DEPTH\n") is not None:
+        return False
+    return True
 
 # The UI thread's dispatch frame. The command buffer lives in App, so this is
 # small; the check exists so a future local cannot grow it unnoticed.
@@ -92,8 +119,15 @@ def frames(dis):
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
+        if not self_test():
+            print("worker stack: self-test failed", file=sys.stderr)
+            return 1
+        print("worker stack: self-test OK")
+        return 0
     if len(sys.argv) != 2:
-        print("usage: check_worker_stack.py <elf>", file=sys.stderr)
+        print("usage: check_worker_stack.py <elf> | --self-test",
+              file=sys.stderr)
         return 2
 
     sizes, self_call = frames(disassemble(sys.argv[1]))
@@ -125,6 +159,13 @@ def main():
             % (chain, FIXED_CHAIN_MAX)
         )
 
+    depth = read_depth()
+    if depth is None:
+        problems.append(
+            "WORKER_REMOTE_DEPTH not found in src/app/worker.h; the gate must "
+            "read the depth it measures"
+        )
+
     recursion = 0
     scan = sizes.get(RECURSION_FRAME)
     if scan is None:
@@ -132,8 +173,8 @@ def main():
     elif not self_call.get(RECURSION_FRAME):
         problems.append("%s is not a self-call; the depth product is meaningless"
                         % RECURSION_FRAME)
-    else:
-        recursion = scan * (RECURSION_DEPTH + 1)
+    elif depth is not None:
+        recursion = scan * (depth + 1)
         if recursion > RECURSION_MAX:
             problems.append(
                 "%s recursion reserves %d bytes (limit %d)"

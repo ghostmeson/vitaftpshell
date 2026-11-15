@@ -22,7 +22,9 @@ build_and_run() {
   "$OUT/$name"
 }
 
-build_and_run "$ROOT/tools/test/test_integration.c"
-build_and_run "$ROOT/tools/test/test_app_thread.c"
-build_and_run "$ROOT/tools/test/test_server.c"
+# Every host suite; the ordinary runner stays fast, this is the release
+# evidence. A new suite is covered automatically.
+for src in "$ROOT"/tools/test/test_*.c; do
+  build_and_run "$src"
+done
 echo "asan: OK"

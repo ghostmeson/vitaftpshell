@@ -94,8 +94,6 @@ typedef struct {
     char arena[FSOP_ARENA_MAX];
     size_t arena_used;
 
-    int high_risk;
-    Path risk_path;
 
     int needs_conflict;
     int existing_count;

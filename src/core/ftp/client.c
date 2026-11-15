@@ -1595,7 +1595,6 @@ FtpClientResult ftp_client_download(FtpClient *client,
         *out_risk = risk;
     /* D87: the local high-risk gate is retired. The hard denials in
      * path_check_write still refuse boot_config and protected paths. */
-    (void)transfer->risk_approved;
 
     if (client->state != FTP_CLIENT_READY)
         return FTP_CLIENT_NOT_CONNECTED;

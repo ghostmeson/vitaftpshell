@@ -769,6 +769,31 @@ static void test_owner_size_while_upload(void)
     ftp_server_destroy(server);
 }
 
+/* A storage failure mid-upload answers 451 and leaves no temp. */
+static void test_storage_failure_451(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient a;
+    connect_session(server, &a);
+
+    fake_fs_fail_op(FAKE_FS_OP_WRITE, FS_NO_SPACE);
+    pasv(server, &a);
+    queue_data_peer();
+    NetSocket *data = data_command(server, &a, "STOR ux0:/data/fail.bin", 150);
+    CHECK(data != NULL);
+    fake_net_queue_rx(data, "payload", 7);
+    fake_net_shutdown(data);
+    wait_reply(server, &a, 451);
+
+    CHECK(!fake_fs_exists("ux0:data/fail.bin"));
+    CHECK(!fake_fs_exists("ux0:data/fail.bin.vftp.part"));
+    CHECK(cap.done == 1 && cap.ok == 0);
+    ftp_server_destroy(server);
+}
+
 static char s_trace[8192];
 
 static void trace_line(void *ctx, const char *line)
@@ -1414,6 +1439,7 @@ int main(void)
     test_close_while_armed();
     test_owner_close_active_one_event();
     test_foreign_abor_keeps_pasv();
+    test_storage_failure_451();
     test_trace_masks_password();
     test_owner_size_while_upload();
     test_held_path();

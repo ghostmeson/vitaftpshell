@@ -80,14 +80,6 @@ static void fail(FsOpPlan *plan, const char *reason)
              reason != NULL ? reason : "OPERATION REFUSED");
 }
 
-static void mark_risk(FsOpPlan *plan, const char *path)
-{
-    if (plan->high_risk)
-        return;
-    plan->high_risk = 1;
-    snprintf(plan->risk_path.text, sizeof(plan->risk_path.text), "%s", path);
-}
-
 static const FsOpFact *fact_find(const FsOpFacts *facts, const char *path)
 {
     if (facts == NULL)
@@ -285,8 +277,6 @@ static void plan_file_move(FsOpPlan *plan, const char *source, const char *dest,
         fail(plan, path_reason(pr, dest));
         return;
     }
-    if (risk == PATH_RISK_HIGH)
-        mark_risk(plan, dest);
 
     int same_volume = 1;
     Volume from_volume;
@@ -336,16 +326,12 @@ static void plan_file_copy(FsOpPlan *plan, const char *source,
         fail(plan, path_reason(pr, source));
         return;
     }
-    if (risk == PATH_RISK_HIGH)
-        mark_risk(plan, source);
 
     pr = path_check_write(dest, 0, &risk);
     if (pr != PATH_OK) {
         fail(plan, path_reason(pr, dest));
         return;
     }
-    if (risk == PATH_RISK_HIGH)
-        mark_risk(plan, dest);
 
     if (!add_step(plan, FSOP_STEP_COPY_FILE, source, dest, move_source))
         return;
@@ -424,8 +410,6 @@ static void plan_tree(FsOpPlan *plan, const char *source, const char *dest,
             fail(plan, path_reason(pr, dest));
             return;
         }
-        if (risk == PATH_RISK_HIGH)
-            mark_risk(plan, dest);
         if (!add_step(plan, FSOP_STEP_MKDIR, NULL, dest, 0))
             return;
         if (!move && !add_rollback(plan, FSOP_ROLLBACK_REMOVE_DIR, dest, NULL))
@@ -443,8 +427,6 @@ static void plan_tree(FsOpPlan *plan, const char *source, const char *dest,
             fail(plan, path_reason(pr, source));
             return;
         }
-        if (risk == PATH_RISK_HIGH)
-            mark_risk(plan, source);
         if (!add_step(plan, FSOP_STEP_DELETE_DIR, source, NULL, 0))
             return;
     }
@@ -538,8 +520,6 @@ static void plan_copy_or_move(FsOpPlan *plan, const FsOpRequest *request)
                     fail(plan, path_reason(pr, dest.text));
                     return;
                 }
-                if (risk == PATH_RISK_HIGH)
-                    mark_risk(plan, dest.text);
                 if (!add_step(plan, FSOP_STEP_RENAME, source.text, dest.text, 0))
                     return;
                 if (!add_rollback(plan, FSOP_ROLLBACK_RENAME_BACK, dest.text,
@@ -570,8 +550,6 @@ static void plan_delete_tree(FsOpPlan *plan, const char *path,
         fail(plan, path_reason(pr, path));
         return;
     }
-    if (risk == PATH_RISK_HIGH)
-        mark_risk(plan, path);
 
     if (fact->type == FS_ENTRY_DIR) {
         if (facts != NULL) {
@@ -652,8 +630,6 @@ static void plan_mkdir(FsOpPlan *plan, const FsOpRequest *request)
         fail(plan, path_reason(pr, dest.text));
         return;
     }
-    if (risk == PATH_RISK_HIGH)
-        mark_risk(plan, dest.text);
     if (!add_step(plan, FSOP_STEP_MKDIR, NULL, dest.text, 0))
         return;
     add_rollback(plan, FSOP_ROLLBACK_REMOVE_DIR, dest.text, NULL);
@@ -712,8 +688,6 @@ static void plan_rename(FsOpPlan *plan, const FsOpRequest *request)
         fail(plan, path_reason(pr, dest.text));
         return;
     }
-    if (risk == PATH_RISK_HIGH)
-        mark_risk(plan, dest.text);
 
     if (!add_step(plan, FSOP_STEP_RENAME, source.text, dest.text, 0))
         return;
