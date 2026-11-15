@@ -13,7 +13,7 @@ passive FTP client and server state machines, the transfer queue and slot
 arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
-twenty-one host suites, and `tools/preview/run.sh` renders 39 settled states.
+twenty-one host suites, and `tools/preview/run.sh` renders 40 settled states.
 `build.sh` emits `vitaftpshell-v01.00-b55.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker

@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-15 — Phase 6 review remediation (b55): a full review of the b49 diff found 29 findings and five lane-flow gaps; the remediation plan is `docs/plans/2026-11-15-1213-fix-b50-review-remediation-plan.md`, and U1-U10 landed: the failed-transfer terminal, the two-lane local guard and WAIT prompts, prompt identity, the UI stack budget (dispatch 80 B), budgeted transfer pumps, the server accept/reply/idle bounds, the single sidecar owner, and the dead-surface cleanup. Twenty-one host suites, 39 preview states, ASan/UBSan clean, gate green | Install b55 and run M1-M13, including the new failed-transfer, two-lane, prompt, server-session, and sidecar rows | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b55.vpk` (262,895 bytes) links the real app. M13/M10 are PART; M1-M9, M11, M12 are pending, so not `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-15 — Phase 6 review remediation (b55): a full review of the b49 diff found 29 findings and five lane-flow gaps; the remediation plan is `docs/plans/2026-11-15-1213-fix-b50-review-remediation-plan.md`, and U1-U10 landed: the failed-transfer terminal, the two-lane local guard and WAIT prompts, prompt identity, the UI stack budget (dispatch 80 B), budgeted transfer pumps, the server accept/reply/idle bounds, the single sidecar owner, and the dead-surface cleanup. Twenty-one host suites, 40 preview states, ASan/UBSan clean, gate green | Install b55 and run M1-M13, including the new failed-transfer, two-lane, prompt, server-session, and sidecar rows | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b55.vpk` (262,895 bytes) links the real app. M13/M10 are PART; M1-M9, M11, M12 are pending, so not `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
@@ -41,7 +41,7 @@ target console with evidence. Host tests alone cannot promote it.
   `vitaftpshell-v01.00-b<build>.vpk` with the real app linked and keeps the
   unstripped ELF. `./tools/test/run.sh` runs the layering guard over every
   `.c`/`.h` under `src/` plus the twenty-one host suites; `./tools/preview/run.sh`
-  renders 39 settled states. `./send.sh <vita-ip>` refuses an artifact whose
+  renders 40 settled states. `./send.sh <vita-ip>` refuses an artifact whose
   build number does not match `BUILD_NUMBER`.
 - **Next:** Install b49 and run M12: a local copy beside an unrelated
   download, a colliding paste with WAIT/SKIP/CANCEL, a server `STOR` on a held
