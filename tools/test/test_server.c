@@ -952,6 +952,67 @@ static void test_trace_masks_password(void)
     ftp_server_destroy(server);
 }
 
+/* The reply-backlog path masks a dropped PASS before it traces the line. The
+ * fake keeps the control socket from draining so the 16 KiB reply buffer fills,
+ * which no ordinary client does. */
+static void test_trace_drops_password(void)
+{
+    setup();
+    memset(s_trace, 0, sizeof(s_trace));
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = ftp_server_create(fake_net_port(), fake_fs_port(),
+                                          fake_clock_port(), capture_event,
+                                          &cap);
+    CHECK(server != NULL);
+    ftp_server_set_trace(server, trace_line, NULL);
+    CHECK(ftp_server_start(server, 1337) == FTP_SERVER_OK);
+
+    FakeFtpClient client;
+    connect_session(server, &client);
+    NetSocket *control = fake_net_accepted_at(0);
+    CHECK(control != NULL);
+    fake_net_block_sends(control, 1);
+
+    /* PWD before login answers through server_reply; 600 of them fill the
+     * server's 16 KiB tx buffer even though the fake accepts nothing. The
+     * direct append paths hide a full buffer, so the backlog needs this one. */
+    char burst[4096];
+    size_t used = 0;
+    for (int i = 0; i < 600; ++i) {
+        memcpy(burst + used, "PWD\r\n", 5);
+        used += 5;
+    }
+    fake_net_queue_rx(control, burst, used);
+    ftp_server_tick(server, 0);
+    CHECK(cap.errors > 0);
+    CHECK(strstr(cap.detail, "REPLY BACKLOG") != NULL);
+
+    /* Only the drop path's own lines remain in the trace. */
+    memset(s_trace, 0, sizeof(s_trace));
+    static const char *dropped =
+        "PASS hunter2\r\n"
+        "pass hunter2\r\n"
+        "PASS\thunter2\r\n"
+        "PASS\r\n"
+        "NOOP\r\n";
+    fake_net_queue_rx(control, dropped, strlen(dropped));
+    ftp_server_tick(server, 0);
+
+    CHECK(strstr(s_trace, "FTPC DROPPED PASS ****") != NULL);
+    CHECK(strstr(s_trace, "FTPC DROPPED NOOP") != NULL);
+    CHECK(strstr(s_trace, "hunter2") == NULL);
+    /* The four PASS spellings each produced one masked line. */
+    int masked = 0;
+    for (const char *p = s_trace;
+         (p = strstr(p, "FTPC DROPPED PASS ****")) != NULL; ++p)
+        masked++;
+    CHECK(masked == 4);
+
+    fake_net_block_sends(control, 0);
+    ftp_server_destroy(server);
+}
+
 static int s_guard_checks;
 static int s_guard_holds;
 static int s_guard_releases;
@@ -1551,6 +1612,7 @@ int main(void)
     test_rename_sidecar_refused();
     test_owner_size_while_download();
     test_trace_masks_password();
+    test_trace_drops_password();
     test_owner_size_while_upload();
     test_held_path();
     test_held_rename();

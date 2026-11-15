@@ -14,6 +14,7 @@ struct NetSocket {
     int listening;
     int peer_closed;
     int peer_reset;
+    int block_sends;
     NetAddress peer;
     unsigned ready;
     unsigned char rx[FAKE_NET_RX_MAX];
@@ -107,6 +108,8 @@ static NetResult fake_send(void *ctx, NetSocket *socket, const void *data,
     (void)ctx;
     if (socket == NULL || !socket->open)
         return NET_INVALID;
+    if (socket->block_sends)
+        return NET_WOULD_BLOCK;
     if (s_send_result != NET_OK) {
         NetResult r = s_send_result;
         s_send_result = NET_OK;
@@ -410,6 +413,12 @@ size_t fake_net_read_tx(NetSocket *socket, void *buf, size_t cap)
     memmove(socket->tx, socket->tx + n, socket->tx_len - n);
     socket->tx_len -= n;
     return n;
+}
+
+void fake_net_block_sends(NetSocket *socket, int blocked)
+{
+    if (socket != NULL)
+        socket->block_sends = blocked;
 }
 
 void fake_net_set_ready(NetSocket *socket, unsigned flags)

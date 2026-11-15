@@ -268,7 +268,17 @@ static int server_append(ServerSession *session, const char *data, size_t len)
 
 static int server_append_raw(ServerSession *session, const char *text)
 {
-    return server_append(session, text, strlen(text));
+    if (session == NULL)
+        return 1;
+    if (server_append(session, text, strlen(text)))
+        return 1;
+    /* The multiline builders append directly; a full buffer still means the
+     * peer is not draining and must enter the same drop state (b66). */
+    if (!session->tx_backlog) {
+        session->tx_backlog = 1;
+        server_error_event(session->server, "REPLY BACKLOG");
+    }
+    return 0;
 }
 
 static void server_trace(FtpServer *server, const char *fmt, ...)
