@@ -337,8 +337,7 @@ Direction A: the console layout (D25). The six states are in
 |---|---|---|---|---|
 | Header | 0 | 0 | 960 | 64 |
 | Status panel | 18 | 76 | 552 | 352 |
-| Warning panel | 582 | 76 | 360 | 200 |
-| Client panel | 582 | 288 | 360 | 140 |
+| Client panel | 582 | 76 | 360 | 352 |
 | Dock | 18 | 440 | 924 | 64 |
 | Control legend | 18 | 510 | 924 | 16 |
 
@@ -355,20 +354,13 @@ Direction A: the console layout (D25). The six states are in
 - The slab is 32, 340, 488 × 40: `START SERVER` yellow when OFF; `STOP SERVER`
   and `CANCEL` dark. A 2 px white outline offset 4 marks focus.
 
-### Warning
-
-A 582, 76, 360 × 200 panel with a yellow accent and `WARNING` at 596, 84. Six
-micro lines from 596, 108 on a 16 px stride: the anonymous read-write risk in
-yellow, the `boot_config.txt` denial in dim, then the launch/stop lifecycle in
-dim. One of those lines says that an upload replaces a file of the same name
-(D41). The app-data/`tai` exposure is not separately named (b62).
-
 ### Client
 
-A 582, 288, 360 × 140 panel. `CLIENT` at 596, 296; `CONNECTED` green at the
-right when a client is on. With no client, `NO CLIENT` and `UP TO 4 CLIENTS` at
-TIME`. With a client: the IP at 320, the operation at 342 and its path at 345.5,
-the bytes or `NO TRANSFER` at 362, and `UP TO 4 CLIENTS` at 382.
+A 582, 76, 360 × 352 panel. `CLIENT` at 596, 84; `CONNECTED` green at the
+right when a client is on. With no client, `NO CLIENT` at 108 and
+`UP TO 4 CLIENTS` at 130. With a client: the IP at 108, the operation at 130 and
+its path at 133.5, the bytes or `NO TRANSFER` at 150, and `UP TO 4 CLIENTS` at
+170.
 
 ### Dock and legend
 
@@ -382,8 +374,8 @@ the bytes or `NO TRANSFER` at 362, and `UP TO 4 CLIENTS` at 382.
 
 ### States
 
-- **OFF at launch:** the warning is visible before the first start; the address
-  is dim; the start slab is focused; the header says `SERVER OFF`.
+- **OFF at launch:** the client panel shows `NO CLIENT`; the address is dim;
+  the start slab is focused; the header says `SERVER OFF`.
 - **Starting:** `STARTING` yellow; a cancel slab; the address dim; the header
   says `SERVER STARTING`.
 - **ON, no client / browsing / transferring:** the stop slab is focused; the
@@ -392,12 +384,12 @@ the bytes or `NO TRANSFER` at 362, and `UP TO 4 CLIENTS` at 382.
   start slab stays available; the header says `SERVER OFF`.
 - **No network:** `NO NETWORK - CONNECT TO WI-FI` uses the same line; the
   address reads `--`; the start slab keeps focus.
-- **Second client:** the PC receives a busy reply; the Vita still shows one
-  client and the client panel keeps the active one.
+- **Client limit:** the first four clients connect; a fifth receives a busy
+  reply. The panel names the most recent peer.
 - **Stop during a write:** CONFIRM names the in-flight write before the session
   closes.
 - **Upload overwrite:** a file received in server mode replaces an existing file
-  of the same name without a console prompt (D41); the warning panel says so.
+  of the same name without a console prompt (D41).
 
 The header repeats the server state on every screen: `SERVER OFF`,
 `SERVER STARTING`, or `SERVER ON n CLIENT(S)`.

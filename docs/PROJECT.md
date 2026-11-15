@@ -21,7 +21,7 @@ server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime exist. `tools/test/run.sh` passes
 twenty-one host suites, `tools/preview/run.sh` renders 40 settled states, and
-`build.sh` emits `vitaftpshell-v01.00-b62.vpk` with the real app linked. b16 and b18 have
+`build.sh` emits `vitaftpshell-v01.00-b63.vpk` with the real app linked. b16 and b18 have
 run on the console: b18 proved the drive browser, pinned the IME as the
 new-folder/rename blocker, showed the client failing at TCP connect, and showed
 the server with no client. b20 opened the IME and reached a rename, then the
@@ -61,9 +61,9 @@ hardware-verified for both directions from the app's own client. FileZilla's
 b60 accepts up to four sessions with one data transfer at a time (D86). b61
 applies D87: the server exposes the app data folder and the `tai` folders, the
 local high-risk prompt is retired, and `ur0:tai/boot_config.txt` plus the system
-roots stay hard-denied. b62 removes the separate app-data/`tai` lines from the
-SERVER warning. M5 is PART until the b62 FileZilla retry. M13 and M10 are partly
-observed. The project stays `building` until every row has a
+roots stay hard-denied. b62 trims the SERVER warning text; b63 removes the
+warning panel and gives the client panel the full right column (D88). M5 is PART
+until the b63 FileZilla retry. M13 and M10 are partly observed. The project stays `building` until every row has a
 recorded PASS.
 
 ## Users
@@ -143,7 +143,7 @@ sessions, connect-to-first-listing, and server-matrix pass.
 
 | Risk | Mitigation |
 |---|---|
-| Anonymous read-write server exposes the three Vita volumes, including app data and `tai` | OFF by default, visible ON state, client count, warning; `boot_config.txt` and system roots stay protected (D87) |
+| Anonymous read-write server exposes the three Vita volumes, including app data and `tai` | OFF by default, visible ON state, `ACCESS READ-WRITE`, client count; the warning panel is removed (D88); `boot_config.txt` and system roots stay protected |
 | Passwords stored unencrypted | State it before the first save; never log them; no false encryption claim |
 | WiFi path has a b37 hardware report but no row-level evidence yet | Record connect, PASV, transfer, and timeout results in `VERIFICATION.md` |
 | Public FTP may decline | Personal servers keep the product useful; no protocol widening in v1 |

@@ -1,15 +1,28 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b62.vpk
-**SHA-256:** 6cf2fdbdbc060f28c986594407f10ac58e957739999ee2c49e35fb9e15954ed5
+**Build:** vitaftpshell-v01.00-b63.vpk
+**SHA-256:** 21290957d30495c168ca186e533ab3f6bb5558d52769a90758432b7cd78e03fa
 **ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy, b62 removes the separate app-data/`tai` warning lines, and the b62 hardware retry is pending; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy, b62 trims the warning text, and b63 removes the warning panel (D88); the b63 hardware retry is pending; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b63 warning panel removal
+
+**Date:** 2026-11-15
+**Build:** `vitaftpshell-v01.00-b63.vpk`
+**SHA-256:** `21290957d30495c168ca186e533ab3f6bb5558d52769a90758432b7cd78e03fa`
+
+D88 removes the SERVER warning region. The client panel takes the right column
+at 582, 76, 360 × 352; the status panel keeps `ACCESS READ-WRITE`, the ON/OFF
+state, and the client count, and the header repeats `SERVER ON n CLIENT(S)`.
+The `boot_config.txt` denial and the overwrite behavior remain path/transfer
+rules. `test_render_screens` and the preview cover the reflowed panel. Host
+run only; b63 hardware retry pending.
 
 ## b62 warning trim
 
