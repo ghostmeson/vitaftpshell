@@ -319,6 +319,55 @@ static int content_is(const char *path, const char *expected)
     return n == strlen(expected) && memcmp(buf, expected, n) == 0;
 }
 
+/* A destination that is a folder, or whose parent vanished, must end as one
+ * failed item and leave the lane usable for the next transfer. */
+static void test_download_destination_failure(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    Peer peer;
+    connect_site(app, &peer);
+    select_remote(app);
+
+    fake_fs_add_dir("ux0:data/TEST.BIN");
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 60; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->dock.state == UI_DOCK_FAILED)
+            break;
+    }
+
+    CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
+    CHECK(app_state(app)->dock.active == 0);
+    CHECK(app_state(app)->dock.message[0] != '\0');
+    CHECK(strstr(app_state(app)->dock.message, "FOLDER") != NULL);
+    CHECK(!fake_fs_exists("ux0:data/TEST.BIN.vftp.part"));
+
+    /* The lane is idle: the same item succeeds once the folder is gone. */
+    FsPort *fs = fake_fs_port();
+    CHECK(fs->rmdir(fs->ctx, "ux0:data/TEST.BIN") == FS_OK);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->dock.state == UI_DOCK_DONE)
+            break;
+    }
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.active == 0);
+    CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
+    CHECK(!fake_fs_exists("ux0:data/TEST.BIN.vftp.part"));
+
+    app_destroy(app);
+}
+
 static void test_connect_list_download(void)
 {
     App *app = make_app();
@@ -1597,6 +1646,7 @@ static void test_local_conflict_prompt(void)
 
 int main(void)
 {
+    test_download_destination_failure();
     test_connect_list_download();
     test_remote_navigation();
     test_remote_mutations();

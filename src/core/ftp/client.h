@@ -121,7 +121,11 @@ typedef enum {
     FTP_CLIENT_INVALID,
     FTP_CLIENT_NOT_CONNECTED,
     FTP_CLIENT_NEED_RISK,
-    FTP_CLIENT_DENIED
+    FTP_CLIENT_DENIED,
+    /* The transfer was accepted but its local file could not be opened. The
+     * client is back in READY and reported no operation-done event; the worker
+     * owns the failure terminal. */
+    FTP_CLIENT_LOCAL_FAILED
 } FtpClientResult;
 
 typedef struct FtpClient FtpClient;
@@ -129,6 +133,8 @@ typedef struct FtpClient FtpClient;
 FtpClient *ftp_client_create(NetPort *net, FsPort *fs, ClockPort *clock,
                              FtpClientEventFn emit, void *emit_ctx);
 void ftp_client_destroy(FtpClient *client);
+/* The detail of the last failure, valid until the next operation. */
+const char *ftp_client_last_detail(const FtpClient *client);
 
 FtpClientResult ftp_client_connect(FtpClient *client,
                                    const FtpClientLogin *login);

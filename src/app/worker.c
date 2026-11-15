@@ -642,7 +642,8 @@ static const char *fs_result_text(FsResult result)
 static void emit_transfer_done(Worker *worker, XferDirection direction,
                                const char *name, int ok, uint64_t bytes,
                                uint64_t total, int total_known,
-                               OpCause cause, OpStage stage, uint64_t start_ms)
+                               OpCause cause, OpStage stage, uint64_t start_ms,
+                               const char *detail)
 {
     HandoffEvent event;
     event_init(&event, HANDOFF_EVT_TRANSFER_DONE);
@@ -665,6 +666,8 @@ static void emit_transfer_done(Worker *worker, XferDirection direction,
         }
     }
     fmt_copy(event.path, sizeof(event.path), name != NULL ? name : "");
+    if (detail != NULL)
+        fmt_copy(event.detail, sizeof(event.detail), detail);
     emit(worker, &event);
     (void)direction;
 }
@@ -2233,6 +2236,16 @@ static int local_destination_exists(Worker *worker, const XferItem *item)
                                   &entry) == FS_OK;
 }
 
+static int local_destination_is_dir(Worker *worker, const XferItem *item)
+{
+    if (item->direction != XFER_DIR_DOWNLOAD)
+        return 0;
+    FsEntry entry;
+    return worker->ports.fs->stat(worker->ports.fs->ctx, item->destination.text,
+                                  &entry) == FS_OK &&
+           entry.type == FS_ENTRY_DIR;
+}
+
 static void batch_finish(Worker *worker)
 {
     if (worker->batch_total > 0 && worker->batch_done >= worker->batch_total)
@@ -2286,17 +2299,33 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
     }
 
     if (result != FTP_CLIENT_OK) {
+        int local_failed = result == FTP_CLIENT_LOCAL_FAILED;
+        OpCause cause = local_failed ? OP_CAUSE_STORAGE : OP_CAUSE_APP;
+        const char *detail = local_failed ? ftp_client_last_detail(worker->client)
+                                          : "TRANSFER REFUSED";
         XferItem next;
         memset(&next, 0, sizeof(next));
-        xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
+        xfer_release(&worker->queue, XFER_ITEM_FAILED, cause,
                      OP_STAGE_TRANSFER, &next);
         reserve_release(&worker->reserve, RESERVE_LANE_NETWORK);
-        emit_error(worker, UI_PANE_REMOTE, "TRANSFER REFUSED", OP_CAUSE_APP,
-                   OP_STAGE_TRANSFER);
         worker->batch_done++;
+        emit_transfer_done(worker, item->direction, item->source.text, 0, 0,
+                           item->total, item->total_known, cause,
+                           OP_STAGE_TRANSFER, 0, detail);
+        emit_error(worker,
+                   item->direction == XFER_DIR_DOWNLOAD ? UI_PANE_LOCAL
+                                                        : UI_PANE_REMOTE,
+                   detail, cause, OP_STAGE_TRANSFER);
+        if (item->direction == XFER_DIR_DOWNLOAD)
+            worker_list_local(worker, worker->local_path);
         batch_finish(worker);
         return;
     }
+
+    /* A terminal the client reported inside the call already released the
+     * item; latching now would recreate the wedge. */
+    if (!xfer_busy(&worker->queue))
+        return;
 
     worker->transfer_active = 1;
     log_event(worker, LOGEV_TRANSFER_START,
@@ -2387,6 +2416,19 @@ static void pump_queue(Worker *worker)
         }
 
         if (item.direction == XFER_DIR_DOWNLOAD) {
+            if (local_destination_is_dir(worker, &item)) {
+                xfer_release(&worker->queue, XFER_ITEM_FAILED,
+                             OP_CAUSE_STORAGE, OP_STAGE_TRANSFER, NULL);
+                worker->batch_done++;
+                emit_transfer_done(worker, item.direction, item.source.text, 0,
+                                   0, item.total, item.total_known,
+                                   OP_CAUSE_STORAGE, OP_STAGE_TRANSFER, 0,
+                                   "DESTINATION IS A FOLDER");
+                emit_error(worker, UI_PANE_LOCAL, "DESTINATION IS A FOLDER",
+                           OP_CAUSE_STORAGE, OP_STAGE_TRANSFER);
+                batch_finish(worker);
+                continue;
+            }
             if (local_destination_exists(worker, &item) &&
                 !worker->batch_conflict_decided) {
                 request_transfer_conflict(worker, &item);
@@ -2595,7 +2637,9 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
         event->operation != FTP_CLIENT_OP_UPLOAD)
         return;
 
-    if (!worker->transfer_active)
+    /* Queue ownership, not the lane latch: a synchronous terminal must never
+     * be dropped while an item is still claimed. */
+    if (!xfer_busy(&worker->queue))
         return;
 
     int ok = event->ok;
@@ -2624,7 +2668,7 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
         emit_transfer_done(worker, finished.direction, finished.source.text, 1,
                            event->bytes, event->total, event->total_known,
                            OP_CAUSE_APP, OP_STAGE_TRANSFER,
-                           worker->transfer_start_ms);
+                           worker->transfer_start_ms, NULL);
         log_event(worker, LOGEV_TRANSFER_DONE,
                   worker->connecting_valid ? worker->connecting_site.name : NULL,
                   worker->connecting_valid ? worker->connecting_site.host : NULL,
@@ -2645,7 +2689,7 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
         emit_transfer_done(worker, finished.direction, finished.source.text, 0,
                            event->bytes, event->total, event->total_known,
                            event->cause, event->stage,
-                           worker->transfer_start_ms);
+                           worker->transfer_start_ms, event->detail);
         emit_error(worker,
                    event->operation == FTP_CLIENT_OP_UPLOAD ? UI_PANE_LOCAL
                                                             : UI_PANE_REMOTE,
@@ -2659,7 +2703,8 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
     }
 
     batch_finish(worker);
-    pump_queue(worker);
+    /* worker_step pumps every step; pumping here would nest a second transfer
+     * inside the client call that produced this event. */
 }
 
 static void client_event(void *ctx, const FtpClientEvent *event)
@@ -2736,7 +2781,8 @@ static void client_event(void *ctx, const FtpClientEvent *event)
                 emit_transfer_done(worker, item.direction, item.source.text, 0,
                                    event->bytes, event->total,
                                    event->total_known, event->cause,
-                                   event->stage, worker->transfer_start_ms);
+                                   event->stage, worker->transfer_start_ms,
+                                   event->detail);
             }
             reset_remote_session(worker);
         }
@@ -2871,7 +2917,8 @@ static void server_event(void *ctx, const FtpServerEvent *event)
         emit_transfer_done(worker, worker->server_direction,
                            worker->server_name, event->ok, event->bytes,
                            event->total, event->total_known, event->cause,
-                           event->stage, worker->server_transfer_start_ms);
+                           event->stage, worker->server_transfer_start_ms,
+                           event->detail);
         log_event(worker, event->ok ? LOGEV_TRANSFER_DONE : LOGEV_TRANSFER_FAIL,
                   NULL, NULL, worker->server_name,
                   op_stage_name(event->stage), op_cause_name(event->cause),

@@ -509,10 +509,11 @@ static void test_download(void)
 
     fake_fs_add_dir("ux0:data/adir");
     FtpClientTransfer dir = {"/x", "ux0:data/adir", 0, 0, 0};
-    CHECK(ftp_client_download(client, &dir, NULL) == FTP_CLIENT_OK);
+    CHECK(ftp_client_download(client, &dir, NULL) == FTP_CLIENT_LOCAL_FAILED);
     CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
-    CHECK(cap.done == 3 && cap.ok == 0);
-    CHECK(cap.done_cause == FTP_CAUSE_STORAGE);
+    /* The worker owns the failure terminal; the client emits no done event. */
+    CHECK(cap.done == 2);
+    CHECK(strcmp(ftp_client_last_detail(client), "DESTINATION OPEN FAILED") == 0);
     CHECK(!fake_fs_exists("ux0:data/adir.vftp.part"));
 
     ftp_client_destroy(client);
