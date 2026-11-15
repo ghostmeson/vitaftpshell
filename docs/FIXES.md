@@ -27,8 +27,8 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b49.vpk`, 261,213 bytes,
-  SHA-256 `e2dabba0406d6cf314ff4150df4bb98ce0da8141f19e912a509467061eec43cb`.
+- **Current artifact:** `vitaftpshell-v01.00-b55.vpk`, 262,895 bytes,
+  SHA-256 `84e5ed73a8a6d6be73973d544cb4f19dd1dfe401bd972892542821907e4d2349`.
 - **Last hardware-observed build:** b43 (operator report, 2026-11-14): copy,
   paste, new folder, rename, and download work and the dock words read correctly.
   b49 adds the b41 parallel lanes, is built, and is host-tested, not tested on hardware. b40 crashed; its four

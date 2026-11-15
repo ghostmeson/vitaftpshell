@@ -11,7 +11,8 @@ unit; do not use this folder as a scratchpad.
 
 | Plan | Kind | Status |
 |---|---|---|
-| [`2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | Implementation-ready unified plan | v1 contract plus the 2026-11-14 correction pass (b40/b41); M1-M12 pending |
+| [`2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | Implementation-ready unified plan | v1 contract plus the 2026-11-14 correction pass (b40/b41); M1-M13 pending |
+| [`2026-11-15-1213-fix-b50-review-remediation-plan.md`](2026-11-15-1213-fix-b50-review-remediation-plan.md) | Implementation-ready unified plan | b49 review remediation (U1-U13); U1-U12 landed in b55, M1-M13 pending |
 
 ## Rules
 

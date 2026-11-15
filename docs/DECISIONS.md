@@ -124,7 +124,8 @@ keep the app open. This is a deliberate boundary, not a temporary limitation.
 ## D9. One active transfer, one server client
 
 **Date:** 2026-11-08
-**Status:** accepted
+**Status:** accepted; the one-transfer clause is superseded by D72 and D82. The
+server still accepts one client at a time.
 
 **Context:** Concurrent writers make the state model and the error model much
 harder to prove on a console with one screen and one user.
@@ -946,7 +947,8 @@ fixture, a draw-call assertion, and a preview file.
 ## D51. High-risk writes and the one slot are enforced in the worker too
 
 **Date:** 2026-11-10
-**Status:** accepted; implementation shape for U10/U13.
+**Status:** accepted; the one-slot clause is superseded by D72 and D82. The
+high-risk write enforcement stands.
 
 **Context:** A reducer-only risk check cannot see the final name of a new folder
 or rename, and a marked batch can contain a high-risk item that is not the
@@ -1707,7 +1709,7 @@ few KiB has to be a `Worker` member and is visible in one place.
 ## D78. The dock shows both lanes, network first
 
 **Date:** 2026-11-14
-**Status:** accepted; b48 (b41 stage).
+**Status:** accepted; b48/b49 (b41 stage).
 
 **Context:** U25 lets a local job and a network transfer run together, but the
 dock had one set of slots. A progress event from the local copy overwrote the

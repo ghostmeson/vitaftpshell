@@ -40,7 +40,7 @@ target console with evidence. Host tests alone cannot promote it.
 - **Build:** Phases 1-5 are done. `./build.sh` emits one
   `vitaftpshell-v01.00-b<build>.vpk` with the real app linked and keeps the
   unstripped ELF. `./tools/test/run.sh` runs the layering guard over every
-  `.c`/`.h` under `src/` plus the twenty host suites; `./tools/preview/run.sh`
+  `.c`/`.h` under `src/` plus the twenty-one host suites; `./tools/preview/run.sh`
   renders 39 settled states. `./send.sh <vita-ip>` refuses an artifact whose
   build number does not match `BUILD_NUMBER`.
 - **Next:** Install b49 and run M12: a local copy beside an unrelated

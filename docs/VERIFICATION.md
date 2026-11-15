@@ -1,11 +1,11 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b49.vpk
-**SHA-256:** e2dabba0406d6cf314ff4150df4bb98ce0da8141f19e912a509467061eec43cb
-**ELF:** build/vitaftpshell, 530,916 bytes
+**Build:** vitaftpshell-v01.00-b55.vpk
+**SHA-256:** 84e5ed73a8a6d6be73973d544cb4f19dd1dfe401bd972892542821907e4d2349
+**ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
-**Date:** 2026-11-14
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b49 adds the b41 parallel lanes, built and host-tested, not yet on hardware; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Date:** 2026-11-15
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b55 carries the review remediation, built and host-tested, not yet on hardware; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
