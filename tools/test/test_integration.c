@@ -1647,6 +1647,41 @@ static void test_download_final_reply_loses_queue(void)
     CHECK(content_is("ux0:data/A.BIN", "HELLO"));
     CHECK(!fake_fs_exists("ux0:data/B.BIN"));
 
+    /* The lane survives the terminal: reconnect the saved site and move one
+     * more file through the same worker. */
+    UiCommand reconnect;
+    memset(&reconnect, 0, sizeof(reconnect));
+    reconnect.type = UI_CMD_RECONNECT;
+    CHECK(handoff_command_push(app_handoff(app), &reconnect) == 1);
+    (void)app_tick(app);
+
+    static const char *again_listing =
+        "type=file;size=5;modify=20240101000000; C.BIN\r\n";
+    Peer again;
+    peer_init(&again, again_listing, "WORLD");
+    pump(app, &again, 120);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
+    CHECK(again.listings >= 1);
+
+    if (app_state(app)->active_pane != UI_PANE_REMOTE)
+        press(app, INPUT_BIT(INPUT_L1));
+    CHECK(app_state(app)->active_pane == UI_PANE_REMOTE);
+    (void)app_tick(app);
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_DOWNLOAD);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&again);
+        if (again.retrs > 0 && app_state(app)->dock.state == UI_DOCK_DONE)
+            break;
+    }
+    CHECK(again.retrs == 1);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(content_is("ux0:data/C.BIN", "WORLD"));
+
     app_destroy(app);
 }
 
