@@ -259,6 +259,7 @@ static void server_close_transfer(FtpServer *server);
 static void server_control_failed(FtpServer *server, ServerSession *session);
 static void server_close_session(FtpServer *server, ServerSession *session,
                                  int send_221, const char *detail);
+static int ci_equal(const char *a, const char *b);
 
 static void server_reply(ServerSession *session, int code, const char *fmt, ...)
 {
@@ -394,11 +395,48 @@ static void server_release_owned_data(FtpServer *server,
     server_close_data(server);
 }
 
+/* What a path check is for. The three flags it replaces were positional, so a
+ * flipped call read as a different operation with no compiler help. */
+typedef enum {
+    SERVER_PATH_READ = 0,   /* metadata read: no hold */
+    SERVER_PATH_DATA_READ,  /* listing or download: hold a read */
+    SERVER_PATH_CHECK_WRITE,/* upload precheck: check a write, no hold */
+    SERVER_PATH_DATA_WRITE, /* upload: hold a write */
+    SERVER_PATH_TREE_WRITE  /* delete/mkdir/rmdir/rename: hold a write tree */
+} ServerPathAccess;
+
+/* The one transfer path this session owns right now (RETR source or STOR
+ * destination). Used only to let the owner read its own metadata. */
+static int server_own_transfer_path(FtpServer *server,
+                                    ServerSession *session,
+                                    const char *local)
+{
+    return server->data_session == server_session_index(server, session) &&
+           (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) &&
+           ci_equal(local, server->active_local);
+}
+
 static int server_path_held(ServerSession *session, const char *local,
-                            int write, int tree, int hold)
+                            ServerPathAccess access)
 {
     FtpServer *server = session->server;
     if (server->guard == NULL)
+        return 0;
+
+    int write = access == SERVER_PATH_CHECK_WRITE ||
+                access == SERVER_PATH_DATA_WRITE ||
+                access == SERVER_PATH_TREE_WRITE;
+    int tree = access == SERVER_PATH_TREE_WRITE;
+    int hold = access == SERVER_PATH_DATA_READ ||
+               access == SERVER_PATH_DATA_WRITE ||
+               access == SERVER_PATH_TREE_WRITE;
+
+    /* A session may ask about the path it is transferring. The stat decides
+     * whether the answer is a size or a not-found; an upload destination is
+     * answered not-found by its command handler because the new file does not
+     * exist yet. */
+    if (access == SERVER_PATH_READ &&
+        server_own_transfer_path(server, session, local))
         return 0;
 
     if (server->guard(server->guard_ctx, FTP_GUARD_CHECK, local, write, tree)) {
@@ -1197,8 +1235,9 @@ static int server_data_command(ServerSession *session, ServerDataKind kind,
     /* The guard's refusal is answered on the owning session. */
     server->data_session = server_session_index(server, session);
     if (!is_root &&
-        server_path_held(session, local.text, kind == SDATA_STOR, 0,
-                         kind != SDATA_LIST))
+        server_path_held(session, local.text,
+                         kind == SDATA_STOR ? SERVER_PATH_DATA_WRITE
+                                            : SERVER_PATH_DATA_READ))
         return 0;
 
     snprintf(server->active_virtual, sizeof(server->active_virtual), "%s",
@@ -1293,8 +1332,13 @@ static void server_mlst(ServerSession *session, const char *arg)
     const char *name = "/";
 
     if (!is_root) {
-        if (server_path_held(session, local.text, 0, 0, 0))
+        if (server_path_held(session, local.text, SERVER_PATH_READ))
             return;
+        if (server->data_kind == SDATA_STOR &&
+            server_own_transfer_path(server, session, local.text)) {
+            server_reply(session, 550, "Not found.");
+            return;
+        }
         PathRisk risk = PATH_RISK_NORMAL;
         if (path_check_read(local.text, 1, &risk) != PATH_OK ||
             server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK) {
@@ -1417,7 +1461,7 @@ static void server_handle_mkd(ServerSession *session, const char *arg)
         server_reply(session, 550, "Not found.");
         return;
     }
-    if (server_path_held(session, local.text, 1, 0, 0))
+    if (server_path_held(session, local.text, SERVER_PATH_CHECK_WRITE))
         return;
 
     if (server->fs->mkdir(server->fs->ctx, local.text) != FS_OK) {
@@ -1446,7 +1490,7 @@ static void server_handle_dele(ServerSession *session, const char *arg)
         server_reply(session, 550, "Not found.");
         return;
     }
-    if (server_path_held(session, local.text, 1, 1, 0))
+    if (server_path_held(session, local.text, SERVER_PATH_TREE_WRITE))
         return;
 
     if (server->fs->remove(server->fs->ctx, local.text) != FS_OK) {
@@ -1475,7 +1519,7 @@ static void server_handle_rmd(ServerSession *session, const char *arg)
         server_reply(session, 550, "Not found.");
         return;
     }
-    if (server_path_held(session, local.text, 1, 1, 0))
+    if (server_path_held(session, local.text, SERVER_PATH_TREE_WRITE))
         return;
 
     if (server->fs->rmdir(server->fs->ctx, local.text) != FS_OK) {
@@ -1505,7 +1549,7 @@ static void server_handle_rnfr(ServerSession *session, const char *arg)
         server_reply(session, 550, "Not found.");
         return;
     }
-    if (server_path_held(session, local.text, 1, 1, 0))
+    if (server_path_held(session, local.text, SERVER_PATH_TREE_WRITE))
         return;
 
     FsEntry entry;
@@ -1539,8 +1583,10 @@ static void server_handle_rnto(ServerSession *session, const char *arg)
         PathRisk risk = PATH_RISK_NORMAL;
         if (path_check_rename(session->rnfr_local, local.text, 1, &risk) ==
             PATH_OK) {
-            if (server_path_held(session, session->rnfr_local, 1, 1, 0) ||
-                server_path_held(session, local.text, 1, 1, 0)) {
+            if (server_path_held(session, session->rnfr_local,
+                                 SERVER_PATH_TREE_WRITE) ||
+                server_path_held(session, local.text,
+                                 SERVER_PATH_TREE_WRITE)) {
                 /* The 450 is already on the wire; a second reply would desync
                  * the client's command/reply pairing. */
                 session->rnfr_valid = 0;
@@ -1573,8 +1619,15 @@ static void server_handle_size(ServerSession *session, const char *arg)
         return;
     }
 
-    if (server_path_held(session, local.text, 0, 0, 0))
+    if (server_path_held(session, local.text, SERVER_PATH_READ))
         return;
+    if (server->data_kind == SDATA_STOR &&
+        server_own_transfer_path(server, session, local.text)) {
+        /* The destination is a sidecar until the upload commits; the old entry
+         * is not what the client is writing. */
+        server_reply(session, 550, "Not found.");
+        return;
+    }
 
     PathRisk risk = PATH_RISK_NORMAL;
     FsEntry entry;
@@ -1601,8 +1654,13 @@ static void server_handle_mdtm(ServerSession *session, const char *arg)
         return;
     }
 
-    if (server_path_held(session, local.text, 0, 0, 0))
+    if (server_path_held(session, local.text, SERVER_PATH_READ))
         return;
+    if (server->data_kind == SDATA_STOR &&
+        server_own_transfer_path(server, session, local.text)) {
+        server_reply(session, 550, "Not found.");
+        return;
+    }
 
     PathRisk risk = PATH_RISK_NORMAL;
     FsEntry entry;
@@ -1651,7 +1709,13 @@ static void server_handle_command(ServerSession *session, const char *line,
     }
     if (session->tx_backlog && strncmp(line, "ABOR", 4) != 0 &&
         strncmp(line, "QUIT", 4) != 0) {
-        server_trace(server, "FTPC DROPPED %s", line);
+        /* The mask below runs after this branch, so the dropped line needs its
+         * own case-insensitive check or a lowercase PASS leaks its argument. */
+        if (ci_equal_n(line, "PASS", 4) && (line[4] == ' ' || line[4] == '\t' ||
+                                            line[4] == '\0'))
+            server_trace(server, "FTPC DROPPED PASS ****");
+        else
+            server_trace(server, "FTPC DROPPED %s", line);
         return;
     }
     if (cmd_len >= sizeof(cmd)) {
