@@ -147,6 +147,10 @@ static void test_denials_and_risk(void)
     CHECK(path_check_rename("ur0:tai/config.txt", "ux0:data/x", 1, &risk) ==
           PATH_OK);
     CHECK(risk == PATH_RISK_HIGH);
+    CHECK(path_check_rename("ux0:data/a", "ux0:data/a.vftp.part", 0, &risk) ==
+          PATH_DENIED);
+    CHECK(path_check_rename("ux0:data/a", "ux0:data/a.VFTP.OLD", 0, &risk) ==
+          PATH_DENIED);
 }
 
 static void test_sidecar_names(void)

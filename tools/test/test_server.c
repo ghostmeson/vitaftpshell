@@ -783,6 +783,26 @@ static int tree_guard(void *ctx, FtpGuardAction action, const char *path,
     return 0;
 }
 
+/* A rename may not create a transfer sidecar name. */
+static void test_rename_sidecar_refused(void)
+{
+    setup();
+    fake_fs_seed_file("ux0:data/a.bin", "A", 1);
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient a;
+    connect_session(server, &a);
+
+    command(server, &a, "RNFR ux0:/data/a.bin", 350);
+    command(server, &a, "RNTO ux0:/data/a.bin.vftp.part", 550);
+    CHECK(!fake_fs_exists("ux0:data/a.bin.vftp.part"));
+    CHECK(fake_fs_exists("ux0:data/a.bin"));
+
+    command(server, &a, "QUIT", 221);
+    ftp_server_destroy(server);
+}
+
 /* A tree command checks the path but must not leave a hold behind; a leaked
  * hold makes the next rename on the path answer 450. */
 static void test_tree_command_releases(void)
@@ -1479,6 +1499,7 @@ int main(void)
     test_foreign_abor_keeps_pasv();
     test_storage_failure_451();
     test_tree_command_releases();
+    test_rename_sidecar_refused();
     test_trace_masks_password();
     test_owner_size_while_upload();
     test_held_path();
