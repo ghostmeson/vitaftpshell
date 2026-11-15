@@ -53,8 +53,11 @@ transfer at a time (D86), and has run on the console: FileZilla held two
 sessions and uploaded and downloaded successfully; the app-local client moved
 files across all three volumes. b61 applies D87; b62 trims the SERVER warning;
 b63 removes the warning panel and gives the client panel the full right column
-(D88). M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
-the project is `building`, not `verified`. Do not start coding from this file alone: the plan
+(D88). The next pass fixes the three confirmed P1s from the full review (the
+local conflict answer, the final-reply deadline, and the armed-slot release),
+the foreign ABOR, the owner metadata read, the dropped PASS trace, the local
+terminal badge, and the CLIENT panel pairing. M13 and M10 are partly observed;
+M1–M9, M11, and M12 are pending, so the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
 
@@ -352,7 +355,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D85
+    DECISIONS.md       numbered decisions, D1-D90
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification

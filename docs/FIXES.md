@@ -49,6 +49,31 @@ matrix passes.
   retry. M5 remains PART only for a FileZilla rename/delete and the full
   three-volume browse.
 
+## Review remediation (b63 → next build)
+
+| Build | Symptom | Cause and fix | Evidence | Status |
+|---|---|---|---|---|
+| next | **A rename onto an existing name opened the conflict prompt, and the answer ran nothing.** | The single-item conflict producer survived while its answer branch was deleted; the prompt frees the plan, so the answer must re-plan. Restore the branch, count a refused re-plan as failed, and key the prompt kind on an enum (U1, R1). | `test_local_rename_conflict`; host run | `HOST` |
+| next | **A download that received every byte then waited forever for the final 226.** | No deadline covered the draining state; the stage deadline had been cleared and the data deadline removed. Arm a final-reply deadline, keep a known-complete download, remove a short one, end the session, and name the remaining queue (U2, R2, D89). | `test_download_final_reply_missing`, `test_download_final_reply_short`, `test_upload_final_reply_missing`, `test_download_final_reply_loses_queue`, render kept case; host run | `HOST` |
+| next | **A client that dropped between PASV and its data command kept the only data slot; every other client got 450.** | The close test counted only an active transfer or a pending accept. Release any non-idle slot the closing session owns, emit an event only for an active transfer, and delegate the control-failed path to the close path (U3, R3). | `test_close_while_armed`, `test_owner_close_active_one_event`; host run | `HOST` |
+| next | **A foreign ABOR disarmed the owner's armed PASV.** | The third ABOR branch disarmed any session's slot. Only the owner may disarm it (U3, R4). | `test_foreign_abor_keeps_pasv`; host run | `HOST` |
+| next | **The server answered 450 for the file the same session was uploading.** | The guard could not exclude one session. Let the owner read metadata for its own transfer path; an upload destination answers 550, never the old size; other sessions stay guarded (U4, R5, D90). | `test_owner_size_while_upload`; host run | `HOST` |
+| next | **A dropped PASS command wrote its argument to the session log.** | The drop path traced the raw line before the mask. Mask by a case-insensitive first token before the backlog branch (U4, R6). | host review; `test_trace_masks_password` covers the accepted path | `HOST` |
+| next | **The local terminal badge vanished while the network lane ran.** | The inline badge predicate accepted only active or waiting. Share one predicate and name the terminal words (U6, R8). | `test_render_workspace`; host run | `HOST` |
+| next | **The CLIENT panel paired one peer with another session's command.** | The panel read server-global peer and command fields. Carry the session index, peer, masked verb, and path on the event; fall back to the live session on close (U6, R8). | `test_client_event_pairs_session`; host run | `HOST` |
+| next | **Reservation logic duplicated the path module's case folding and ancestry, and the header exposed its 288 KiB layout.** | Export `path_ci_equal`/`path_is_ancestor`; make `Reserve` opaque with create/destroy; state the lane-blind contract (U5, R7). | `test_reserve`, `test_path`; host run | `HOST` |
+| next | **The stack gate copied the worker recursion depth; the sanitizer covered 3 of 21 suites and nothing ran it.** | Read the depth from one header and fail closed; run every suite under ASan/UBSan and add a CI step (U8, R11). | `test_asan`; gate self-test; host run | `HOST` |
+
+**Still open from the b63 review, recorded rather than built** (U7):
+
+- Sidecar `RNTO` asymmetry: `.vftp.part`/`.vftp.old` are refused as write and delete targets but not as rename destinations.
+- The data-connection accept matches the peer address only, not the port; two clients on one host share an address.
+- Cancellation during the final-reply wait discards a complete download by design (D89, KTD8); the cancel dialog says the partial is removed.
+- `FEAT` advertises a `perm` fact that `MLSD`/`MLST` never emits.
+- A PASV reply captures the LAN address at start; a DHCP change leaves a stale `227` endpoint.
+- A second cancel can overwrite the first in the single critical-cancel slot.
+- `path_canonicalize` does not fold trailing dots or spaces; the Vita filesystem's own folding is unverified `[C]`.
+
 ## Upload defect (b57 → b58)
 
 | Build | Symptom | Evidence | Status |

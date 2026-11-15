@@ -112,7 +112,7 @@ requirements R1-R70.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | b37 hardware-tested (operator report); b40 crashed, four cores analysed; b43 built, not tested; M1–M13 evidence transcription pending |
+| Phase 6: Hardware verification | b37 and b43 hardware-tested (operator report); b40 crashed, four cores analysed; b60 observed FileZilla and app-local transfers; the b63 review remediation is host-tested; M1–M13 evidence transcription pending |
 
 ## Failure policy
 
