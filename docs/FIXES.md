@@ -70,7 +70,7 @@ matrix passes.
 | b66 | **A client that dropped between PASV and its data command kept the only data slot; every other client got 450.** | The close test counted only an active transfer or a pending accept. Release any non-idle slot the closing session owns, emit an event only for an active transfer, and delegate the control-failed path to the close path (U3, R3). | `test_close_while_armed`, `test_owner_close_active_one_event`; host run | `HOST b66` |
 | b66 | **A foreign ABOR disarmed the owner's armed PASV.** | The third ABOR branch disarmed any session's slot. Only the owner may disarm it (U3, R4). | `test_foreign_abor_keeps_pasv`; host run | `HOST b66` |
 | b66 | **The server answered 450 for the file the same session was uploading.** | The guard could not exclude one session. Let the owner read metadata for its own transfer path; an upload destination answers 550, never the old size; other sessions stay guarded (U4, R5, D90). | `test_owner_size_while_upload`; host run | `HOST b66` |
-| b66 | **A dropped PASS command wrote its argument to the session log.** | The drop path traced the raw line before the mask. Mask by a case-insensitive first token before the backlog branch (U4, R6). | Code inspection; `test_trace_masks_password` covers the accepted path. The fake cannot wedge the reply buffer, so the drop path has no host test. | `HOST b66` |
+| b66 | **A dropped PASS command wrote its argument to the session log.** | The drop path traced the raw line before the mask. Mask by a case-insensitive first token before the backlog branch (U4, R6). | `test_trace_masks_password` (accepted path), `test_trace_drops_password` (all four spellings against a wedged reply buffer); host run | `HOST b66` |
 | b66 | **The local terminal badge vanished while the network lane ran.** | The inline badge predicate accepted only active or waiting. Share one predicate and name the terminal words (U6, R8). | `test_render_workspace`; host run | `HOST b66` |
 | b66 | **The CLIENT panel paired one peer with another session's command.** | The panel read server-global peer and command fields. Carry the session index, peer, masked verb, and path on the event; fall back to the live session on close (U6, R8). | `test_client_event_pairs_session`; host run | `HOST b66` |
 | b66 | **Reservation logic duplicated the path module's case folding and ancestry, and the header exposed its 288 KiB layout.** | Export `path_ci_equal`/`path_is_ancestor`; make `Reserve` opaque with create/destroy; state the lane-blind contract (U5, R7). | `test_reserve`, `test_path`; host run | `HOST b66` |
@@ -78,7 +78,6 @@ matrix passes.
 
 **Still open from the b65 review, recorded rather than built:**
 
-- The reply-backlog PASS drop path has no fake seam, so its mask rests on code inspection (review #9).
 - The data-connection accept cannot distinguish two sessions on one host; the fixed port is kept and the limitation is accepted for v1 (U4).
 
 **Still open from the b63 review, recorded rather than built** (U7):

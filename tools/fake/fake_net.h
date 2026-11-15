@@ -49,6 +49,10 @@ void fake_net_reset_peer(NetSocket *socket);
 size_t fake_net_tx_len(NetSocket *socket);
 size_t fake_net_read_tx(NetSocket *socket, void *buf, size_t cap);
 int fake_net_is_open(NetSocket *socket);
+/* Keep a send from making progress without closing the socket; the server's
+ * reply buffer can then be filled to exercise the backlog drop path. */
+void fake_net_block_sends(NetSocket *socket, int blocked);
+
 void fake_net_set_ready(NetSocket *socket, unsigned flags);
 
 /* Queue one peer for the listener; the next accept returns a new socket. */
