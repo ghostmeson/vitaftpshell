@@ -852,12 +852,67 @@ static void test_peer_check(void)
     connect_session(server, &client);
 
     pasv(server, &client);
+    /* The 150 follows the data accept, so a foreign-only peer produces no
+     * reply until the accept deadline passes. */
+    fake_ftp_client_send(&client, "RETR /UX0:/DATA/f.txt");
+    ftp_server_tick(server, 0);
     fake_net_queue_accept(fake_net_listener_at(1), 0x0A000009u, 40001);
-    (void)data_command(server, &client, "RETR /UX0:/DATA/f.txt", 425);
+    ftp_server_tick(server, 0);
     NetSocket *foreign = fake_net_accepted_at(1);
     CHECK(foreign != NULL);
     CHECK(!fake_net_is_open(foreign));
     CHECK(fake_net_tx_len(foreign) == 0);
+
+    /* A foreign peer is dropped without failing the command; the command
+     * fails only when the accept deadline passes with no matching peer. */
+    fake_clock_advance(6000);
+    wait_reply(server, &client, 425);
+
+    ftp_server_destroy(server);
+}
+
+/* A foreign peer queued first must not consume the legitimate data peer. */
+static void test_peer_check_recovers(void)
+{
+    setup();
+    fake_fs_seed_file("ux0:data/f.txt", "data", 4);
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    pasv(server, &client);
+    fake_net_queue_accept(fake_net_listener_at(1), 0x0A000009u, 40001);
+    queue_data_peer();
+    NetSocket *data =
+        data_command(server, &client, "RETR /UX0:/DATA/f.txt", 150);
+    CHECK(data != NULL);
+    NetSocket *foreign = fake_net_accepted_at(1);
+    CHECK(foreign != NULL);
+    CHECK(!fake_net_is_open(foreign));
+
+    ftp_server_destroy(server);
+}
+
+/* A control peer that sends nothing loses the session instead of holding the
+ * only slot forever. */
+static void test_control_idle(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    fake_clock_advance(31000);
+    ftp_server_tick(server, 0);
+    int code = 0;
+    char text[128];
+    CHECK(read_reply(&client, &code, text, sizeof(text)) == 1);
+    CHECK(code == 421);
+    CHECK(ftp_server_clients(server) == 0);
 
     ftp_server_destroy(server);
 }
@@ -971,6 +1026,8 @@ int main(void)
     test_busy_and_abort();
     test_control_write_failure();
     test_peer_check();
+    test_peer_check_recovers();
+    test_control_idle();
     test_port_rest_502();
     test_quit();
     test_network_loss();

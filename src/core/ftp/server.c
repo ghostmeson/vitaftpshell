@@ -18,6 +18,9 @@
 #define SERVER_LINE_MAX 2048
 #define SERVER_ACCEPT_MS 5000
 #define SERVER_DATA_IDLE_MS 15000
+#define SERVER_CONTROL_IDLE_MS 30000
+#define SERVER_ACCEPT_BATCH 4
+#define SERVER_TX_HIGH_WATER (SERVER_TX_MAX * 3 / 4)
 #define SERVER_LINK_CHECK_MS 1000
 
 typedef enum {
@@ -56,6 +59,8 @@ struct FtpServer {
     char tx[SERVER_TX_MAX];
     size_t tx_len;
     size_t tx_off;
+    int tx_backlog;
+    uint64_t control_deadline;
 
     FtpDataState data_state;
     ServerDataKind data_kind;
@@ -211,8 +216,13 @@ static void server_reply(FtpServer *server, int code, const char *fmt, ...)
 
     char line[FTP_PATH_MAX + 80];
     int n = snprintf(line, sizeof(line), "%03d %s\r\n", code, body);
-    if (n > 0)
-        server_append(server, line, (size_t)n);
+    if (n > 0 && !server_append(server, line, (size_t)n) &&
+        !server->tx_backlog) {
+        /* The peer is not draining its replies. Record it once; the command
+         * loop stops reading non-ABOR/QUIT input until the buffer drains. */
+        server->tx_backlog = 1;
+        server_error_event(server, "REPLY BACKLOG");
+    }
 }
 
 static void server_flush(FtpServer *server)
@@ -236,6 +246,7 @@ static void server_flush(FtpServer *server)
 
     server->tx_len = 0;
     server->tx_off = 0;
+    server->tx_backlog = 0;
 }
 
 static void server_drain_listener(FtpServer *server)
@@ -346,6 +357,8 @@ static void server_control_failed(FtpServer *server)
     server->user_seen = 0;
     server->user_ok = 0;
     server->rnfr_valid = 0;
+    server->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
+    server->tx_backlog = 0;
     snprintf(server->cwd, sizeof(server->cwd), "/");
     server->tx_len = 0;
     server->tx_off = 0;
@@ -989,28 +1002,32 @@ static void server_try_accept(FtpServer *server)
     if (server->data_state != FTP_DATA_ARMED || !server->pending_accept)
         return;
 
-    NetSocket *data = NULL;
-    NetAddress peer;
-    NetResult r = server->net->accept(server->net->ctx, server->data_listener,
-                                      &data, &peer);
-    if (r == NET_WOULD_BLOCK)
-        return;
-    if (r != NET_OK) {
-        server_reply(server, 425, "Cannot open data connection.");
-        server_disarm(server);
+    /* Drain a bounded number of queued connections per tick. A foreign peer
+     * is closed and the loop continues; the command only fails when the
+     * pending deadline passes with no matching peer. */
+    for (int i = 0; i < SERVER_ACCEPT_BATCH; ++i) {
+        NetSocket *data = NULL;
+        NetAddress peer;
+        NetResult r = server->net->accept(server->net->ctx,
+                                          server->data_listener, &data, &peer);
+        if (r == NET_WOULD_BLOCK)
+            return;
+        if (r != NET_OK) {
+            server_reply(server, 425, "Cannot open data connection.");
+            server_disarm(server);
+            return;
+        }
+
+        if (peer.addr != server->control_peer.addr) {
+            server->net->close(server->net->ctx, data);
+            continue;
+        }
+
+        server->data = data;
+        server->data_state = FTP_DATA_ACCEPTED;
+        server_begin_data(server);
         return;
     }
-
-    if (peer.addr != server->control_peer.addr) {
-        server->net->close(server->net->ctx, data);
-        server_reply(server, 425, "Cannot open data connection.");
-        server_disarm(server);
-        return;
-    }
-
-    server->data = data;
-    server->data_state = FTP_DATA_ACCEPTED;
-    server_begin_data(server);
 }
 
 static int server_data_command(FtpServer *server, ServerDataKind kind,
@@ -1509,6 +1526,9 @@ static void server_handle_command(FtpServer *server, const char *line,
         server_reply(server, 500, "Command not understood.");
         return;
     }
+    if (server->tx_backlog && strncmp(line, "ABOR", 4) != 0 &&
+        strncmp(line, "QUIT", 4) != 0)
+        return;
     if (cmd_len >= sizeof(cmd)) {
         server_reply(server, 502, "Command not implemented.");
         return;
@@ -1769,6 +1789,7 @@ static void server_process_control(FtpServer *server)
         if (got == 0)
             return;
 
+        server->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
         for (size_t i = 0; i < got; ++i) {
             FtpLineResult lr = ftp_line_feed(&server->lines, buf[i]);
             if (lr == FTP_LINE_READY)
@@ -1796,8 +1817,12 @@ static void server_accept_control(FtpServer *server)
     if (server->clients != 0) {
         server->state = FTP_SERVER_REFUSING;
         server_state_event(server);
-        server->net->send(server->net->ctx, accepted, "450 Busy.\r\n", 11,
-                          &(size_t){0});
+        size_t sent = 0;
+        NetResult sr = server->net->send(server->net->ctx, accepted,
+                                         "450 Busy.\r\n", 11, &sent);
+        if (sr == NET_WOULD_BLOCK)
+            (void)server->net->send(server->net->ctx, accepted,
+                                    "450 Busy.\r\n", 11, &sent);
         server->net->close(server->net->ctx, accepted);
         server->state = FTP_SERVER_SESSION;
         server_state_event(server);
@@ -1812,6 +1837,8 @@ static void server_accept_control(FtpServer *server)
     server->user_ok = 0;
     server->logged_in = 0;
     server->rnfr_valid = 0;
+    server->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
+    server->tx_backlog = 0;
     snprintf(server->cwd, sizeof(server->cwd), "/");
     ftp_line_init(&server->lines);
     server->tx_len = 0;
@@ -2012,6 +2039,19 @@ void ftp_server_tick(FtpServer *server, unsigned wait_ms)
     server_flush(server);
 
     now = server_now(server);
+    if (server->control != NULL &&
+        (server->data_state == FTP_DATA_ACTIVE ||
+         server->data_state == FTP_DATA_ACCEPTED))
+        server->control_deadline = now + SERVER_CONTROL_IDLE_MS;
+
+    if (server->control != NULL && server->clients == 1 &&
+        now >= server->control_deadline) {
+        server_reply(server, 421, "Idle timeout.");
+        server_flush(server);
+        server_close_session(server, 0, "IDLE TIMEOUT");
+        return;
+    }
+
     if (server->pending_accept && now >= server->pending_deadline) {
         server_reply(server, 425, "Cannot open data connection.");
         server_disarm(server);
