@@ -142,8 +142,8 @@ land:
 
 - The server is **OFF at launch**. Starting it is an explicit action, and its ON
   state and client count stay visible. The warning states that anonymous clients
-  can read and write the exposed volumes, including the app data folder and
-  the `tai` folders.
+  can read and write the exposed volumes; `ur0:tai/boot_config.txt` is named
+  as denied.
 - The server denies all access to `ur0:tai/boot_config.txt`. It may read and
   write the app data folder and the `tai` folders (D87).
 - The local manager may write inside `ur0:tai` and `ux0:tai` without the

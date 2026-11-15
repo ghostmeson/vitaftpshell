@@ -109,8 +109,6 @@ static void warning_draw(const LayoutRect *r)
         "AND WRITE UX0:, UR0:, AND UMA0.",
     };
     static const char *const dim[] = {
-        "UX0:/DATA/VITAFTPSHELL IS EXPOSED.",
-        "UR0:TAI AND UX0:TAI ARE WRITABLE.",
         "UR0:TAI/BOOT_CONFIG.TXT IS DENIED.",
         "AN UPLOAD REPLACES A FILE OF THE",
         "SAME NAME.",
@@ -120,7 +118,7 @@ static void warning_draw(const LayoutRect *r)
     };
 
     ui_lines(yellow, 2, 596.0f, 108.0f, 16.0f, PX_MICRO, C_YELLOW);
-    ui_lines(dim, 8, 596.0f, 140.0f, 16.0f, PX_MICRO, C_DIM);
+    ui_lines(dim, 6, 596.0f, 140.0f, 16.0f, PX_MICRO, C_DIM);
 }
 
 static void client_draw(const UiState *state, const LayoutRect *r)

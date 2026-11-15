@@ -1,15 +1,28 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b61.vpk
-**SHA-256:** ecbfdf1451a06177a5f9087967238c139786efba6529f6f5f018112fa29d37e8
+**Build:** vitaftpshell-v01.00-b62.vpk
+**SHA-256:** 6cf2fdbdbc060f28c986594407f10ac58e957739999ee2c49e35fb9e15954ed5
 **ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy and awaits its hardware retry; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy, b62 removes the separate app-data/`tai` warning lines, and the b62 hardware retry is pending; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b62 warning trim
+
+**Date:** 2026-11-15
+**Build:** `vitaftpshell-v01.00-b62.vpk`
+**SHA-256:** `6cf2fdbdbc060f28c986594407f10ac58e957739999ee2c49e35fb9e15954ed5`
+
+The SERVER warning no longer carries the separate `UX0:/DATA/VITAFTPSHELL IS
+EXPOSED.` and `UR0:TAI AND UX0:TAI ARE WRITABLE.` lines. It keeps the yellow
+anonymous read-write line, `UR0:TAI/BOOT_CONFIG.TXT IS DENIED.`, the overwrite
+note, and the launch/stop lines. The D87 access policy is unchanged; only its
+disclosure text changed. `test_render_screens` asserts the new six-line panel.
+Host run only; b62 hardware retry pending.
 
 ## b61 unrestricted access
 
