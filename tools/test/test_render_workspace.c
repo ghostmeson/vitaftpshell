@@ -326,6 +326,14 @@ static void test_dock_states(void)
     CHECK(trace_has_text("LOCAL WAITING"));
     CHECK(trace_has_text_color("LOCAL WAITING", C_YELLOW));
 
+    /* A solo waiting lane owns the panel, not a badge over the idle dock. */
+    s_state.dock.active = 0;
+    s_state.dock.state = UI_DOCK_IDLE;
+    s_state.dock_primary = UI_DOCK_LANE_LOCAL;
+    render();
+    CHECK(trace_text_at_color("WAITING", 32.0f, 450.0f, C_YELLOW));
+    CHECK(!trace_has_text("LOCAL WAITING"));
+
     setup();
     s_state.panes[UI_PANE_REMOTE].connected = 0;
     s_state.dock.state = UI_DOCK_IDLE;

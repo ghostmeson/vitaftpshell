@@ -368,6 +368,80 @@ static void test_download_destination_failure(void)
     app_destroy(app);
 }
 
+static void select_local_named(App *app, const char *name);
+static void enter_ux0_data(App *app);
+static void enter_local_named(App *app, const char *name, const char *path);
+
+/* A local job starts beside a held download (D72), and a lane cancel never
+ * touches the other lane. */
+static void test_two_lanes_progress(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:data/DEST");
+
+    Peer peer;
+    connect_site(app, &peer);
+    select_remote(app);
+
+    peer.hold_data = 1;
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.retrs > 0 && app_state(app)->dock.active)
+            break;
+    }
+    CHECK(peer.retrs > 0);
+    CHECK(app_state(app)->dock.active == 1);
+
+    /* A local copy starts while the download is live; the old guard refused it. */
+    press(app, INPUT_BIT(INPUT_L1));
+    enter_ux0_data(app);
+    select_local_named(app, "A.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_COPY);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    enter_local_named(app, "DEST", "ux0:data/DEST");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, &peer, 40);
+
+    CHECK(fake_fs_exists("ux0:data/DEST/A.TXT"));
+    CHECK(app_state(app)->dock.active == 1);
+    CHECK(app_state(app)->local_dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->local_shown == 1);
+    CHECK(!log_has("TRANSFER IN PROGRESS"));
+
+    /* Cancelling the idle local lane must not stop the download. */
+    UiCommand cancel;
+    memset(&cancel, 0, sizeof(cancel));
+    cancel.type = UI_CMD_CANCEL_LOCAL;
+    CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
+    pump(app, &peer, 5);
+    CHECK(app_state(app)->dock.active == 1);
+
+    /* Cancel the download from the dock. */
+    for (int i = 0; i < 4; ++i)
+        press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->dock.focused == 1);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, &peer, 40);
+    CHECK(peer.aborts > 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+
+    app_destroy(app);
+}
+
 static void test_connect_list_download(void)
 {
     App *app = make_app();
@@ -1230,7 +1304,7 @@ static void test_upload_conflict(void)
     CHECK(peer.stors == 1);
     /* CANCEL must be observed as a cancellation, not look like SKIP. */
     CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
-    CHECK(strcmp(app_state(app)->status, "CANCELLED") == 0);
+    CHECK(strcmp(app_state(app)->status, "NETWORK CANCELLED") == 0);
 
     /* CANCEL cleared the batch latch: a new attempt asks again. */
     press(app, INPUT_BIT(INPUT_TRIANGLE));
@@ -1647,6 +1721,7 @@ static void test_local_conflict_prompt(void)
 int main(void)
 {
     test_download_destination_failure();
+    test_two_lanes_progress();
     test_connect_list_download();
     test_remote_navigation();
     test_remote_mutations();

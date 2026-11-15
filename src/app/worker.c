@@ -2053,13 +2053,6 @@ static void handle_action(Worker *worker, const UiCommand *command)
 
     local_batch_begin(worker, command, action_direction(command->action));
 
-    if (worker->transfer_active || xfer_busy(&worker->queue) ||
-        ftp_server_busy(worker->server)) {
-        emit_error(worker, UI_PANE_LOCAL, "TRANSFER IN PROGRESS",
-                   OP_CAUSE_APP, OP_STAGE_TRANSFER);
-        return;
-    }
-
     if (!worker->batch_executing && command->batch_id != 0) {
         if (worker->pending.valid) {
             queue_pending_action(worker, command);
@@ -2663,6 +2656,8 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
     if (cancelled) {
         HandoffEvent cancelled_event;
         event_init(&cancelled_event, HANDOFF_EVT_TRANSFER_CANCELLED);
+        cancelled_event.direction = finished.direction;
+        cancelled_event.direction_known = 1;
         emit(worker, &cancelled_event);
     } else if (ok) {
         emit_transfer_done(worker, finished.direction, finished.source.text, 1,

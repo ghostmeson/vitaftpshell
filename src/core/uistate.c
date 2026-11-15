@@ -122,7 +122,7 @@ static void set_action_error(UiState *state, UiPaneState *pane,
 static void open_dock_cancel(UiState *state)
 {
     int network = state->dock.active;
-    int local = state->local_dock.active;
+    int local = state->local_dock.active || state->local_dock.waiting;
     int server = is_server_direction((int)state->dock.direction);
 
     if (network && local) {
@@ -2187,6 +2187,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             lane->direction = event->pane == UI_PANE_LOCAL ? XFER_DIR_UPLOAD
                                                            : XFER_DIR_DOWNLOAD;
         fmt_copy(lane->name, sizeof(lane->name), event->text);
+        lane->skipped = 0;
+        lane->failed = 0;
+        lane->cancelled = 0;
         set_transfer_dock(lane, event, UI_DOCK_ACTIVE);
         lane->done = 0;
         lane->item_index = event->item_index;
@@ -2228,16 +2231,19 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane_terminal(state, lane);
         break;
     }
-    case UI_EVT_TRANSFER_CANCELLED:
-        state->dock.active = 0;
-        if (state->dock.focused)
+    case UI_EVT_TRANSFER_CANCELLED: {
+        UiDock *lane = event->direction_known ? lane_for(state, event)
+                                              : &state->dock;
+        lane->active = 0;
+        lane->waiting = 0;
+        lane->state = UI_DOCK_IDLE;
+        lane->message[0] = '\0';
+        if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
-        state->dock.state = UI_DOCK_IDLE;
-        state->dock.message[0] = '\0';
-        state->local_dock.active = 0;
-        state->local_dock.waiting = 0;
-        set_status(state, "CANCELLED");
+        set_status(state, lane == &state->dock ? "NETWORK CANCELLED"
+                                               : "LOCAL CANCELLED");
         break;
+    }
     case UI_EVT_TRANSFER_FAILED: {
         UiDock *lane = lane_for(state, event);
         lane->active = 0;

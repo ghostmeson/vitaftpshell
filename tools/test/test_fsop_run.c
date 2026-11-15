@@ -592,7 +592,8 @@ static void test_delete_cancel_two(void)
     ProgressCancel ctx = {2, &progress};
     FsOpRunResult r = fsop_run(fake_fs_port(), &s_plan, &progress,
                                cancel_when_done, &ctx);
-    CHECK(r == FSOP_RUN_PARTIAL);
+    CHECK(r == FSOP_RUN_CANCELLED);
+    CHECK(progress.cause == OP_CAUSE_USER);
     CHECK(progress.files_done == 2);
     CHECK(progress.files_total == 5);
     CHECK(strcmp(progress.message, "DELETED 2 OF 5") == 0);
