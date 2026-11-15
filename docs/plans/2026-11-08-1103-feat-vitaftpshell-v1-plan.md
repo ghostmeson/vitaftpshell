@@ -602,7 +602,7 @@ stateDiagram-v2
   Session --> On: write done
 ```
 
-**Transfer pipeline.** The one slot, the conflict gate, and the rollback.
+**Transfer pipeline.** The network queue, the conflict gate, and the rollback.
 
 ```mermaid
 flowchart TB
