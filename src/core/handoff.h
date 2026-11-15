@@ -95,6 +95,8 @@ typedef struct {
 typedef struct {
     int valid;
     UiConfirmKind kind;
+    /* The lane the prompt belongs to; UI_PANE_REMOTE for a network item. */
+    int pane;
     int item_count;
     int existing_count;
     int high_risk;

@@ -334,6 +334,15 @@ static void test_dock_states(void)
     CHECK(trace_text_at_color("WAITING", 32.0f, 450.0f, C_YELLOW));
     CHECK(!trace_has_text("LOCAL WAITING"));
 
+    /* The network lane can wait on a held path too. */
+    s_state.local_shown = 0;
+    s_state.local_dock.waiting = 0;
+    s_state.dock.waiting = 1;
+    s_state.dock_primary = UI_DOCK_LANE_NETWORK;
+    render();
+    CHECK(trace_text_at_color("WAITING", 32.0f, 450.0f, C_YELLOW));
+    CHECK(trace_has_text("NETWORK"));
+
     setup();
     s_state.panes[UI_PANE_REMOTE].connected = 0;
     s_state.dock.state = UI_DOCK_IDLE;

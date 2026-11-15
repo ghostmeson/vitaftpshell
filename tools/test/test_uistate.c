@@ -994,6 +994,24 @@ static void test_waiting_lane_cancel(void)
     send_key(UI_KEY_CROSS);
     CHECK(s_state.confirm.kind == UI_CONFIRM_CANCEL_LANES);
     CHECK(s_state.confirm.choices[2] == UI_CHOICE_CANCEL_LOCAL);
+
+    /* A network PATH BUSY answer marks the network lane waiting, not local. */
+    reset();
+    static const UiConfirmItem blocker = {"ux0:data/HELD.BIN", 0, 0};
+    UiStateEvent request;
+    memset(&request, 0, sizeof(request));
+    request.kind = UI_EVT_CONFIRM_REQUEST;
+    request.confirm = UI_CONFIRM_PATH_BUSY;
+    request.pane = UI_PANE_REMOTE;
+    request.items = &blocker;
+    request.item_count = 1;
+    send_event(&request);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_PATH_BUSY);
+    send_key(UI_KEY_CROSS); /* WAIT */
+    CHECK(s_state.dock.waiting == 1);
+    CHECK(s_state.local_dock.waiting == 0);
+    CHECK(s_state.dock_primary == UI_DOCK_LANE_NETWORK);
 }
 
 static void test_paste_guards(void)

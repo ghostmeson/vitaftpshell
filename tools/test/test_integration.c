@@ -442,6 +442,85 @@ static void test_two_lanes_progress(void)
     app_destroy(app);
 }
 
+/* D73: a colliding paste answered WAIT resumes when the blocker releases and
+ * re-applies the existing-destination rule. */
+static void test_wait_resume_rechecks(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:data/SRC");
+    fake_fs_seed_file("ux0:data/SRC/TEST.BIN", "B", 1);
+
+    Peer peer;
+    connect_site(app, &peer);
+    select_remote(app);
+
+    peer.hold_data = 1;
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.retrs > 0 && app_state(app)->dock.active)
+            break;
+    }
+    CHECK(app_state(app)->dock.active == 1);
+
+    /* Copy a file named TEST.BIN into the folder the download is writing. */
+    press(app, INPUT_BIT(INPUT_L1));
+    enter_ux0_data(app);
+    enter_local_named(app, "SRC", "ux0:data/SRC");
+    select_local_named(app, "TEST.BIN");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_COPY);
+    press(app, INPUT_BIT(INPUT_CROSS)); /* arm the clipboard */
+    select_local_named(app, "..");
+    press(app, INPUT_BIT(INPUT_CROSS)); /* back to ux0:data */
+    for (int i = 0; i < 40; ++i) {
+        (void)app_tick(app);
+        if (strcmp(app_state(app)->panes[UI_PANE_LOCAL].path, "ux0:data") == 0)
+            break;
+    }
+    CHECK(strcmp(app_state(app)->panes[UI_PANE_LOCAL].path, "ux0:data") == 0);
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, &peer, 10);
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_PATH_BUSY);
+    CHECK(app_state(app)->confirm.choices[0] == UI_CHOICE_WAIT);
+    press(app, INPUT_BIT(INPUT_CROSS)); /* WAIT */
+    CHECK(app_state(app)->local_dock.waiting == 1);
+
+    /* The destination appears during the wait; the resume must ask. */
+    fake_fs_seed_file("ux0:data/TEST.BIN", "X", 1);
+
+    /* Stop the download so the reservation releases. */
+    UiCommand cancel;
+    memset(&cancel, 0, sizeof(cancel));
+    cancel.type = UI_CMD_CANCEL_NETWORK;
+    CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
+    pump(app, &peer, 40);
+
+    for (int i = 0; i < 40; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM &&
+            app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT)
+            break;
+    }
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+    CHECK(app_state(app)->confirm.item_count == 1);
+    CHECK(strcmp(app_state(app)->confirm.items[0].name,
+                 "ux0:data/TEST.BIN") == 0);
+
+    app_destroy(app);
+}
+
 static void test_connect_list_download(void)
 {
     App *app = make_app();
@@ -1722,6 +1801,7 @@ int main(void)
 {
     test_download_destination_failure();
     test_two_lanes_progress();
+    test_wait_resume_rechecks();
     test_connect_list_download();
     test_remote_navigation();
     test_remote_mutations();
