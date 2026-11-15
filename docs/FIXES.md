@@ -133,6 +133,21 @@ matrix passes.
 | b49 | The reservation arena was never reclaimed | Compact the surviving paths on release | `test_release_reclaims_arena` | `HOST b49` |
 
 
+## b55 deferred review items
+
+These are review findings that the b55 pass did not close. They are recorded
+here so they do not live only in a review report.
+
+| Item | Why it waited | Status |
+|---|---|---|
+| The `UiState` row pointer can outlive a released listing generation | The fix is a listing-lifetime change; the threaded test exercises the current cycle without a torn frame | `PENDING` |
+| A kept `.vftp.old` is visible but not marked as debris | The row flag and render case are their own UI change (D81) | `PENDING` |
+| A failed aside cleanup still reports a failed commit | The honest notice needs a notice field on the progress record; the rename did happen | `PENDING` |
+| The queue's terminal and conflict latches have no production reader | The queue tests depend on them; removing them is a focused follow-up to D82's one-owner rule | `PENDING` |
+| Confirm resolution is duplicated across the two key branches | The prompt-id fix closed the behavior; the shared resolver is a cleanup | `PENDING` |
+| TSan over the threaded app test | The singleton fakes race; the app is clean under ASan/UBSan | `PENDING` |
+| M1-M13 on b55 | Needs the console | `PENDING` |
+
 ## b55 review remediation
 
 | Build | Change | Evidence | Status |
