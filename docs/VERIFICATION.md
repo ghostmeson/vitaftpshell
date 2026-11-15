@@ -1,15 +1,32 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b56.vpk
-**SHA-256:** 5f5fe87e5cd4d0328e552eb6ca55454d4383a18099d4c183a0800c79bc149be5
+**Build:** vitaftpshell-v01.00-b57.vpk
+**SHA-256:** e51af216cc17c69a9252824f703b0fad91e192b3bb8742aafbdb3ae19817e398
 **ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b56 re-packages the b55 review remediation with the settled launcher icon, code unchanged, built and host-tested, not yet on hardware; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b57 adds a server protocol trace to diagnose the open upload defect; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b57 server upload trace
+
+**Date:** 2026-11-15
+**Build:** `vitaftpshell-v01.00-b57.vpk`
+**SHA-256:** `e51af216cc17c69a9252824f703b0fad91e192b3bb8742aafbdb3ae19817e398`
+
+The FTP server now writes a protocol trace to `ux0:data/vitaFTPShell/session.log`:
+`FTPC` is a received command (`PASS` is masked as `****`), `FTPR` is a reply,
+and `FTPD` is a data milestone (control accept, data accept or foreign peer,
+temp open, first read, commit, finish, close). The trace exists because the b56
+console run showed that listings and directory operations work but an upload
+never starts; the log has no server command trace yet. `test_server` asserts
+the trace lines and that a password never appears.
+
+The b56 icon rebuild below is unchanged; b57 adds only the trace and its test.
+The upload row (M5) is the failing row. Collect the log after one failed upload.
 
 ## b56 icon rebuild
 

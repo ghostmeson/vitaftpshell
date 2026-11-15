@@ -52,6 +52,10 @@ typedef struct {
 
 typedef void (*FtpServerEventFn)(void *ctx, const FtpServerEvent *event);
 
+/* A protocol trace for the session log. The server never includes a PASS
+ * argument; a trace line is already safe to write. */
+typedef void (*FtpServerTraceFn)(void *ctx, const char *line);
+
 typedef enum {
     FTP_SERVER_OK = 0,
     FTP_SERVER_BUSY,
@@ -86,6 +90,8 @@ typedef int (*FtpServerGuardFn)(void *ctx, FtpGuardAction action,
                                 const char *local_path, int write, int tree);
 
 void ftp_server_set_guard(FtpServer *server, FtpServerGuardFn guard,
+                          void *ctx);
+void ftp_server_set_trace(FtpServer *server, FtpServerTraceFn trace,
                           void *ctx);
 /* `wait_ms` bounds the socket wait; pass 0 while a local job needs the slice. */
 void ftp_server_tick(FtpServer *server, unsigned wait_ms);

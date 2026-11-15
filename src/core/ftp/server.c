@@ -37,6 +37,8 @@ struct FtpServer {
     ClockPort *clock;
     FtpServerEventFn emit;
     void *emit_ctx;
+    FtpServerTraceFn trace;
+    void *trace_ctx;
 
     FtpServerState state;
     uint16_t control_port;
@@ -202,6 +204,27 @@ static int server_append_raw(FtpServer *server, const char *text)
     return server_append(server, text, strlen(text));
 }
 
+static void server_trace(FtpServer *server, const char *fmt, ...)
+{
+    if (server == NULL || server->trace == NULL)
+        return;
+
+    char line[256];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(line, sizeof(line), fmt, args);
+    va_end(args);
+    server->trace(server->trace_ctx, line);
+}
+
+static void server_trace_peer(FtpServer *server, const char *prefix,
+                              NetAddress peer)
+{
+    server_trace(server, "%s %u.%u.%u.%u:%u", prefix, (peer.addr >> 24) & 0xFF,
+                 (peer.addr >> 16) & 0xFF, (peer.addr >> 8) & 0xFF,
+                 peer.addr & 0xFF, (unsigned)peer.port);
+}
+
 static void server_close_data(FtpServer *server);
 static void server_close_transfer(FtpServer *server);
 static void server_control_failed(FtpServer *server);
@@ -216,6 +239,8 @@ static void server_reply(FtpServer *server, int code, const char *fmt, ...)
 
     char line[FTP_PATH_MAX + 80];
     int n = snprintf(line, sizeof(line), "%03d %s\r\n", code, body);
+    if (n > 0)
+        server_trace(server, "FTPR %.*s", n > 2 ? n - 2 : n, line);
     if (n > 0 && !server_append(server, line, (size_t)n) &&
         !server->tx_backlog) {
         /* The peer is not draining its replies. Record it once; the command
@@ -416,6 +441,7 @@ static void server_close_session(FtpServer *server, int send_221,
     if (server->control == NULL)
         return;
 
+    server_trace(server, "FTPD CLOSE");
     if (send_221)
         server_reply(server, 221, "Goodbye.");
     server_flush(server);
@@ -813,10 +839,13 @@ static void server_finish_data(FtpServer *server, int ok, FtpCause cause,
 {
     server_close_data(server);
 
+    server_trace(server, "FTPD FINISH kind=%d ok=%d open=%d", (int)server->data_kind,
+                 ok, server->temp.open);
     if (server->data_kind == SDATA_STOR) {
         if (ok && server->temp.open) {
             FtpCommitStep step = FTP_COMMIT_OK;
             FsResult r = ftp_temp_finish(server->fs, &server->temp, &step);
+            server_trace(server, "FTPD COMMIT r=%d step=%d", (int)r, (int)step);
             if (r != FS_OK) {
                 server_close_transfer(server);
                 server_reply(server, 451, "Storage write failed.");
@@ -892,16 +921,21 @@ static int server_pump_stor(FtpServer *server)
         return 0;
 
     if (r == NET_CLOSED) {
+        server_trace(server, "FTPD EOF bytes=%llu",
+                     (unsigned long long)server->transferred);
         server_finish_data(server, 1, FTP_CAUSE_APP, NULL);
         return 0;
     }
     if (r != NET_OK) {
+        server_trace(server, "FTPD RECV FAIL r=%d", (int)r);
         server_data_error(server, 426, FTP_CAUSE_NETWORK,
                           "DATA CONNECTION LOST");
         return 0;
     }
 
     if (got > 0) {
+        if (server->transferred == 0)
+            server_trace(server, "FTPD RX %llu", (unsigned long long)got);
         if (server->temp.file == NULL || !server->temp.open) {
             server_data_error(server, 451, FTP_CAUSE_STORAGE,
                               "STORAGE WRITE FAILED");
@@ -914,6 +948,8 @@ static int server_pump_stor(FtpServer *server)
                 server->fs->ctx, server->temp.file, buf + total, got - total,
                 &written);
             if (wr != FS_OK || written == 0) {
+                server_trace(server, "FTPD WRITE FAIL r=%d written=%llu",
+                             (int)wr, (unsigned long long)written);
                 server_data_error(server, 451, FTP_CAUSE_STORAGE,
                                   "STORAGE WRITE FAILED");
                 return 0;
@@ -956,6 +992,8 @@ static void server_begin_data(FtpServer *server)
     if (server->data_kind == SDATA_RETR) {
         FsResult r = server->fs->open(server->fs->ctx, server->active_local,
                                       FS_OPEN_READ, &server->file);
+        server_trace(server, "FTPD RETR OPEN %s r=%d", server->active_local,
+                     (int)r);
         if (r != FS_OK) {
             server_reply(server, 550, "Not found.");
             server_close_data(server);
@@ -965,6 +1003,8 @@ static void server_begin_data(FtpServer *server)
     } else if (server->data_kind == SDATA_STOR) {
         FsResult r = ftp_temp_open(server->fs, server->active_local,
                                    &server->temp);
+        server_trace(server, "FTPD STOR OPEN %s r=%d temp=%s",
+                     server->active_local, (int)r, server->temp.temp.text);
         if (r != FS_OK) {
             server_reply(server, 550, "Not found.");
             server_close_data(server);
@@ -975,6 +1015,8 @@ static void server_begin_data(FtpServer *server)
         FsResult r = server->fs->list_open(server->fs->ctx,
                                            server->active_local,
                                            &server->dir);
+        server_trace(server, "FTPD LIST OPEN %s r=%d", server->active_local,
+                     (int)r);
         if (r != FS_OK) {
             server_reply(server, 550, "Not found.");
             server_close_data(server);
@@ -1019,16 +1061,19 @@ static void server_try_accept(FtpServer *server)
         if (r == NET_WOULD_BLOCK)
             return;
         if (r != NET_OK) {
+            server_trace(server, "FTPD ACCEPT FAIL r=%d", (int)r);
             server_reply(server, 425, "Cannot open data connection.");
             server_disarm(server);
             return;
         }
 
         if (peer.addr != server->control_peer.addr) {
+            server_trace_peer(server, "FTPD FOREIGN", peer);
             server->net->close(server->net->ctx, data);
             continue;
         }
 
+        server_trace_peer(server, "FTPD ACCEPT", peer);
         server->data = data;
         server->data_state = FTP_DATA_ACCEPTED;
         server_begin_data(server);
@@ -1533,8 +1578,10 @@ static void server_handle_command(FtpServer *server, const char *line,
         return;
     }
     if (server->tx_backlog && strncmp(line, "ABOR", 4) != 0 &&
-        strncmp(line, "QUIT", 4) != 0)
+        strncmp(line, "QUIT", 4) != 0) {
+        server_trace(server, "FTPC DROPPED %s", line);
         return;
+    }
     if (cmd_len >= sizeof(cmd)) {
         server_reply(server, 502, "Command not implemented.");
         return;
@@ -1549,6 +1596,10 @@ static void server_handle_command(FtpServer *server, const char *line,
     cmd[cmd_len] = '\0';
 
     snprintf(server->last_command, sizeof(server->last_command), "%s", cmd);
+    if (strcmp(cmd, "PASS") == 0)
+        server_trace(server, "FTPC PASS ****");
+    else
+        server_trace(server, "FTPC %s", line);
 
     const char *arg = space != NULL ? space + 1 : "";
     while (*arg == ' ')
@@ -1835,6 +1886,7 @@ static void server_accept_control(FtpServer *server)
         return;
     }
 
+    server_trace_peer(server, "FTPD CONTROL", peer);
     server->control = accepted;
     server->control_peer = peer;
     server->clients = 1;
@@ -2059,6 +2111,7 @@ void ftp_server_tick(FtpServer *server, unsigned wait_ms)
     }
 
     if (server->pending_accept && now >= server->pending_deadline) {
+        server_trace(server, "FTPD ACCEPT TIMEOUT");
         server_reply(server, 425, "Cannot open data connection.");
         server_disarm(server);
     }
@@ -2112,6 +2165,15 @@ void ftp_server_set_guard(FtpServer *server, FtpServerGuardFn guard, void *ctx)
         return;
     server->guard = guard;
     server->guard_ctx = ctx;
+}
+
+void ftp_server_set_trace(FtpServer *server, FtpServerTraceFn trace,
+                          void *ctx)
+{
+    if (server == NULL)
+        return;
+    server->trace = trace;
+    server->trace_ctx = ctx;
 }
 
 void ftp_server_set_external_busy(FtpServer *server, int busy)

@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 twenty-one host suites, and `tools/preview/run.sh` renders 40 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b56.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b57.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -44,7 +44,9 @@ and download work, and the dock words read correctly in green. b55 carries the
 review remediation (U1-U10): the failed-transfer terminal, the two-lane local
 guard with WAIT on both lanes, prompt identity, the UI stack budget, the
 budgeted transfer pumps, the server session bounds, and the single sidecar
-owner. b56 re-packages that code with the settled launcher icon (D84). M13 and
+owner. b56 re-packages that code with the settled launcher icon (D84); b57
+adds a server protocol trace to diagnose the open upload defect (M5): listings,
+folder creation, rename, and delete work, but an upload never starts. M13 and
 M10 are partly observed; M1–M9, M11, and M12 are pending, so
 the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and

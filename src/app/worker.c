@@ -2886,6 +2886,20 @@ static const char *server_op_name(const char *command)
     return "BROWSING";
 }
 
+/* D84 diagnostic: the FTP command/reply and data milestones go to the session
+ * log, so a console-only upload failure has a trace. PASS is masked by the
+ * server before this callback runs. */
+static void server_trace_line(void *ctx, const char *line)
+{
+    Worker *worker = ctx;
+    if (worker == NULL || line == NULL)
+        return;
+    LogRecord record;
+    logev_init(&record, LOGEV_LOG);
+    record.detail = line;
+    (void)logev_emit(worker->ports.log, now_ms(worker), &record);
+}
+
 static void server_event(void *ctx, const FtpServerEvent *event)
 {
     Worker *worker = ctx;
@@ -3386,8 +3400,10 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
                                        client_event, worker);
     worker->server = ftp_server_create(ports->net, ports->fs, ports->clock,
                                        server_event, worker);
-    if (worker->server != NULL)
+    if (worker->server != NULL) {
         ftp_server_set_guard(worker->server, server_path_guard, worker);
+        ftp_server_set_trace(worker->server, server_trace_line, worker);
+    }
     if (worker->client == NULL || worker->server == NULL) {
         ftp_client_destroy(worker->client);
         ftp_server_destroy(worker->server);

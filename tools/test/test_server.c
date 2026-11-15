@@ -441,6 +441,95 @@ static void test_stor(void)
     ftp_server_destroy(server);
 }
 
+/* FileZilla sends the transfer command and connects the data socket after it.
+ * The server must arm, wait for the peer, and only then send 150. */
+static void test_stor_connect_after_command(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    pasv(server, &client);
+    fake_ftp_client_send(&client, "STOR ux0:data/late.bin");
+    ftp_server_tick(server, 0);
+
+    int code = 0;
+    char text[512] = {0};
+    CHECK(read_reply(&client, &code, text, sizeof(text)) == 0);
+
+    queue_data_peer();
+    ftp_server_tick(server, 0);
+    CHECK(read_reply(&client, &code, text, sizeof(text)) == 1);
+    CHECK(code == 150);
+
+    NetSocket *data = fake_net_accepted_at(fake_net_accept_count() - 1);
+    CHECK(data != NULL);
+    fake_net_queue_rx(data, "late", 4);
+    fake_net_shutdown(data);
+    wait_reply(server, &client, 226);
+
+    char buf[16];
+    size_t n = fake_fs_read_file("ux0:data/late.bin", buf, sizeof(buf));
+    CHECK(n == 4 && memcmp(buf, "late", 4) == 0);
+    CHECK(cap.done == 1 && cap.ok == 1);
+
+    ftp_server_destroy(server);
+}
+
+static char s_trace[8192];
+
+static void trace_line(void *ctx, const char *line)
+{
+    (void)ctx;
+    size_t used = strlen(s_trace);
+    size_t len = strlen(line);
+    if (used + len + 2 >= sizeof(s_trace))
+        return;
+    memcpy(s_trace + used, line, len);
+    s_trace[used + len] = '\n';
+    s_trace[used + len + 1] = '\0';
+}
+
+static void test_trace_masks_password(void)
+{
+    setup();
+    memset(s_trace, 0, sizeof(s_trace));
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = ftp_server_create(fake_net_port(), fake_fs_port(),
+                                          fake_clock_port(), capture_event,
+                                          &cap);
+    CHECK(server != NULL);
+    ftp_server_set_trace(server, trace_line, NULL);
+    CHECK(ftp_server_start(server, 1337) == FTP_SERVER_OK);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    command(server, &client, "USER anonymous", 331);
+    command(server, &client, "PASS hunter2", 230);
+    CHECK(strstr(s_trace, "FTPC USER anonymous") != NULL);
+    CHECK(strstr(s_trace, "FTPC PASS ****") != NULL);
+    CHECK(strstr(s_trace, "hunter2") == NULL);
+
+    pasv(server, &client);
+    queue_data_peer();
+    NetSocket *data = data_command(server, &client, "STOR ux0:data/t.bin",
+                                   150);
+    CHECK(data != NULL);
+    fake_net_queue_rx(data, "x", 1);
+    fake_net_shutdown(data);
+    wait_reply(server, &client, 226);
+    CHECK(strstr(s_trace, "FTPD STOR OPEN ux0:data/t.bin") != NULL);
+    CHECK(strstr(s_trace, "FTPD RX 1") != NULL);
+    CHECK(strstr(s_trace, "FTPD FINISH kind=4 ok=1") != NULL);
+    CHECK(strstr(s_trace, "FTPR 226") != NULL);
+
+    ftp_server_destroy(server);
+}
+
 static int s_guard_checks;
 static int s_guard_holds;
 static int s_guard_releases;
@@ -1014,6 +1103,8 @@ int main(void)
     test_root_listing();
     test_retr();
     test_stor();
+    test_stor_connect_after_command();
+    test_trace_masks_password();
     test_held_path();
     test_held_rename();
     test_denials();
