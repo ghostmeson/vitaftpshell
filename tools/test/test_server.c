@@ -1051,6 +1051,31 @@ static void test_trace_drops_password(void)
     ftp_server_destroy(server);
 }
 
+/* FEAT must advertise exactly the facts MLST emits. */
+static void test_feat_matches_mlst(void)
+{
+    setup();
+    fake_fs_seed_file("ux0:data/f.bin", "ABCDE", 5);
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    char text[1024];
+    command_text(server, &client, "FEAT", 211, text, sizeof(text));
+    CHECK(strstr(text, "MLST type*;size*;modify*;") != NULL);
+    CHECK(strstr(text, "perm") == NULL);
+
+    command_text(server, &client, "MLST ux0:/data/f.bin", 250, text,
+                 sizeof(text));
+    CHECK(strstr(text, "type=file;") != NULL);
+    CHECK(strstr(text, "size=5;") != NULL);
+    CHECK(strstr(text, "perm") == NULL);
+
+    ftp_server_destroy(server);
+}
+
 static int s_guard_checks;
 static int s_guard_holds;
 static int s_guard_releases;
@@ -1652,6 +1677,7 @@ int main(void)
     test_owner_size_while_active();
     test_trace_masks_password();
     test_trace_drops_password();
+    test_feat_matches_mlst();
     test_owner_size_while_upload();
     test_held_path();
     test_held_rename();
