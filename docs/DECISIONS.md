@@ -1728,3 +1728,27 @@ local job run together the prompt offers only KEEP and CANCEL LOCAL.
 other. `UI_CMD_CANCEL_NETWORK` and `UI_CMD_CANCEL_LOCAL` target one lane; the
 old `UI_CMD_CANCEL_TRANSFER` still means "the running lane" for the two-choice
 prompt.
+
+## D79. The UI thread gets a stack budget
+
+**Date:** 2026-11-15
+**Status:** accepted; b51.
+
+**Context:** The b49 review measured the UI dispatch at 183,424 bytes of stack.
+The command buffer held 64 `UiCommand` values at 2,832 bytes each, and the
+dispatch could re-enter itself through the IME-unavailable and command-ring-full
+paths, so two frames reserved 362,496 bytes. The main-thread stack is 256 KiB:
+the workspace fact-check note records the COCKPIT dumps with the stack base at
+`+0x3f000`, and the project sets no `sceUserMainThreadStackSize`. D77 gated
+worker frames only, so nothing would have caught this.
+
+**Decision:** The command buffer is a heap-owned member of `App`. The two
+synthetic events raised from inside the dispatch are deferred to the next frame
+instead of re-entering it. `tools/check_worker_stack.py` also checks the UI
+dispatch frame (4 KiB ceiling, no self-call) and the recursive folder scan
+(its frame times `WORKER_REMOTE_DEPTH + 1`, 8 KiB ceiling). With the move the
+dispatch frame is 80 bytes; the scan product is 1,188 bytes.
+
+**Consequences:** A large local in the UI dispatch or in the folder scan fails
+the build instead of the console. The 256 KiB figure is recorded in
+`docs/VERIFICATION.md` beside the gate numbers.

@@ -20,7 +20,7 @@ import sys
 HANDLE_ACTION_MAX = 16 * 1024
 
 # The non-recursive part of the copy/rename chain. The folder scan recurses
-# separately (WORKER_REMOTE_DEPTH * its own frame) and is checked by name below.
+# separately and is checked below as its own frame times its depth constant.
 FIXED_CHAIN_MAX = 64 * 1024
 # Functions the compiler keeps separate at -O2. State that moved into the heap
 # run still costs stack when inlined, so each owner below is measured at the
@@ -34,6 +34,17 @@ FIXED_CHAIN = (
     "logev_emit",
     "local_batch_emit_done",
 )
+
+# The folder scan recurses to this depth; the product must stay small. Keep in
+# sync with WORKER_REMOTE_DEPTH in src/app/worker.c.
+RECURSION_FRAME = "fact_tree"
+RECURSION_DEPTH = 32
+RECURSION_MAX = 8 * 1024
+
+# The UI thread's dispatch frame. The command buffer lives in App, so this is
+# small; the check exists so a future local cannot grow it unnoticed.
+UI_FRAME = "feed"
+UI_FRAME_MAX = 4 * 1024
 
 
 def disassemble(elf):
@@ -114,14 +125,41 @@ def main():
             % (chain, FIXED_CHAIN_MAX)
         )
 
+    recursion = 0
+    scan = sizes.get(RECURSION_FRAME)
+    if scan is None:
+        problems.append("%s not found in the ELF" % RECURSION_FRAME)
+    elif not self_call.get(RECURSION_FRAME):
+        problems.append("%s is not a self-call; the depth product is meaningless"
+                        % RECURSION_FRAME)
+    else:
+        recursion = scan * (RECURSION_DEPTH + 1)
+        if recursion > RECURSION_MAX:
+            problems.append(
+                "%s recursion reserves %d bytes (limit %d)"
+                % (RECURSION_FRAME, recursion, RECURSION_MAX)
+            )
+
+    ui = sizes.get(UI_FRAME)
+    if ui is None:
+        problems.append("%s not found in the ELF" % UI_FRAME)
+    elif ui > UI_FRAME_MAX:
+        problems.append(
+            "UI dispatch reserves %d bytes (limit %d): move locals into App"
+            % (ui, UI_FRAME_MAX)
+        )
+    if self_call.get(UI_FRAME):
+        problems.append("%s calls itself; defer the event instead" % UI_FRAME)
+
     if problems:
         for p in problems:
             print("worker stack: %s" % p, file=sys.stderr)
         return 1
 
     print(
-        "worker stack: handle_action %d B, fixed chain %d B, both inside budget"
-        % (handle or 0, chain)
+        "worker stack: handle_action %d B, fixed chain %d B, scan %d B, "
+        "UI %d B, all inside budget"
+        % (handle or 0, chain, recursion, ui or 0)
     )
     return 0
 
