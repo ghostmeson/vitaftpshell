@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 twenty-one host suites, and `tools/preview/run.sh` renders 40 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b61.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b62.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -51,8 +51,9 @@ gate (D85), and the console confirmed both transfer directions between the app's
 own client and server. b60 accepts up to four server sessions, one data
 transfer at a time (D86), and has run on the console: FileZilla held two
 sessions and uploaded and downloaded successfully; the app-local client moved
-files across all three volumes. b61 applies D87 and awaits its console retry.
-M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
+files across all three volumes. b61 applies D87; b62 drops the separate
+app-data/`tai` lines from the SERVER warning and awaits its console retry. M13
+and M10 are partly observed; M1–M9, M11, and M12 are pending, so
 the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
@@ -204,8 +205,8 @@ run is the only evidence that promotes the project to `verified`.
    component. v1 has no system-level surface.
 3. **Server OFF by default.** Starting it is an explicit action. The ON state and
    client count stay visible on every screen. The warning says anonymous clients
-   can read and write the exposed volumes, including the app data folder and
-   the `tai` folders except `ur0:tai/boot_config.txt`.
+   can read and write the exposed volumes; `ur0:tai/boot_config.txt` is named
+   as denied.
 4. **Protected paths.** Volume roots, `ur0:data`, `ux0:data`, `ur0:tai`, and
    `ux0:tai` cannot be renamed, moved, or deleted. The server and the local
    manager may read and write inside the app data folder and the `tai` folders;

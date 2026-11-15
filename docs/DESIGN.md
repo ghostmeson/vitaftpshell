@@ -357,11 +357,11 @@ Direction A: the console layout (D25). The six states are in
 
 ### Warning
 
-A 582, 76, 360 × 200 panel with a yellow accent and `WARNING` at 596, 84. Eight
+A 582, 76, 360 × 200 panel with a yellow accent and `WARNING` at 596, 84. Six
 micro lines from 596, 108 on a 16 px stride: the anonymous read-write risk in
-yellow, the exposed app folder and writable `tai` folders in dim, then the
-launch/stop lifecycle in dim. One of those lines says that an upload replaces a file of the
-same name (D41).
+yellow, the `boot_config.txt` denial in dim, then the launch/stop lifecycle in
+dim. One of those lines says that an upload replaces a file of the same name
+(D41). The app-data/`tai` exposure is not separately named (b62).
 
 ### Client
 

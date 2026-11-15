@@ -148,7 +148,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 **Server mode**
 
 - R47. The server is OFF at launch and never starts automatically.
-- R48. SERVER shows OFF or ON, control port (default 1337), local IP, connected client count, and a warning that anonymous clients can read and write. The port can be edited from SERVER. The warning names the exposed volumes, including the app data folder and the writable `tai` folders, and the denied `boot_config.txt`. When a client is connected, it names the current operation, path, and transferred and total bytes, with `--` when unknown.
+- R48. SERVER shows OFF or ON, control port (default 1337), local IP, connected client count, and a warning that anonymous clients can read and write. The port can be edited from SERVER. The warning names the exposed volumes and the denied `boot_config.txt`; the app-data/`tai` exposure is not separately named (D87, b62). When a client is connected, it names the current operation, path, and transferred and total bytes, with `--` when unknown.
 - R49. Cross starts and stops the server; starting without a network shows a clear error and leaves it OFF. A bind failure names the port, says another server may be using it, and leaves the server OFF so the port can be changed.
 - R50. The server accepts up to four clients; a fifth connection is refused with a busy reply. One data transfer owns the PASV/data port at a time, and another session's data or PASV command gets a busy reply (D86).
 - R51. The server exposes the mounted subset of `ux0:`, `ur0:`, and `uma0:` as top-level directories; absent volumes are absent, and no other mount is exposed.

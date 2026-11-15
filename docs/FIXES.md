@@ -27,8 +27,8 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b61.vpk`, 264,248 bytes,
-  SHA-256 `ecbfdf1451a06177a5f9087967238c139786efba6529f6f5f018112fa29d37e8`.
+- **Current artifact:** `vitaftpshell-v01.00-b62.vpk`, 264,372 bytes,
+  SHA-256 `6cf2fdbdbc060f28c986594407f10ac58e957739999ee2c49e35fb9e15954ed5`.
 - **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
   FileZilla upload and download work with two sessions; the app-local client
   transfers on all three volumes. The session log is `logs/session-b60.log`.
@@ -56,6 +56,7 @@ matrix passes.
 | b57 | **FTP server uploads never start.** FileZilla queues a file until it fails; MKD, rename, delete, and listings work, and the app's own client to localhost fails the same way. | The server traces every command, reply, data accept, temp open, first read, commit, and close to `ux0:data/vitaFTPShell/session.log`; `PASS` is masked. The log showed `transfer_start` → `FTPC PASV` → `FTPR 450 Transfer in progress` on the app's own client. | `HW b57` |
 | b58 | The server refused every data and mutating command while the app's network lane was active, because the worker set the legacy global `external_busy` flag. The app's client therefore deadlocked against its own server, and a PC was refused on unrelated paths. | Remove `ftp_server_set_external_busy` and the global gate; the path guard still answers 450 on a held path (D85). | `test_held_path`; b57 trace; b58 console: app-local upload of the 263,206-byte VPK and download both 226 | `HW b58` |
 | b58 | **FileZilla `450 Busy`.** The server already had a client (the app's remote pane), and FileZilla's extra control connection was refused. | The server accepted one client at a time (D41). | b58 session log: app client connected while FileZilla got 450 Busy | `HW b58` |
+| b62 | **The SERVER warning named the app data folder and the writable `tai` folders.** | Remove those two dim lines; keep the general anonymous read-write line, the `boot_config.txt` denial, the overwrite note, and the lifecycle. | `test_render_screens`; host run | `PENDING b62` |
 | b61 | **The server refused its own app data and `tai` writes, and the local high-risk prompt blocked routine edits.** | The path policy denied server reads/writes in `ux0:data/vitaFTPShell` and writes under `tai`; the reducer/worker opened a second confirmation for high-risk paths. b61 removes those gates (D87) and keeps `ur0:tai/boot_config.txt` plus the system roots. | `test_path`, `test_server`, `test_uistate`, `test_integration`, `test_client`, ASan/UBSan; b61 hardware retry pending | `PENDING b61` |
 | b60 | **FileZilla cannot hold its browse and transfer control connections at the same time.** | Accept up to four sessions, each with its own login, cwd, line reader, reply buffer, idle deadline, and rename state; one data transfer owns the PASV/data port at a time; a fifth connection gets 450; closing a non-owner does not abort the transfer (D86). Also fix the guard order: a free path returned before the HOLD, so no server transfer ever held its path (D86). | `test_two_clients`, `test_client_limit`, ASan/UBSan; b60 console: FileZilla `clients=2`, STOR 265,539 and 786 bytes, RETR 786 bytes, all 226; app-local all volumes | `HW b60` |
 

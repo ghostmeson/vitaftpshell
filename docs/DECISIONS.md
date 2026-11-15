@@ -1915,7 +1915,7 @@ superseded.
 ## D87. Access is unrestricted except boot_config and system roots
 
 **Date:** 2026-11-15
-**Status:** accepted; b61; user-directed.
+**Status:** accepted; b61/b62; user-directed.
 
 **Context:** The v1 safety posture kept the app data folder out of the FTP
 server, made the `tai` folders read-only to it, and asked for a second high-risk
@@ -1934,5 +1934,6 @@ operation.
 
 **Consequences:** D30's high-risk prompt, D31's confirmation, D51's high-risk
 worker gate, and the server's app-data/`tai` write denials are superseded. The
-SERVER warning names the app data folder and `tai` as exposed and writable;
-`boot_config.txt` remains the one file every role refuses.
+SERVER warning keeps the general anonymous read-write line and the
+`boot_config.txt` denial; it does not separately name the app data or `tai`
+exposure (b62). `boot_config.txt` remains the one file every role refuses.
