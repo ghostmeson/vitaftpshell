@@ -525,6 +525,71 @@ static void test_wait_resume_rechecks(void)
     app_destroy(app);
 }
 
+/* The app holds the listing slot its rows point at across frames. A refresh
+ * publishes a newer generation; the app adopts it and releases the old slot in
+ * the same step, so the worker can never rewrite a visible row. */
+static void test_app_listing_slot_held(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    UiPaneState *pane = &app_state(app)->panes[UI_PANE_LOCAL];
+    for (int i = 0; i < 80 && pane->row_count == 0; ++i)
+        (void)app_tick(app);
+    CHECK(pane->row_count > 0);
+    if (pane->row_count == 0) {
+        app_destroy(app);
+        return;
+    }
+
+    Handoff *handoff = app_handoff(app);
+    HandoffListings *listings = &handoff->listings[UI_PANE_LOCAL];
+    int held = listings->reader_slot;
+    CHECK(held >= 0);
+    if (held < 0) {
+        app_destroy(app);
+        return;
+    }
+    CHECK(listings->slots[held].held == 1);
+    CHECK(pane->rows == (const UiRow *)listings->slots[held].rows);
+    uint32_t generation = listings->slots[held].generation;
+
+    /* A frame with no new listing must leave the slot held; the old code
+     * released it at the end of every frame and kept the row pointer. */
+    (void)app_tick(app);
+    CHECK(listings->slots[held].held == 1);
+    CHECK(listings->reader_slot == held);
+
+    /* A refresh publishes a newer generation; adoption moves the hold. */
+    UiCommand refresh;
+    memset(&refresh, 0, sizeof(refresh));
+    refresh.type = UI_CMD_REFRESH;
+    refresh.pane = UI_PANE_LOCAL;
+    CHECK(handoff_command_push(handoff, &refresh) == 1);
+
+    int adopted = 0;
+    for (int i = 0; i < 80 && !adopted; ++i) {
+        (void)app_tick(app);
+        if (listings->reader_slot != held)
+            adopted = 1;
+    }
+    CHECK(adopted);
+    if (!adopted) {
+        app_destroy(app);
+        return;
+    }
+
+    int next = listings->reader_slot;
+    CHECK(next >= 0 && next != held);
+    CHECK(listings->slots[next].held == 1);
+    CHECK(listings->slots[next].generation > generation);
+    CHECK(listings->slots[held].held == 0);
+    CHECK(pane->rows == (const UiRow *)listings->slots[next].rows);
+
+    app_destroy(app);
+}
+
 static void test_connect_list_download(void)
 {
     App *app = make_app();
@@ -1961,6 +2026,7 @@ int main(void)
     test_two_lanes_progress();
     test_wait_resume_rechecks();
     test_connect_list_download();
+    test_app_listing_slot_held();
     test_remote_navigation();
     test_remote_mutations();
     test_remote_disconnect_and_reconnect();

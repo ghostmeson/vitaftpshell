@@ -200,7 +200,7 @@ here so they do not live only in a review report.
 
 | Item | Why it waited | Status |
 |---|---|---|
-| The `UiState` row pointer can outlive a released listing generation | Fixed in b67: the app holds the slot and adopts a newer generation in one step | `HOST b68` |
+| The `UiState` row pointer can outlive a released listing generation | Fixed in b67: the app holds the slot and adopts a newer generation in one step | `test_app_listing_slot_held`; `HOST b68` |
 | A kept `.vftp.old` is visible but not marked as debris | The row flag and render case are their own UI change (D81) | `PENDING` |
 | A failed aside cleanup still reports a failed commit | The honest notice needs a notice field on the progress record; the rename did happen | `PENDING` |
 | The queue's terminal and conflict latches have no production reader | The queue tests depend on them; removing them is a focused follow-up to D82's one-owner rule | `PENDING` |
