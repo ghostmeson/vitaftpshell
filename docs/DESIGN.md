@@ -158,9 +158,12 @@ allowed outside the hazard band.
   waiting network lane shows the same panel with the subject `NETWORK`. The
   badge is drawn over every screen that draws the dock. A focused dock with both lanes asks `KEEP`, `CANCEL NETWORK`,
   `CANCEL LOCAL` (KEEP focused first); a single lane keeps the two-choice
-  cancel. A server-mode transfer is not cancelled here; it ends through the
-  server-stop confirm, so a server transfer plus a local job offers only KEEP
-  and CANCEL LOCAL.
+  cancel. The single-lane cancel says the transferred file is removed and that
+  KEEP leaves it running; the two-lane cancel says cancelled transfers remove
+  their files. An explicit cancel discards a download even when every byte
+  arrived, so the confirm never calls the file partial (D89). A server-mode
+  transfer is not cancelled here; it ends through the server-stop confirm, so
+  a server transfer plus a local job offers only KEEP and CANCEL LOCAL.
 - The terminal state stays until the next transfer starts (R67). The dock is
   never modal and never covers a row.
 

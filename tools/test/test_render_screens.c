@@ -469,6 +469,8 @@ static void test_confirm(void)
     confirm->kind = UI_CONFIRM_CANCEL_XFER;
     snprintf(confirm->title, sizeof(confirm->title), "CANCEL THE TRANSFER");
     snprintf(confirm->context, sizeof(confirm->context), "FILE.BIN");
+    snprintf(confirm->warning, sizeof(confirm->warning),
+             "THE TRANSFERRED FILE IS REMOVED.");
     confirm->choices[0] = UI_CHOICE_KEEP;
     confirm->choices[1] = UI_CHOICE_CANCEL;
     confirm->choice_count = 2;
@@ -476,7 +478,9 @@ static void test_confirm(void)
     CHECK(trace_text_at("CANCEL THE TRANSFER", 210.0f, 140.0f));
     CHECK(trace_text_at("FILE.BIN", 210.0f, 196.0f));
     CHECK(trace_has_text("KEEP DOWNLOADING"));
-    CHECK(trace_has_text("THE PARTIAL FILE IS REMOVED."));
+    CHECK(trace_text_at("KEEP LEAVES IT RUNNING.", 210.0f, 220.0f));
+    CHECK(trace_text_at_color("THE TRANSFERRED FILE IS REMOVED.", 210.0f,
+                              336.0f, C_YELLOW));
 
     memset(confirm, 0, sizeof(*confirm));
     confirm->kind = UI_CONFIRM_STOP_SERVER;

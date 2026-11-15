@@ -129,7 +129,7 @@ static void body_draw(const UiConfirm *confirm)
                  confirm->context[0] != '\0' ? confirm->context
                                              : "THE ACTIVE TRANSFER");
         font_text(line, CONFIRM_ITEM_X, y, PX_LABEL, C_WHITE);
-        font_text("THE PARTIAL FILE IS REMOVED.", CONFIRM_ITEM_X, y + 24.0f,
+        font_text("KEEP LEAVES IT RUNNING.", CONFIRM_ITEM_X, y + 24.0f,
                   PX_LABEL, C_DIM);
         break;
     case UI_CONFIRM_STOP_SERVER:
