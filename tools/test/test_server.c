@@ -294,6 +294,107 @@ static void test_two_clients(void)
     ftp_server_destroy(server);
 }
 
+/* A client that arms PASV and then closes must not keep the one data slot.
+ * The surviving session is connected first so slot reuse cannot hide it (U3). */
+static void test_close_while_armed(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+
+    FakeFtpClient b;
+    FakeFtpClient a;
+    connect_session(server, &b);
+    connect_second_session(server, &a, PEER_ADDR + 1, PEER_PORT + 20);
+    CHECK(ftp_server_clients(server) == 2);
+
+    pasv(server, &a);
+    /* Drop A's control between PASV and its data command. QUIT would disarm
+     * the owner's slot on the way out and hide the wedge. */
+    fake_net_reset_peer(a.control);
+    ftp_server_tick(server, 0);
+    ftp_server_tick(server, 0);
+    CHECK(ftp_server_clients(server) == 1);
+
+    /* B must be able to arm the slot and transfer. */
+    pasv(server, &b);
+    queue_data_peer_for(PEER_ADDR, PEER_PORT + 1);
+    NetSocket *data = data_command(server, &b, "MLSD /UX0:", 150);
+    CHECK(data != NULL);
+    finish_data(server, &b, 226);
+
+    command(server, &b, "QUIT", 221);
+    ftp_server_destroy(server);
+}
+
+/* An active transfer whose owner disappears ends in exactly one failed event
+ * and frees the slot. */
+static void test_owner_close_active_one_event(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+
+    FakeFtpClient b;
+    FakeFtpClient a;
+    connect_session(server, &b);
+    connect_second_session(server, &a, PEER_ADDR + 1, PEER_PORT + 20);
+
+    pasv(server, &a);
+    queue_data_peer_for(PEER_ADDR + 1, PEER_PORT + 21);
+    NetSocket *data = data_command(server, &a, "STOR ux0:/data/a.bin", 150);
+    CHECK(data != NULL);
+    int before = cap.done;
+
+    fake_net_reset_peer(a.control);
+    ftp_server_tick(server, 0);
+    ftp_server_tick(server, 0);
+
+    CHECK(ftp_server_clients(server) == 1);
+    CHECK(cap.done == before + 1);
+    CHECK(cap.ok == 0);
+    CHECK(cap.cause == FTP_CAUSE_NETWORK);
+
+    /* The slot is free for the surviving session. */
+    pasv(server, &b);
+    queue_data_peer_for(PEER_ADDR, PEER_PORT + 1);
+    NetSocket *bdata = data_command(server, &b, "MLSD /UX0:", 150);
+    CHECK(bdata != NULL);
+    finish_data(server, &b, 226);
+
+    command(server, &b, "QUIT", 221);
+    ftp_server_destroy(server);
+}
+
+/* A foreign ABOR may not disarm the owner's PASV. */
+static void test_foreign_abor_keeps_pasv(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+
+    FakeFtpClient b;
+    FakeFtpClient a;
+    connect_session(server, &b);
+    connect_second_session(server, &a, PEER_ADDR + 1, PEER_PORT + 20);
+
+    pasv(server, &a);
+    command(server, &b, "ABOR", 225);
+
+    /* A's armed slot survives: its data command reaches 150. */
+    queue_data_peer_for(PEER_ADDR + 1, PEER_PORT + 21);
+    NetSocket *data = data_command(server, &a, "MLSD /UX0:", 150);
+    CHECK(data != NULL);
+    finish_data(server, &a, 226);
+
+    command(server, &a, "QUIT", 221);
+    command(server, &b, "QUIT", 221);
+    ftp_server_destroy(server);
+}
+
 static void pasv(FtpServer *server, FakeFtpClient *client)
 {
     command(server, client, "PASV", 227);
@@ -1245,6 +1346,9 @@ int main(void)
     test_stor();
     test_stor_connect_after_command();
     test_two_clients();
+    test_close_while_armed();
+    test_owner_close_active_one_event();
+    test_foreign_abor_keeps_pasv();
     test_trace_masks_password();
     test_held_path();
     test_held_rename();

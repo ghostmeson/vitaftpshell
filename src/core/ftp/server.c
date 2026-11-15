@@ -257,6 +257,8 @@ static void server_trace_peer(FtpServer *server, const char *prefix,
 static void server_close_data(FtpServer *server);
 static void server_close_transfer(FtpServer *server);
 static void server_control_failed(FtpServer *server, ServerSession *session);
+static void server_close_session(FtpServer *server, ServerSession *session,
+                                 int send_221, const char *detail);
 
 static void server_reply(ServerSession *session, int code, const char *fmt, ...)
 {
@@ -371,6 +373,27 @@ static void server_disarm(FtpServer *server)
     server_drain_listener(server);
 }
 
+/* The one data slot belongs to a session in any non-idle state. Releasing it
+ * runs the same teardown as a normal transfer end: data socket, reservation,
+ * and any upload temp. Only an active transfer has bytes worth a terminal. */
+static int server_owns_data(FtpServer *server, ServerSession *session)
+{
+    return server->data_state != FTP_DATA_NONE &&
+           server->data_session == server_session_index(server, session);
+}
+
+static void server_release_owned_data(FtpServer *server,
+                                      ServerSession *session, FtpCause cause,
+                                      const char *detail)
+{
+    if (!server_owns_data(server, session))
+        return;
+    if (server->data_state == FTP_DATA_ACTIVE)
+        server_transfer_event(server, 0, cause, detail);
+    server_close_transfer(server);
+    server_close_data(server);
+}
+
 static int server_path_held(ServerSession *session, const char *local,
                             int write, int tree, int hold)
 {
@@ -405,33 +428,9 @@ static void server_emit_state_and_client(FtpServer *server)
 
 static void server_control_failed(FtpServer *server, ServerSession *session)
 {
-    if (session == NULL || !session->used)
-        return;
-
-    int had_transfer =
-        (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) &&
-        server->data_session == server_session_index(server, session);
-    if (had_transfer)
-        server_transfer_event(server, 0, FTP_CAUSE_NETWORK, "CONTROL LOST");
-
-    if (had_transfer) {
-        server_close_transfer(server);
-        server_close_data(server);
-    }
-
-    if (session->control != NULL) {
-        server->net->close(server->net->ctx, session->control);
-        session->control = NULL;
-    }
-    session->used = 0;
-    server->clients--;
-    if (server->clients < 0)
-        server->clients = 0;
-    if (server->clients == 0)
-        server->state = FTP_SERVER_ON;
-    server_emit_state_and_client(server);
-    snprintf(server->detail, sizeof(server->detail), "CONTROL LOST");
-    server_error_event(server, server->detail);
+    /* One teardown body serves both close paths; the flush is skipped so a
+     * failed send cannot recurse back here. */
+    server_close_session(server, session, 0, "CONTROL LOST");
 }
 
 static void server_stop_internal(FtpServer *server, const char *detail)
@@ -482,24 +481,16 @@ static void server_close_session(FtpServer *server, ServerSession *session,
         return;
 
     server_trace(server, "FTPD CLOSE");
-    if (send_221)
+    if (send_221) {
         server_reply(session, 221, "Goodbye.");
-    server_flush(session);
-    if (!session->used)
-        return;
+        server_flush(session);
+        if (!session->used)
+            return;
+    }
 
-    int had_transfer =
-        (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) &&
-        server->data_session == server_session_index(server, session);
-    if (had_transfer)
-        server_transfer_event(server, 0,
+    server_release_owned_data(server, session,
                               send_221 ? FTP_CAUSE_USER : FTP_CAUSE_NETWORK,
                               send_221 ? "QUIT" : "CONTROL LOST");
-
-    if (had_transfer) {
-        server_close_transfer(server);
-        server_close_data(server);
-    }
 
     if (session->control != NULL) {
         server->net->close(server->net->ctx, session->control);
@@ -1246,7 +1237,9 @@ static void server_abort_command(ServerSession *session)
     }
 
     if (server->data_state != FTP_DATA_NONE) {
-        server_disarm(server);
+        /* Only the owner may drop its own armed PASV. */
+        if (server->data_session == server_session_index(server, session))
+            server_disarm(server);
         server_reply(session, 225, "No transfer in progress.");
         return;
     }
