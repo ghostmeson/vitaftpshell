@@ -18,7 +18,7 @@ discovery.
 | `FIXES.md` | Chronological fix index: build, symptom, cause, fix, evidence, hardware status | Engineering |
 | `VERIFICATION.md` | Hardware matrix, build evidence, and the per-build test record | Engineering |
 | `THIRD_PARTY.md` | Reused code, licenses, and protocol references | Engineering |
-| `plans/` | The v1 plan: requirements, decisions, units, verification | Planning |
+| `plans/` | The v1 plan and the review remediation plan: requirements, decisions, units, verification | Planning |
 | `features/` | Future feature documents | Product |
 | `design/` | The screen-by-screen design sheets and renders | Design |
 

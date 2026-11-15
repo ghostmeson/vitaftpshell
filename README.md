@@ -104,7 +104,7 @@ answer.
 The policy and graphics layers run without VitaSDK:
 
 ```sh
-./tools/test/run.sh        # layering guard + nineteen host suites
+./tools/test/run.sh        # layering guard + twenty-one host suites
 ./tools/preview/run.sh     # renders 36 settled states to build/preview/
 ```
 
@@ -157,7 +157,7 @@ land:
   nothing.
 - Saved passwords are stored unencrypted on the console and are never written to
   the session log.
-- One transfer is active at a time; a server-side transfer uses the same slot.
+- One network transfer and one local job may run together when their paths do not overlap; a collision asks WAIT/SKIP/CANCEL (D72).
 - No kernel plugin, taiHEN payload, `*KERNEL` entry, or boot-time component.
 - Downloads and uploads write a `.vftp.part` file, sync, and rename into place;
   a failed transfer never leaves a partial file looking complete.
