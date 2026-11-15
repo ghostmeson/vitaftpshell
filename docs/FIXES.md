@@ -27,8 +27,8 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b66.vpk`, 263,333 bytes,
-  SHA-256 `a659db8a072f44133c61a0b2ed16b1db2ce711805abee810811c48485b623818`.
+- **Current artifact:** `vitaftpshell-v01.00-b67.vpk`, 263,747 bytes,
+  SHA-256 `066d0a7cd2144ffce4472b1c1be575f0a6f4411eca0d6a641fc29e9801ab09da`.
 - **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
   FileZilla upload and download work with two sessions; the app-local client
   transfers on all three volumes. The session log is `logs/session-b60.log`.

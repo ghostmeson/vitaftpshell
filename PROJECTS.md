@@ -39,11 +39,11 @@ target console with evidence. Host tests alone cannot promote it.
   the module contract.
 - **Build:** Phases 1-5 are done. `./build.sh` emits one
   `vitaftpshell-v01.00-b<build>.vpk` with the real app linked and keeps the
-  unstripped ELF; the current artifact is `vitaftpshell-v01.00-b66.vpk`. `./tools/test/run.sh` runs the layering guard over every
+  unstripped ELF; the current artifact is `vitaftpshell-v01.00-b67.vpk`. `./tools/test/run.sh` runs the layering guard over every
   `.c`/`.h` under `src/` plus the twenty-one host suites; `./tools/preview/run.sh`
   renders 40 settled states. `./send.sh <vita-ip>` refuses an artifact whose
   build number does not match `BUILD_NUMBER`.
-- **Next:** Install `vitaftpshell-v01.00-b66.vpk` and run the M1-M13 matrix. The pass fixes the three confirmed P1s (conflict answer, final-reply
+- **Next:** Install `vitaftpshell-v01.00-b67.vpk` and run the M1-M13 matrix. The pass fixes the three confirmed P1s (conflict answer, final-reply
   deadline, armed-slot release), the foreign ABOR, the owner metadata read, the
   dropped PASS trace, the local terminal badge, and the CLIENT panel pairing.
   M5 is the open row; M10's dock words and M13's operations were seen on b43/b60,

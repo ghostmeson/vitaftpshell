@@ -1,11 +1,11 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b66.vpk
-**SHA-256:** a659db8a072f44133c61a0b2ed16b1db2ce711805abee810811c48485b623818
-**ELF:** build/vitaftpshell, 531,516 bytes
+**Build:** vitaftpshell-v01.00-b67.vpk
+**SHA-256:** 066d0a7cd2144ffce4472b1c1be575f0a6f4411eca0d6a641fc29e9801ab09da
+**ELF:** build/vitaftpshell, 531,560 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy, b62 trims the warning text, b63 removes the warning panel (D88), and b66 carries the b63 review remediation; the b66 hardware retry is pending; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy, b62 trims the warning text, b63 removes the warning panel (D88), b66 carries the b63 review remediation, and b67 closes its deferred preflight, sidecar, and listing-lifetime items; the b67 hardware retry is pending; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
@@ -14,7 +14,8 @@ cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
 ## Open-issues pass (b67, host)
 
 **Date:** 2026-11-15
-**Build:** pending
+**Build:** `vitaftpshell-v01.00-b67.vpk`
+**SHA-256:** `066d0a7cd2144ffce4472b1c1be575f0a6f4411eca0d6a641fc29e9801ab09da`
 **Scope:** the b66 review's deferred data-loss preflight, the sidecar rename
 denial, the listing-slot lifetime, and the two missing tests.
 
@@ -35,8 +36,8 @@ minus the deferred `worker.c` split.
 Review: `ce-code-review` (full, mode:agent) returned `Ready with fixes`; 18 findings
 were confirmed and the P1 tree-hold, the kept-file relist, the zero-byte terminal,
 the tab-separated PASS, and the dead accessor were fixed. Review #7 (SIZE
-preflight), #11 (owner RETR test), #13 (two-item queue test), and #9 (backlog fake
-seam) are recorded as open.
+preflight), #11 (owner RETR test), and #13 (two-item queue test) were closed in
+b67; #9 (backlog fake seam) remains open.
 
 Host evidence: the layering guard, the asset guard, and twenty-one suites pass
 (`./tools/test/run.sh`); the preview renders the kept-download state; the
