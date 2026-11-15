@@ -38,6 +38,7 @@ typedef enum {
     CSTEP_TYPE,
     CSTEP_PWD,
     CSTEP_FEAT,
+    CSTEP_SIZE,
     CSTEP_PASV,
     CSTEP_DATA_CMD,
     CSTEP_CWD,
@@ -1091,6 +1092,19 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
         return;
     }
 
+    case CSTEP_SIZE: {
+        if (reply->code == 213) {
+            char *end = NULL;
+            unsigned long long size = strtoull(reply->text, &end, 10);
+            if (end != reply->text) {
+                client->total = size;
+                client->total_known = 1;
+            }
+        }
+        client_start_pasv(client);
+        return;
+    }
+
     case CSTEP_DATA_CMD:
         if (reply->code == 125 || reply->code == 150) {
             client->data_state = FTP_DATA_ACTIVE;
@@ -1624,7 +1638,10 @@ FtpClientResult ftp_client_download(FtpClient *client,
     client->stage_deadline = now_ms(client) + CLIENT_COMMAND_MS;
     client_set_state(client, FTP_CLIENT_TRANSFERRING);
     client_emit_progress(client);
-    client_start_pasv(client);
+    /* A listing can predate the transfer; ask for the size this transfer will
+     * actually move. A server without SIZE keeps the listing hint (D89). */
+    client->step = CSTEP_SIZE;
+    client_send(client, "SIZE %s", client->pending_path);
     return FTP_CLIENT_OK;
 }
 

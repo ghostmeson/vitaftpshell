@@ -182,6 +182,17 @@ static void reply(FakeFtpd *server, int code, const char *text)
     fake_ftpd_reply(server, code, text);
 }
 
+/* The client asks SIZE before PASV. Existing tests keep the listing hint by
+ * answering "not implemented"; the preflight test answers 213 instead. */
+static void size_unsupported(FtpClient *client, FakeFtpd *server)
+{
+    char line[256];
+    CHECK(fake_ftpd_next_command(server, line, sizeof(line)) == 1);
+    CHECK(strncmp(line, "SIZE ", 5) == 0);
+    reply(server, 502, "Not implemented.");
+    tick(client);
+}
+
 /*
  * Log in and answer through FEAT. On return the client has just sent PASV and
  * the caller owns the data exchange.
@@ -481,6 +492,7 @@ static void test_download(void)
     FtpClientTransfer transfer = {"/UX0:/DATA/dl.bin", "ux0:data/dl.bin",
                                   100, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     CHECK(cap.total == 100 && cap.total_known == 1);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -537,6 +549,7 @@ static void test_download_budget(void)
     FtpClientTransfer transfer = {"/UX0:/DATA/big.bin", "ux0:data/big.bin",
                                   6144, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -640,6 +653,7 @@ static void test_download_final_reply_missing(void)
     FtpClientTransfer transfer = {"/UX0:/DATA/keep.bin", "ux0:data/keep.bin",
                                   5, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -684,6 +698,7 @@ static void test_download_final_reply_short(void)
     FtpClientTransfer transfer = {"/UX0:/DATA/short.bin", "ux0:data/short.bin",
                                   10, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -724,6 +739,7 @@ static void test_download_final_reply_unknown_size(void)
     FtpClientTransfer transfer = {"/UX0:/DATA/nosize.bin",
                                   "ux0:data/nosize.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -741,6 +757,50 @@ static void test_download_final_reply_unknown_size(void)
     CHECK(ftp_client_state(client) == FTP_CLIENT_LOST);
     CHECK(cap.file_kept == 0);
     CHECK(!fake_fs_exists("ux0:data/nosize.bin"));
+
+    ftp_client_destroy(client);
+}
+
+/* The preflight size wins over a stale listing hint; the kept decision uses
+ * the size this transfer actually moved. */
+static void test_download_size_preflight(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    /* The listing says 100; the file is 5. */
+    FtpClientTransfer transfer = {"/UX0:/DATA/real.bin", "ux0:data/real.bin",
+                                  100, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /UX0:/DATA/real.bin");
+    reply(&server, 213, "5");
+    tick(client);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/real.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+
+    fake_net_queue_rx(data, "hello", 5);
+    fake_net_shutdown(data);
+    tick(client);
+    tick(client);
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(cap.file_kept == 1);
+    CHECK(cap.total == 5 && cap.total_known == 1);
+    char buf[16];
+    size_t n = fake_fs_read_file("ux0:data/real.bin", buf, sizeof(buf));
+    CHECK(n == 5 && memcmp(buf, "hello", 5) == 0);
 
     ftp_client_destroy(client);
 }
@@ -793,6 +853,7 @@ static void test_download_reset(void)
 
     FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -835,6 +896,7 @@ static void test_control_drop(void)
 
     FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -961,6 +1023,7 @@ static void test_data_idle(void)
 
     FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -999,6 +1062,7 @@ static void test_cancel_alignment(void)
 
     FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -1076,6 +1140,7 @@ static void test_450_disarms(void)
 
     FtpClientTransfer transfer = {"/a.bin", "ux0:data/a.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -1090,6 +1155,7 @@ static void test_450_disarms(void)
 
     FtpClientTransfer second = {"/b.bin", "ux0:data/b.bin", 0, 0};
     CHECK(ftp_client_download(client, &second, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,141).");
     tick(client);
@@ -1124,6 +1190,7 @@ static void test_high_risk(void)
     /* D87: high-risk paths still report their class, but no longer require a
      * local approval step. The hard path denials remain. */
     CHECK(ftp_client_download(client, &transfer, &risk) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     CHECK(risk == PATH_RISK_HIGH);
     CHECK(ftp_client_state(client) == FTP_CLIENT_TRANSFERRING);
     CHECK(!fake_fs_exists("ur0:tai/x.suprx"));
@@ -1236,6 +1303,7 @@ static void test_abort_reverse_order(void)
 
     FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -1262,6 +1330,7 @@ static void test_abort_reverse_order(void)
     /* A server that refuses ABOR must not cost the session. */
     FtpClientTransfer second = {"/y.bin", "ux0:data/y.bin", 0, 0};
     CHECK(ftp_client_download(client, &second, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,141).");
     tick(client);
@@ -1486,6 +1555,7 @@ int main(void)
     test_download_final_reply_short();
     test_upload_final_reply_missing();
     test_download_final_reply_unknown_size();
+    test_download_size_preflight();
     test_download_budget();
     test_upload();
     test_download_reset();
