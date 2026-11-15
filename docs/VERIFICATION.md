@@ -1,15 +1,45 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b57.vpk
-**SHA-256:** e51af216cc17c69a9252824f703b0fad91e192b3bb8742aafbdb3ae19817e398
+**Build:** vitaftpshell-v01.00-b58.vpk
+**SHA-256:** 6632615ccf83afcf4e206183a2fe8df6bf9fb055215abc92b430aa5540f0ecae
 **ELF:** build/vitaftpshell, 530,640 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b57 adds a server protocol trace to diagnose the open upload defect; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b57 traced the upload defect and b58 removes the global server-busy gate that caused it; the b58 hardware retry is pending; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## b58 server upload fix
+
+**Date:** 2026-11-15
+**Build:** `vitaftpshell-v01.00-b58.vpk`
+**SHA-256:** `6632615ccf83afcf4e206183a2fe8df6bf9fb055215abc92b430aa5540f0ecae`
+
+The b57 session log from the console pinned the upload failure. The app's own
+client started a download, then sent `PASV`, and the server answered:
+
+```
+120549  transfer_start  path=/UR0:/tai/boot_config.txt
+120620  log             detail=FTPC PASV
+120642  log             detail=FTPR 450 Transfer in progress.
+120679  error           detail=server reply withheld
+120698  transfer_fail   bytes=0
+```
+
+The worker set `ftp_server_set_external_busy` from the whole network lane
+(`transfer_active || xfer_busy(&queue) || pending.valid`). The server refused
+`PASV`, `STOR`, `RETR`, and every mutating command while any app transfer was
+active, so the app's own client deadlocked against its own server, and a PC was
+refused on unrelated paths. b58 removes the global flag and leaves the
+path-scoped reservation guard as the only cross-lane exclusion (D85). A
+same-path transfer still gets 450; an unrelated path does not.
+
+The b57 FileZilla session in the same log had no `STOR`; it failed while trying
+to `CWD` into `ux0:data/vitaFTPShell`, which the server deliberately denies
+because it is the app's own data folder. Upload to a normal folder (`ux0:data/rt`,
+`uma0:`, and so on), not the app folder.
 
 ## b57 server upload trace
 

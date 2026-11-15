@@ -186,11 +186,12 @@ arena.
 - In the product the worker runs on a POSIX thread. The host integration test
   passes `worker_thread = 0` and calls `worker_step` inline through `app_tick`;
   the same worker code runs either way (D49).
-- The worker marks the server external-busy while the network lane is active,
-  so a PC data command answers 450 on a held path (D72). A local action starts
-  while the network lane runs; the reservation table sends a collision to the
-  WAIT/SKIP/CANCEL prompt, and a plan whose facts overflow the scan cap is
-  refused rather than planned as a subset.
+- The worker runs both lanes; the reservation table is the only cross-lane
+  exclusion. A server data or mutating command answers 450 only on a held path
+  (D72, D85); the server is not globally busy because the app's network lane is
+  active. A local action starts while the network lane runs; the reservation
+  table sends a collision to the WAIT/SKIP/CANCEL prompt, and a plan whose facts
+  overflow the scan cap is refused rather than planned as a subset.
 - A local action command carries a batch id, item index, total, and last flag.
   The worker collects the set, probes each destination once, asks one conflict
   question naming every existing path, then runs one plan per item. The

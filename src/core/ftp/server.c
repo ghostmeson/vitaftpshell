@@ -91,7 +91,6 @@ struct FtpServer {
     int total_known;
 
     char last_command[16];
-    int external_busy;
     FtpServerGuardFn guard;
     void *guard_ctx;
     int root_index;
@@ -1610,11 +1609,6 @@ static void server_handle_command(FtpServer *server, const char *line,
         return;
     }
 
-    if (server->external_busy && server_busy_command(cmd)) {
-        server_reply(server, 450, "Transfer in progress.");
-        return;
-    }
-
     if (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) {
         if (strcmp(cmd, "NOOP") != 0 && strcmp(cmd, "QUIT") != 0 &&
             strcmp(cmd, "PWD") != 0 && strcmp(cmd, "SIZE") != 0 &&
@@ -2174,10 +2168,4 @@ void ftp_server_set_trace(FtpServer *server, FtpServerTraceFn trace,
         return;
     server->trace = trace;
     server->trace_ctx = ctx;
-}
-
-void ftp_server_set_external_busy(FtpServer *server, int busy)
-{
-    if (server != NULL)
-        server->external_busy = busy != 0;
 }

@@ -21,7 +21,7 @@ server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime exist. `tools/test/run.sh` passes
 twenty-one host suites, `tools/preview/run.sh` renders 40 settled states, and
-`build.sh` emits `vitaftpshell-v01.00-b57.vpk` with the real app linked. b16 and b18 have
+`build.sh` emits `vitaftpshell-v01.00-b58.vpk` with the real app linked. b16 and b18 have
 run on the console: b18 proved the drive browser, pinned the IME as the
 new-folder/rename blocker, showed the client failing at TCP connect, and showed
 the server with no client. b20 opened the IME and reached a rename, then the
@@ -52,10 +52,12 @@ counts refused batch items, and reads `FAILED` on a total failure. b43 has run
 on the console (operator report, 2026-11-14): copy, paste, new folder, rename,
 and download work, and the dock words read correctly in green. b55 carries the
 review remediation (U1-U10); b56 re-packages that code with the settled launcher
-icon (D84); b57 adds a server protocol trace to diagnose the open upload defect
-(M5): listings, folder creation, rename, and delete work, but an upload never
-starts. M13 and M10 are partly observed; the project stays `building` until
-every row has a recorded PASS.
+icon (D84); b57 added a server protocol trace; b58 removes the global
+server-busy gate that refused `PASV`/`STOR`/`RETR` whenever the app's own network
+lane was active. The b57 log showed the app's client deadlocking against its own
+server: `transfer_start` → `PASV` → `450 Transfer in progress`. M5 is the open
+hardware row; M13 and M10 are partly observed. The project stays `building`
+until every row has a recorded PASS.
 
 ## Users
 
@@ -141,5 +143,5 @@ sessions, connect-to-first-listing, and server-matrix pass.
 | Controller-only density | Design phase reviews each screen before implementation |
 | Cross-volume batch move is not all-or-nothing | Each file is atomic; a batch failure leaves completed moves and reports `n OF m MOVED`, never deletes a moved file (D45) |
 | Planner and handoff caps are finite | A plan that overflows the arena or step table is refused, never truncated; a lost command is counted (D46) |
-| One network transfer and one local job may run together; the reservation table owns mutual exclusion | The worker runs both lanes, the server is external-busy while the network lane is active, and a colliding path asks WAIT/SKIP/CANCEL (D72) |
+| One network transfer and one local job may run together; the reservation table owns mutual exclusion | The worker runs both lanes; a server command answers 450 only on a held path, never because another lane is merely active (D72, D85) |
 | GPLv3 boundary | Keep the license and third-party notices intact; document provenance |

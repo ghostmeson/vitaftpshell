@@ -3535,9 +3535,6 @@ void worker_step(Worker *worker)
         worker_list_local(worker, worker->local_path);
     }
 
-    ftp_server_set_external_busy(
-        worker->server, worker->transfer_active || xfer_busy(&worker->queue) ||
-                            worker->pending.valid);
     ftp_client_tick(worker->client,
                     worker->local_run != NULL ? 0 : WORKER_NET_WAIT_MS);
     ftp_server_tick(worker->server,
