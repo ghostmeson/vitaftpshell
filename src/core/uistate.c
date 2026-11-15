@@ -2144,6 +2144,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->skipped = 0;
         lane->failed = 0;
         lane->cancelled = 0;
+        lane->notice = 0;
         set_transfer_dock(lane, event, UI_DOCK_ACTIVE);
         lane->done = 0;
         lane->item_index = event->item_index;
@@ -2179,6 +2180,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             set_focus(state, UI_FOCUS_LIST);
         set_transfer_dock(lane, event, UI_DOCK_DONE);
         lane->file_kept = 0;
+        lane->notice = event->notice;
         lane->rate = event->rate;
         lane->rate_known = event->rate_known;
         lane->elapsed_ms = event->elapsed_ms;

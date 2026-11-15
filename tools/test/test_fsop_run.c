@@ -617,10 +617,18 @@ static void test_aside_cleanup_failure(void)
     CHECK(fsop_plan_build(&s_plan, &req) == 1);
     fake_fs_set_rename_replaces(0);
     fake_fs_fail_remove_at(0);
-    FsOpProgress p = run(NULL, NULL);
-    /* D76: the rename succeeded; the leftover aside is a notice. */
-    CHECK(p.cause == OP_CAUSE_STORAGE);
-    CHECK(strstr(p.message, "ASIDE CLEANUP FAILED") != NULL);
+    FsOpProgress p;
+    memset(&p, 0, sizeof(p));
+    FsOpRunResult r = fsop_run(fake_fs_port(), &s_plan, &p, NULL, NULL);
+    /* D76: the rename succeeded; the leftover aside is a notice, not a
+     * failed commit, and the step still counts as done. */
+    CHECK(r == FSOP_RUN_OK);
+    CHECK(p.files_done == 1);
+    CHECK(p.notice[0] != '\0');
+    CHECK(strstr(p.notice, "ASIDE CLEANUP FAILED") != NULL);
+    CHECK(strcmp(p.message, "COMPLETE") == 0);
+    CHECK(content_is("ux0:data/NEW.TXT", "OLD"));
+    CHECK(!fake_fs_exists("ux0:data/OLD.TXT"));
     CHECK(fake_fs_exists("ux0:data/NEW.TXT.vftp.old"));
 }
 

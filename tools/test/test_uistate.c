@@ -919,6 +919,19 @@ static void test_two_lane_dock(void)
     CHECK(s_state.local_dock.active == 1);
     CHECK(s_state.dock_primary == UI_DOCK_LANE_LOCAL);
 
+    /* A successful local rename can carry a debris notice. */
+    memset(&done, 0, sizeof(done));
+    done.kind = UI_EVT_TRANSFER_DONE;
+    done.direction = XFER_DIR_LOCAL_RENAME;
+    done.direction_known = 1;
+    done.notice = 1;
+    snprintf(done.text, sizeof(done.text),
+             "ASIDE CLEANUP FAILED - OLD COPY KEPT AS NEW.TXT.VFTP.OLD");
+    send_event(&done);
+    CHECK(s_state.local_dock.state == UI_DOCK_DONE);
+    CHECK(s_state.local_dock.notice == 1);
+    CHECK(strstr(s_state.local_dock.message, "ASIDE CLEANUP FAILED") != NULL);
+
     /* Both active again: the dock prompt offers two lanes. */
     s_state.dock.active = 1;
     s_state.dock.state = UI_DOCK_ACTIVE;

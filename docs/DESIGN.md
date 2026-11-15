@@ -136,7 +136,10 @@ allowed outside the hazard band.
   where nothing succeeded reads `FAILED` in red, never the operation word in
   red. A single item omits the count. A download that lost its final reply
   after every byte arrived keeps the operation word in yellow and puts
-  `FINAL REPLY MISSING` on line three; it is not `NO PARTIAL KEPT` (D89).
+  `FINAL REPLY MISSING` on line three; it is not `NO PARTIAL KEPT` (D89). A
+  successful rename whose aside cleanup failed keeps the green operation word
+  and puts `ASIDE CLEANUP FAILED - OLD COPY KEPT AS ...` on line three in
+  yellow; the rename did happen, so the dock never reads `FAILED`.
 - **Failed:** `FAILED` red; filename; `n OF m`; the bar stops at the failure
   point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure ends
   with `X TO RETRY`; a control failure leaves the reconnect to the pane.

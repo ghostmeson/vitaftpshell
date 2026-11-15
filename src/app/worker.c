@@ -1617,6 +1617,11 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
     done.item_total = item_total;
     done.direction = direction;
     fmt_copy(done.path, sizeof(done.path), command.path);
+    if (progress.notice[0] != '\0') {
+        log_detail(worker, LOGEV_LOG, progress.notice);
+        fmt_copy(done.detail, sizeof(done.detail), progress.notice);
+        done.notice = 1;
+    }
     emit(worker, &done);
 
     if (worker->local_batch_cancel_requested) {

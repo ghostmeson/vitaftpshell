@@ -468,6 +468,27 @@ static void test_pane_error(void)
     CHECK(!trace_text_at("/GNU/", 500.0f, 102.0f));
 }
 
+/* A successful rename with a kept aside keeps the green operation word and
+ * puts the notice on line three. */
+static void test_aside_notice_done(void)
+{
+    setup();
+    memset(&s_state.dock, 0, sizeof(s_state.dock));
+    s_state.dock.state = UI_DOCK_DONE;
+    s_state.dock.direction = XFER_DIR_LOCAL_RENAME;
+    snprintf(s_state.dock.name, sizeof(s_state.dock.name), "NEW.TXT");
+    s_state.dock.total = 5;
+    s_state.dock.total_known = 1;
+    s_state.dock.done = 5;
+    s_state.dock.notice = 1;
+    snprintf(s_state.dock.message, sizeof(s_state.dock.message),
+             "ASIDE CLEANUP FAILED - OLD COPY KEPT AS NEW.TXT.VFTP.OLD");
+    render();
+    CHECK(trace_text_at_color("RENAMED", 32.0f, 450.0f, C_GREEN));
+    /* The dock fits the line, so only the prefix is guaranteed. */
+    CHECK(trace_has_text_prefix("ASIDE CLEANUP FAILED"));
+}
+
 int main(void)
 {
     test_ten_rows_and_scroll();
@@ -478,6 +499,7 @@ int main(void)
     test_risk_mark();
     test_pane_error();
     test_dock_states();
+    test_aside_notice_done();
     test_header();
     test_regions();
     test_session_lost();

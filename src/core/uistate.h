@@ -112,6 +112,8 @@ typedef struct {
     uint64_t rate;
     int rate_known;
     int file_kept;
+    /* A success that left debris; `message` carries the notice text. */
+    int notice;
     int skipped;
     int failed;
     int cancelled;
@@ -357,6 +359,7 @@ typedef struct {
     uint64_t rate;
     int rate_known;
     int file_kept;
+    int notice;
     int direction;
     int direction_known;
     unsigned prompt_id;
