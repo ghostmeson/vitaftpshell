@@ -1644,6 +1644,34 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
     }
 }
 
+/* The Cross and Circle answers share one resolver. It returns 0 when the
+ * answer only closes the dialog (the two-lane KEEP). */
+static int resolve_confirm_answer(UiState *state, const UiConfirm *c,
+                                  UiChoice choice, UiCommandType *type)
+{
+    *type = UI_CMD_CONFIRM;
+    if (c->kind == UI_CONFIRM_CANCEL_XFER && choice == UI_CHOICE_CANCEL) {
+        *type = UI_CMD_CANCEL_TRANSFER;
+    } else if (c->kind == UI_CONFIRM_CANCEL_LANES) {
+        if (choice == UI_CHOICE_KEEP)
+            return 0;
+        *type = choice == UI_CHOICE_CANCEL_NETWORK ? UI_CMD_CANCEL_NETWORK
+                                                   : UI_CMD_CANCEL_LOCAL;
+    }
+    if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT) {
+        if (c->pane == UI_PANE_REMOTE) {
+            state->dock.waiting = 1;
+            state->dock_primary = UI_DOCK_LANE_NETWORK;
+        } else {
+            state->local_shown = 1;
+            state->local_dock.waiting = 1;
+            if (!state->dock.active)
+                state->dock_primary = UI_DOCK_LANE_LOCAL;
+        }
+    }
+    return 1;
+}
+
 static void handle_confirm_key(UiState *state, const UiStateEvent *event,
                                UiCommand *out, int max, int *count)
 {
@@ -1737,27 +1765,10 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
             close_confirm(state, 0);
             return;
         }
-        UiCommandType type = UI_CMD_CONFIRM;
-        if (c->kind == UI_CONFIRM_CANCEL_XFER && choice == UI_CHOICE_CANCEL) {
-            type = UI_CMD_CANCEL_TRANSFER;
-        } else if (c->kind == UI_CONFIRM_CANCEL_LANES) {
-            if (choice == UI_CHOICE_KEEP) {
-                close_confirm(state, 0);
-                return;
-            }
-            type = choice == UI_CHOICE_CANCEL_NETWORK ? UI_CMD_CANCEL_NETWORK
-                                                      : UI_CMD_CANCEL_LOCAL;
-        }
-        if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT) {
-            if (c->pane == UI_PANE_REMOTE) {
-                state->dock.waiting = 1;
-                state->dock_primary = UI_DOCK_LANE_NETWORK;
-            } else {
-                state->local_shown = 1;
-                state->local_dock.waiting = 1;
-                if (!state->dock.active)
-                    state->dock_primary = UI_DOCK_LANE_LOCAL;
-            }
+        UiCommandType type;
+        if (!resolve_confirm_answer(state, c, choice, &type)) {
+            close_confirm(state, 0);
+            return;
         }
         UiCommand *command = emit(out, max, count, type);
         if (command != NULL && type == UI_CMD_CONFIRM) {
@@ -1787,27 +1798,10 @@ static void handle_confirm_key(UiState *state, const UiStateEvent *event,
             c->kind == UI_CONFIRM_CANCEL_LANES ||
             c->kind == UI_CONFIRM_STOP_SERVER)
             choice = UI_CHOICE_KEEP;
-        UiCommandType type = UI_CMD_CONFIRM;
-        if (c->kind == UI_CONFIRM_CANCEL_XFER && choice == UI_CHOICE_CANCEL) {
-            type = UI_CMD_CANCEL_TRANSFER;
-        } else if (c->kind == UI_CONFIRM_CANCEL_LANES) {
-            if (choice == UI_CHOICE_KEEP) {
-                close_confirm(state, 0);
-                return;
-            }
-            type = choice == UI_CHOICE_CANCEL_NETWORK ? UI_CMD_CANCEL_NETWORK
-                                                      : UI_CMD_CANCEL_LOCAL;
-        }
-        if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT) {
-            if (c->pane == UI_PANE_REMOTE) {
-                state->dock.waiting = 1;
-                state->dock_primary = UI_DOCK_LANE_NETWORK;
-            } else {
-                state->local_shown = 1;
-                state->local_dock.waiting = 1;
-                if (!state->dock.active)
-                    state->dock_primary = UI_DOCK_LANE_LOCAL;
-            }
+        UiCommandType type;
+        if (!resolve_confirm_answer(state, c, choice, &type)) {
+            close_confirm(state, 0);
+            return;
         }
         UiCommand *command = emit(out, max, count, type);
         if (command != NULL && type == UI_CMD_CONFIRM) {
