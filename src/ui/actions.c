@@ -147,9 +147,7 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
         snprintf(band, sizeof(band), "NO SELECTION");
         band_color = C_DIM;
     } else if (actions->reason[UI_ACTION_DELETE][0] != '\0' &&
-               (strcmp(actions->reason[UI_ACTION_DELETE], "VOLUME ROOT") == 0 ||
-                strcmp(actions->reason[UI_ACTION_DELETE],
-                       "PROTECTED PATH") == 0)) {
+               actions->protected_root) {
         snprintf(band, sizeof(band), "%s",
                  actions->reason[UI_ACTION_DELETE]);
         band_color = C_YELLOW;
@@ -227,13 +225,7 @@ static void target_draw(const UiState *state, const LayoutRect *r)
               PX_LABEL, C_WHITE);
     font_text(actions->dest, 596.0f, 126.0f, PX_MICRO, C_CYAN);
 
-    int protected_root = 0;
-    for (int i = 0; i < UI_ACTION_COUNT; ++i) {
-        if (actions->reason[i][0] != '\0' &&
-            (strcmp(actions->reason[i], "VOLUME ROOT") == 0 ||
-             strcmp(actions->reason[i], "PROTECTED PATH") == 0))
-            protected_root = 1;
-    }
+    int protected_root = actions->protected_root;
 
     uint64_t bytes = 0;
     int known = 0;

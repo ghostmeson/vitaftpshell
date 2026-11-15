@@ -696,10 +696,11 @@ static void plan_rename(FsOpPlan *plan, const FsOpRequest *request)
         }
         if (request->conflict == FSOP_CONFLICT_ASK) {
             plan->needs_conflict = 1;
-            plan->existing_count = 1;
+            record_existing(plan, dest.text);
             return;
         }
         if (request->conflict == FSOP_CONFLICT_SKIP) {
+            plan->skipped_count = 1;
             plan->ok = 1;
             return;
         }

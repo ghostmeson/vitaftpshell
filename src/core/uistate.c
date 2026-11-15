@@ -609,6 +609,7 @@ void ui_actions_prepare(UiState *state)
         actions->enabled[i] = 1;
         actions->reason[i][0] = '\0';
     }
+    actions->protected_root = 0;
     prepare_visible(actions, pane_index, state->clip_mode);
 
     /*
@@ -672,6 +673,7 @@ void ui_actions_prepare(UiState *state)
             disable(actions, UI_ACTION_RENAME, "NO SELECTION");
             disable(actions, UI_ACTION_DELETE, "NO SELECTION");
         } else if (source_is_root || protected_source) {
+            actions->protected_root = 1;
             const char *why = strcmp(source, "*") == 0
                                   ? "ROOT"
                                   : (source_is_root ? "VOLUME ROOT"

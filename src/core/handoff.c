@@ -57,11 +57,6 @@ int handoff_command_push(Handoff *handoff, const UiCommand *command)
     return 1;
 }
 
-int handoff_cancel_pending(const Handoff *handoff)
-{
-    return handoff != NULL && LOAD_ACQ(&handoff->critical_cancel_valid);
-}
-
 int handoff_cancel_type(const Handoff *handoff)
 {
     if (handoff == NULL)

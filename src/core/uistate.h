@@ -216,6 +216,9 @@ typedef struct {
     int selected;
     int marked;
     int has_selection;
+    /* The selected source is a volume root or a protected path; the screen
+     * reads this flag instead of matching the display strings. */
+    int protected_root;
     int enabled[UI_ACTION_COUNT];
     char reason[UI_ACTION_COUNT][40];
     char path[PATH_MAX_LEN];

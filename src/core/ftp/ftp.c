@@ -12,48 +12,6 @@ static char lower_ascii(char c)
     return c;
 }
 
-const char *ftp_cause_name(FtpCause cause)
-{
-    switch (cause) {
-    case FTP_CAUSE_SERVER:
-        return "server";
-    case FTP_CAUSE_NETWORK:
-        return "network";
-    case FTP_CAUSE_STORAGE:
-        return "storage";
-    case FTP_CAUSE_USER:
-        return "user";
-    case FTP_CAUSE_APP:
-    default:
-        return "app";
-    }
-}
-
-const char *ftp_stage_name(FtpStage stage)
-{
-    switch (stage) {
-    case FTP_STAGE_RESOLVE:
-        return "resolve";
-    case FTP_STAGE_CONNECT:
-        return "connect";
-    case FTP_STAGE_GREETING:
-        return "greeting";
-    case FTP_STAGE_LOGIN:
-        return "login";
-    case FTP_STAGE_FIRST_LISTING:
-        return "first_listing";
-    case FTP_STAGE_COMMAND:
-        return "command";
-    case FTP_STAGE_DATA:
-        return "data";
-    case FTP_STAGE_TRANSFER:
-        return "transfer";
-    case FTP_STAGE_NONE:
-    default:
-        return "none";
-    }
-}
-
 void ftp_line_init(FtpLineReader *reader)
 {
     if (reader == NULL)

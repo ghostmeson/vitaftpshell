@@ -86,10 +86,7 @@ void theme_readout_int(const char *label, int value, int valid, float x,
                        float y, float w);
 void theme_meter(float x, float y, float w, float h, float fill, int valid,
                  uint32_t accent);
-void theme_hazard(float x, float y, float w, float h);
-void theme_sweep(float x, float y, float w, float h, float t);
 
-void theme_fmt_tenths(char *buf, size_t n, int tenths);
 int theme_fmt_int(char *buf, size_t n, int value, int valid);
 void theme_fmt_hms(char *buf, size_t n, int total_seconds);
 

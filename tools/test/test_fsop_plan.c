@@ -335,6 +335,24 @@ static void test_rename_and_mkdir(void)
     CHECK(s_plan.high_risk == 1);
     CHECK(step_source_index(&s_plan, FSOP_STEP_RENAME, "ur0:tai/a.txt") >= 0);
 
+    /* ASK records the destination name for the prompt; SKIP counts as skipped
+     * instead of reporting a rename that never happened. */
+    facts_reset();
+    fact("ur0:tai/a.txt", FS_ENTRY_FILE, 1, 1);
+    fact("ur0:tai/b.txt", FS_ENTRY_FILE, 1, 1);
+    FsOpFacts fexists = facts();
+    FsOpRequest ask = {FSOP_RENAME, sources, 1, "ur0:tai/b.txt", &fexists,
+                       FSOP_CONFLICT_ASK};
+    CHECK(fsop_plan_build(&s_plan, &ask) == 1);
+    CHECK(s_plan.needs_conflict == 1);
+    CHECK(s_plan.existing_count == 1);
+    CHECK(strcmp(fsop_plan_existing_dest(&s_plan, 0), "ur0:tai/b.txt") == 0);
+    FsOpRequest skip = ask;
+    skip.conflict = FSOP_CONFLICT_SKIP;
+    CHECK(fsop_plan_build(&s_plan, &skip) == 1);
+    CHECK(s_plan.skipped_count == 1);
+    CHECK(s_plan.step_count == 0);
+
     facts_reset();
     fact("ux0:data/NEW", FS_ENTRY_DIR, 0, 0);
     FsOpFacts f2 = facts();

@@ -2,6 +2,25 @@
 
 #include "core/uiact.h"
 
+const char *ui_action_context(UiAction action)
+{
+    switch (action) {
+    case UI_ACTION_MOVE:
+        return "MOVE";
+    case UI_ACTION_RENAME:
+        return "RENAME";
+    case UI_ACTION_NEW_FOLDER:
+        return "NEW FOLDER";
+    case UI_ACTION_DELETE:
+        return "DELETE";
+    case UI_ACTION_UPLOAD:
+    case UI_ACTION_DOWNLOAD:
+        return "TRANSFER";
+    default:
+        return "COPY";
+    }
+}
+
 const char *ui_command_name(UiCommandType type)
 {
     switch (type) {
@@ -52,53 +71,5 @@ const char *ui_command_name(UiCommandType type)
     case UI_CMD_NONE:
     default:
         return "none";
-    }
-}
-
-const char *ui_confirm_name(UiConfirmKind kind)
-{
-    switch (kind) {
-    case UI_CONFIRM_DELETE:
-        return "delete";
-    case UI_CONFIRM_CONFLICT:
-        return "conflict";
-    case UI_CONFIRM_CANCEL_XFER:
-        return "cancel_transfer";
-    case UI_CONFIRM_STOP_SERVER:
-        return "stop_server";
-    case UI_CONFIRM_DISCARD:
-        return "discard";
-    case UI_CONFIRM_HIGH_RISK:
-        return "high_risk";
-    case UI_CONFIRM_DELETE_SITE:
-        return "delete_site";
-    case UI_CONFIRM_PATH_BUSY:
-        return "path_busy";
-    case UI_CONFIRM_CANCEL_LANES:
-        return "cancel_lanes";
-    case UI_CONFIRM_NONE:
-    default:
-        return "none";
-    }
-}
-
-const char *ui_field_name(UiField field)
-{
-    switch (field) {
-    case UI_FIELD_NAME:
-        return "NAME";
-    case UI_FIELD_HOST:
-        return "HOST";
-    case UI_FIELD_PORT:
-        return "PORT";
-    case UI_FIELD_ANONYMOUS:
-        return "ANONYMOUS";
-    case UI_FIELD_USERNAME:
-        return "USERNAME";
-    case UI_FIELD_PASSWORD:
-        return "PASSWORD";
-    case UI_FIELD_COUNT:
-    default:
-        return "";
     }
 }

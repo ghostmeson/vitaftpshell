@@ -14,6 +14,9 @@
 #include "platform/log.h"
 #include "platform/net.h"
 
+/* The worker's step cadence; it sleeps this long between worker_step calls. */
+#define WORKER_TICK_MS 8
+
 /*
  * The one worker (D38). It owns the FTP client, the FTP server, the transfer
  * queue, the local executor, the site book, the settings, and the log. It
@@ -47,7 +50,6 @@ void worker_start(Worker *worker);
 /* One bounded slice: commands, engine ticks, queue pump, published facts. */
 void worker_step(Worker *worker);
 
-int worker_ready(const Worker *worker);
 int worker_quit(const Worker *worker);
 
 /* Valid after worker_start and before the worker thread runs. The app copies

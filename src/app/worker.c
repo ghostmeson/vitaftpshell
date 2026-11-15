@@ -127,6 +127,7 @@ struct Worker {
     uint64_t local_run_started_ms;
     uint64_t local_run_last_bytes;
     int local_cancel_requested;
+    unsigned event_lost_seen;
     int local_batch_cancel_requested;
     /* U26: reservations between the lanes, and the item waiting on one. */
     Reserve reserve;
@@ -239,6 +240,11 @@ static void event_init(HandoffEvent *event, HandoffEventKind kind)
 static void emit(Worker *worker, const HandoffEvent *event)
 {
     handoff_event_push(worker->handoff, event);
+    unsigned lost = handoff_event_lost(worker->handoff);
+    if (lost > worker->event_lost_seen) {
+        worker->event_lost_seen = lost;
+        log_detail(worker, LOGEV_ERROR, "event ring lost a record");
+    }
 }
 
 /* Every worker prompt gets one identity; the answer must echo it so a local
@@ -1233,7 +1239,8 @@ static void request_local_conflict(Worker *worker, const UiCommand *command,
     memset(&request, 0, sizeof(request));
     request.kind = UI_CONFIRM_CONFLICT;
     request.valid = 1;
-    fmt_copy(request.context, sizeof(request.context), command->action == UI_ACTION_MOVE ? "MOVE" : "COPY");
+    fmt_copy(request.context, sizeof(request.context),
+             ui_action_context(command->action));
     request.item_count = plan->existing_count;
     request.existing_count = plan->existing_count;
     if (request.item_count > WORKER_CONFIRM_ITEMS)
@@ -1642,7 +1649,7 @@ static void busy_retry(Worker *worker)
     if (held == 0)
         return;
     if (held < 0) {
-        emit_error(worker, UI_PANE_LOCAL, "TRANSFER TOO LARGE", OP_CAUSE_APP,
+        emit_error(worker, UI_PANE_LOCAL, "TOO MANY FILES TO TRACK", OP_CAUSE_APP,
                    OP_STAGE_PLAN);
         free(worker->busy_plan);
         worker->busy_plan = NULL;
@@ -1670,7 +1677,7 @@ static int start_local_plan(Worker *worker, const UiCommand *command,
     char blocker[PATH_MAX_LEN];
     int held = reserve_local_plan(worker, plan, blocker, sizeof(blocker));
     if (held < 0) {
-        emit_error(worker, UI_PANE_LOCAL, "TRANSFER TOO LARGE", OP_CAUSE_APP,
+        emit_error(worker, UI_PANE_LOCAL, "TOO MANY FILES TO TRACK", OP_CAUSE_APP,
                    OP_STAGE_PLAN);
         return 0;
     }
@@ -2310,7 +2317,7 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
     }
     worker->network_waiting = 0;
     if (!reserve_add(&worker->reserve, RESERVE_LANE_NETWORK, kind, local)) {
-        emit_error(worker, UI_PANE_REMOTE, "TRANSFER TOO LARGE", OP_CAUSE_APP,
+        emit_error(worker, UI_PANE_REMOTE, "TOO MANY FILES TO TRACK", OP_CAUSE_APP,
                    OP_STAGE_PLAN);
         xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
                      OP_STAGE_TRANSFER, NULL);
@@ -3536,11 +3543,6 @@ void worker_step(Worker *worker)
     local_batch_flush(worker);
     publish_site_book(worker);
     save_settings(worker);
-}
-
-int worker_ready(const Worker *worker)
-{
-    return worker != NULL && worker->ready;
 }
 
 int worker_quit(const Worker *worker)

@@ -144,40 +144,6 @@ void theme_meter(float x, float y, float w, float h, float fill, int valid,
                   i < lit ? accent : empty);
 }
 
-void theme_hazard(float x, float y, float w, float h)
-{
-    draw_rect(x, y, w, h, C_FIELD);
-
-    for (float px = x - h; px < x + w + h; px += HAZARD_PERIOD) {
-        draw_tri(px, y + h, px + h, y, px + h + HAZARD_STRIPE_W, y, C_YELLOW);
-        draw_tri(px, y + h, px + h + HAZARD_STRIPE_W, y, px + HAZARD_STRIPE_W,
-                 y + h, C_YELLOW);
-    }
-}
-
-void theme_sweep(float x, float y, float w, float h, float t)
-{
-    float p = fmodf(t, SWEEP_PERIOD) / SWEEP_PERIOD;
-    if (p < 0.0f)
-        p += 1.0f;
-
-    float sx = x + p * w;
-
-    draw_set_additive(1);
-    draw_rect(sx - 1.0f, y, 3.0f, h, draw_dim(C_CYAN, SWEEP_HALO_DIM));
-    draw_rect(sx, y, 1.0f, h, draw_dim(C_CYAN, SWEEP_CORE_DIM));
-    draw_set_additive(0);
-}
-
-void theme_fmt_tenths(char *buf, size_t n, int tenths)
-{
-    if (buf == NULL || n == 0)
-        return;
-
-    int v = tenths < 0 ? -tenths : tenths;
-    snprintf(buf, n, "%s%d.%d", tenths < 0 ? "-" : "", v / 10, v % 10);
-}
-
 int theme_fmt_int(char *buf, size_t n, int value, int valid)
 {
     if (buf == NULL || n == 0)

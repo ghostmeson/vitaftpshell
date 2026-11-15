@@ -34,7 +34,6 @@ void font_text_right(const char *s, float x_right, float y, float px,
 
 float font_width(const char *s, float px);
 
-int font_rects(const char *s, float x, float y, float px, Rect *out, int max);
 
 /*
  * Host-test trace hook. The render suites assert that a required label was

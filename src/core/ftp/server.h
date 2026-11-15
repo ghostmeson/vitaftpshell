@@ -94,7 +94,6 @@ FtpServerState ftp_server_state(const FtpServer *server);
 int ftp_server_clients(const FtpServer *server);
 int ftp_server_busy(const FtpServer *server);
 uint16_t ftp_server_control_port(const FtpServer *server);
-uint16_t ftp_server_data_port(const FtpServer *server);
 /* The control peer and the last command, for the SERVER panel. */
 NetAddress ftp_server_peer(const FtpServer *server);
 const char *ftp_server_last_command(const FtpServer *server);
