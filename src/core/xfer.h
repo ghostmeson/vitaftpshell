@@ -57,12 +57,6 @@ typedef struct {
     XferItem items[XFER_QUEUE_MAX];
     int count;
     int active; /* 1 when items[0] owns the slot */
-    XferConflict conflict;
-    int conflict_decided;
-    int terminal_valid;
-    XferItem terminal;
-    OpCause terminal_cause;
-    OpStage terminal_stage;
     unsigned lost;
 } XferQueue;
 
@@ -80,8 +74,8 @@ int xfer_active(const XferQueue *queue, XferItem *out);
 int xfer_claim(XferQueue *queue, XferItem *out);
 
 /*
- * Finish the active item and latch its terminal outcome. The next queued item
- * starts immediately and is returned through `next` when present.
+ * Finish the active item. The next queued item starts immediately and is
+ * returned through `next` when present.
  */
 int xfer_release(XferQueue *queue, XferItemState outcome, OpCause cause,
                  OpStage stage, XferItem *next);
@@ -90,15 +84,7 @@ int xfer_release(XferQueue *queue, XferItemState outcome, OpCause cause,
 int xfer_cancel_active(XferQueue *queue, OpCause cause, OpStage stage,
                        XferItem *next);
 
-/* R41: one decision per batch, recorded once and never re-asked. */
-int xfer_set_conflict(XferQueue *queue, XferConflict decision);
-XferConflict xfer_conflict(const XferQueue *queue);
-
 /* R40: clear every queued item, keeping an active transfer. */
 void xfer_clear_queued(XferQueue *queue);
-
-/* A slow reader sees a terminal outcome exactly once. */
-int xfer_take_terminal(XferQueue *queue, XferItem *out, OpCause *cause,
-                       OpStage *stage);
 
 #endif
