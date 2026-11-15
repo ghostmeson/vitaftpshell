@@ -1425,7 +1425,9 @@ static void server_mlst(ServerSession *session, const char *arg)
 static void server_feat(ServerSession *session)
 {
     server_append_raw(session, "211-Features:\r\n");
-    server_append_raw(session, " MLST type*;size*;modify*;perm*;\r\n");
+    /* Advertise only the facts MLSD/MLST actually emit; `perm` was never
+     * implemented and made the feature list a lie. */
+    server_append_raw(session, " MLST type*;size*;modify*;\r\n");
     server_append_raw(session, " UTF8\r\n");
     server_append_raw(session, "211 End\r\n");
 }
