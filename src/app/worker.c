@@ -994,6 +994,10 @@ static void worker_list_local(Worker *worker, const char *path)
                                                &entry)) == FS_OK) {
         if (strcmp(entry.name, ".") == 0 || strcmp(entry.name, "..") == 0)
             continue;
+        /* A partial write is never a user file; a finished aside stays
+         * visible so a kept copy is reachable (D81). */
+        if (path_sidecar_kind(entry.name) == PATH_SIDECAR_PART)
+            continue;
         if (count >= WORKER_LIST_CAP) {
             truncated = 1;
             stopped_at_cap = 1;

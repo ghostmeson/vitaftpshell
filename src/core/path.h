@@ -65,6 +65,23 @@ PathResult path_check_rename(const char *from, const char *to, int server_role,
 int path_is_protected(const char *path);
 int path_is_high_risk(const char *path);
 
+/* The transfer temp and aside names. One owner: every writer builds them
+ * here, and every listing can recognise them here. */
+#define PATH_SIDECAR_TEMP ".vftp.part"
+#define PATH_SIDECAR_ASIDE ".vftp.old"
+
+typedef enum {
+    PATH_SIDECAR_NONE = 0,
+    PATH_SIDECAR_PART,
+    PATH_SIDECAR_OLD
+} PathSidecarKind;
+
+PathSidecarKind path_sidecar_kind(const char *path);
+int path_is_sidecar(const char *path);
+int path_is_sidecar_of(const char *candidate, const char *base);
+int path_sidecar_path(char *out, size_t cap, const char *target,
+                      const char *suffix);
+
 /* A single component from a remote listing: no `/`, `\`, `:`, or `..`. */
 int path_name_is_safe(const char *name);
 

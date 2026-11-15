@@ -1752,3 +1752,46 @@ dispatch frame is 80 bytes; the scan product is 1,188 bytes.
 **Consequences:** A large local in the UI dispatch or in the folder scan fails
 the build instead of the console. The 256 KiB figure is recorded in
 `docs/VERIFICATION.md` beside the gate numbers.
+
+## D80. A silent server session is closed
+
+**Date:** 2026-11-15
+**Status:** accepted; b53.
+
+**Context:** The b49 review rejected the missing control-session timeout as
+pre-existing, but one peer that connects and sends nothing holds the only
+client slot until the user restarts the server. The review's tradeoff is real:
+a client that idles mid-browse loses its session.
+
+**Decision:** A control session with no received bytes and no active data
+transfer for 30 seconds receives `421 Idle timeout.` and is closed, with one
+session log line. Any received byte and any active transfer refresh the
+deadline. Recovery is a reconnect; the server keepalive is not a substitute
+because it is a client-side timer.
+
+**Consequences:** A passive desktop client that browses slowly reconnects. The
+panel shows the connected client until the close, so the state is visible.
+M7 records the idle close.
+
+## D81. The transfer sidecar has one owner
+
+**Date:** 2026-11-15
+**Status:** accepted; b53.
+
+**Context:** `.vftp.part` and `.vftp.old` were built in four places, the
+reservation module carried an unused recogniser, neither listing filtered the
+debris, and a user file whose name ended in the suffix could be deleted by the
+next write to its base name.
+
+**Decision:** `core/path.c` owns the suffixes, the builder, and the two
+predicates. The executor, the FTP temp write, and the reservation pair test use
+them. `path_check_write` and a rename destination refuse a sidecar name, so the
+app never creates one. `.vftp.part` is hidden from the local pane and the server
+listing because it is never a valid file; `.vftp.old` stays visible so a kept
+copy is reachable and is never mistaken for the user's file. The store keeps its
+private `.old` and `.tmp` names inside the app data folder.
+
+**Consequences:** Changing the convention is one edit. A file that arrives from
+outside the app with a sidecar name is still removed by the next write to its
+base name; that open risk is recorded in `docs/FIXES.md`. The local pane can
+still show the store's `.old` debris.

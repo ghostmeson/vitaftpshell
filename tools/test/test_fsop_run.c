@@ -618,6 +618,7 @@ static void test_aside_cleanup_failure(void)
     fake_fs_set_rename_replaces(0);
     fake_fs_fail_remove_at(0);
     FsOpProgress p = run(NULL, NULL);
+    /* D76: the rename succeeded; the leftover aside is a notice. */
     CHECK(p.cause == OP_CAUSE_STORAGE);
     CHECK(strstr(p.message, "ASIDE CLEANUP FAILED") != NULL);
     CHECK(fake_fs_exists("ux0:data/NEW.TXT.vftp.old"));

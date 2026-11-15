@@ -63,7 +63,5 @@ void reserve_release(Reserve *reserve, ReserveLane lane);
 int reserve_conflict(const Reserve *reserve, ReserveKind kind, const char *path,
                      char *blocker, size_t cap);
 
-/* A generated temp or aside name; hidden from listings. */
-int reserve_is_sidecar(const char *name_or_path);
 
 #endif

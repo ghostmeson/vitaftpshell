@@ -144,6 +144,27 @@ static void test_denials_and_risk(void)
           PATH_DENIED);
 }
 
+static void test_sidecar_names(void)
+{
+    CHECK(path_sidecar_kind("ux0:data/A.BIN.vftp.part") == PATH_SIDECAR_PART);
+    CHECK(path_sidecar_kind("ux0:data/A.BIN.VFTP.OLD") == PATH_SIDECAR_OLD);
+    CHECK(path_sidecar_kind("ux0:data/A.BIN") == PATH_SIDECAR_NONE);
+    CHECK(path_is_sidecar_of("ux0:data/A.BIN.vftp.old", "ux0:data/A.BIN"));
+    CHECK(!path_is_sidecar_of("ux0:data/B.BIN.vftp.old", "ux0:data/A.BIN"));
+
+    char out[PATH_MAX_LEN];
+    CHECK(path_sidecar_path(out, sizeof(out), "ux0:data/A.BIN",
+                            PATH_SIDECAR_TEMP));
+    CHECK(strcmp(out, "ux0:data/A.BIN.vftp.part") == 0);
+
+    /* The app never creates a name its own recovery would claim. */
+    CHECK(path_check_write("ux0:data/A.BIN.vftp.part", 0, NULL) ==
+          PATH_DENIED);
+    CHECK(path_check_write("ux0:data/A.BIN.vftp.old", 1, NULL) ==
+          PATH_DENIED);
+    CHECK(path_check_write("ux0:data/A.BIN", 0, NULL) == PATH_OK);
+}
+
 int main(void)
 {
     test_canonical();
@@ -151,6 +172,7 @@ int main(void)
     test_volume();
     test_safety();
     test_denials_and_risk();
+    test_sidecar_names();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_path: %d failure(s)\n", s_failures);

@@ -328,9 +328,55 @@ PathResult path_check_read(const char *path, int server_role, PathRisk *risk)
     return PATH_OK;
 }
 
+PathSidecarKind path_sidecar_kind(const char *path)
+{
+    if (path == NULL)
+        return PATH_SIDECAR_NONE;
+    const char *name = path;
+    for (const char *p = path; *p != '\0'; ++p) {
+        if (*p == '/' || *p == ':')
+            name = p + 1;
+    }
+    if (ends_with_ci(name, PATH_SIDECAR_TEMP))
+        return PATH_SIDECAR_PART;
+    if (ends_with_ci(name, PATH_SIDECAR_ASIDE))
+        return PATH_SIDECAR_OLD;
+    return PATH_SIDECAR_NONE;
+}
+
+int path_is_sidecar(const char *path)
+{
+    return path_sidecar_kind(path) != PATH_SIDECAR_NONE;
+}
+
+int path_is_sidecar_of(const char *candidate, const char *base)
+{
+    if (candidate == NULL || base == NULL)
+        return 0;
+    char expected[PATH_MAX_LEN];
+    if (path_sidecar_path(expected, sizeof(expected), base, PATH_SIDECAR_TEMP) &&
+        ci_equal(candidate, expected))
+        return 1;
+    return path_sidecar_path(expected, sizeof(expected), base,
+                             PATH_SIDECAR_ASIDE) &&
+           ci_equal(candidate, expected);
+}
+
+int path_sidecar_path(char *out, size_t cap, const char *target,
+                      const char *suffix)
+{
+    if (out == NULL || cap == 0 || target == NULL || suffix == NULL)
+        return 0;
+    int n = snprintf(out, cap, "%s%s", target, suffix);
+    return n > 0 && (size_t)n < cap;
+}
+
 PathResult path_check_write(const char *path, int server_role, PathRisk *risk)
 {
-    return check_path(path, server_role, risk);
+    PathResult result = check_path(path, server_role, risk);
+    if (result == PATH_OK && path_is_sidecar(path))
+        return PATH_DENIED;
+    return result;
 }
 
 PathResult path_check_delete(const char *path, int server_role, PathRisk *risk)
