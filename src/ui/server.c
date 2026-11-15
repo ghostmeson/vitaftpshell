@@ -134,7 +134,7 @@ static void client_draw(const UiState *state, const LayoutRect *r)
 
     if (!server->client_active) {
         font_text("NO CLIENT", 596.0f, 320.0f, PX_LABEL, C_DIM);
-        font_text("ONE CLIENT AT A TIME", 596.0f, 342.0f, PX_MICRO, C_DIM);
+        font_text("UP TO 4 CLIENTS", 596.0f, 342.0f, PX_MICRO, C_DIM);
         return;
     }
 
@@ -160,7 +160,7 @@ static void client_draw(const UiState *state, const LayoutRect *r)
         font_text("NO TRANSFER", 596.0f, 362.0f, PX_MICRO, C_DIM);
     }
 
-    font_text("ONE CLIENT AT A TIME", 596.0f, 382.0f, PX_MICRO, C_DIM);
+    font_text("UP TO 4 CLIENTS", 596.0f, 382.0f, PX_MICRO, C_DIM);
 }
 
 static void dock_server(const UiState *state)

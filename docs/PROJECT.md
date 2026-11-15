@@ -21,7 +21,7 @@ server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime exist. `tools/test/run.sh` passes
 twenty-one host suites, `tools/preview/run.sh` renders 40 settled states, and
-`build.sh` emits `vitaftpshell-v01.00-b58.vpk` with the real app linked. b16 and b18 have
+`build.sh` emits `vitaftpshell-v01.00-b60.vpk` with the real app linked. b16 and b18 have
 run on the console: b18 proved the drive browser, pinned the IME as the
 new-folder/rename blocker, showed the client failing at TCP connect, and showed
 the server with no client. b20 opened the IME and reached a rename, then the
@@ -57,9 +57,10 @@ server-busy gate that refused `PASV`/`STOR`/`RETR` whenever the app's own networ
 lane was active. The b57 log showed the app's client deadlocking against its own
 server: `transfer_start` → `PASV` → `450 Transfer in progress`. b58 is
 hardware-verified for both directions from the app's own client. FileZilla's
-`450 Busy` is the one-client rule colliding with a second control connection;
-M5 is PART. M13 and M10 are partly observed. The project stays `building` until
-every row has a recorded PASS.
+`450 Busy` was the one-client rule colliding with a second control connection;
+b60 accepts up to four sessions with one data transfer at a time (D86). M5 is
+PART until the b60 FileZilla retry. M13 and M10 are partly observed. The project
+stays `building` until every row has a recorded PASS.
 
 ## Users
 
@@ -75,7 +76,7 @@ every row has a recorded PASS.
 |---|---|
 | FTP client | Saved sites, anonymous and login, passive FTP, browse, download, upload, create, rename, delete, recursive folders |
 | Local manager | Browse the mounted `ux0:`/`ur0:`/`uma0:` volumes, multi-select, create, rename, copy, move, delete, recursive folders, free space |
-| FTP server | Anonymous read-write, mounted `ux0:`/`ur0:`/`uma0:`, OFF at launch, one client, visible ON state |
+| FTP server | Anonymous read-write, mounted `ux0:`/`ur0:`/`uma0:`, OFF at launch, up to four clients with one data transfer at a time, visible ON state |
 | Transfers | One active, queued batch, progress, cancel, overwrite/skip/cancel conflict prompt |
 | Interface | Two live panes, site manager, server panel, actions, confirms, system text entry, inline errors |
 

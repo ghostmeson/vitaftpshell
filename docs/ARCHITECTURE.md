@@ -73,7 +73,8 @@ VitaShell or libftpvita is vendored (D40).
 - **Client:** resolve, connect, read the greeting, log in (anonymous or
   user/password), set binary mode, read the working directory, list, browse,
   download, upload, create, rename, delete, and quit. Passive only.
-- **Server:** listen on the control port and the data port, accept one client, log
+- **Server:** listen on the control port and the data port, accept up to four
+  control sessions with one data transfer at a time, log
   in anonymously, list, change directory, download, upload, create, rename,
   delete, and quit. Passive only. Every path resolves through the shared table and
   is re-checked after normalization.

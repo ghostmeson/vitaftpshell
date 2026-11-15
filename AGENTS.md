@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 twenty-one host suites, and `tools/preview/run.sh` renders 40 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b58.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b60.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -48,8 +48,9 @@ owner. b56 re-packages that code with the settled launcher icon (D84); b57
 added a server protocol trace, and its console log showed the worker's legacy
 global server-busy gate answering 450 to the app's own client. b58 removes that
 gate (D85), and the console confirmed both transfer directions between the app's
-own client and server. FileZilla's `450 Busy` is the one-client rule refusing
-its second control connection. M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
+own client and server. b60 accepts up to four server sessions, one data
+transfer at a time (D86), so FileZilla's browse and transfer connections can
+both connect. M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
 the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
@@ -79,7 +80,8 @@ shape; the transfer dock is where work is visible.
 
 - v1 ships all three roles: client, local file manager, and FTP server.
 - The server is anonymous read-write on the mounted `ux0:`, `ur0:`, and `uma0:`
-  volumes, OFF at launch, and accepts one client at a time.
+  volumes, OFF at launch, and accepts up to four clients with one data transfer
+  at a time (D86).
 - The client is passive FTP only, tries MLSD then LIST, and parses Unix and DOS
   listings.
 - Passwords are always remembered and stored unencrypted; they are never logged.

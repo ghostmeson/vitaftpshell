@@ -150,7 +150,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - R47. The server is OFF at launch and never starts automatically.
 - R48. SERVER shows OFF or ON, control port (default 1337), local IP, connected client count, and a warning that anonymous clients can read and write. The port can be edited from SERVER. The warning names the exposed volumes and the excluded app data folder. When a client is connected, it names the current operation, path, and transferred and total bytes, with `--` when unknown.
 - R49. Cross starts and stops the server; starting without a network shows a clear error and leaves it OFF. A bind failure names the port, says another server may be using it, and leaves the server OFF so the port can be changed.
-- R50. The server accepts one client at a time; a second connection is refused with a busy reply.
+- R50. The server accepts up to four clients; a fifth connection is refused with a busy reply. One data transfer owns the PASV/data port at a time, and another session's data or PASV command gets a busy reply (D86).
 - R51. The server exposes the mounted subset of `ux0:`, `ur0:`, and `uma0:` as top-level directories; absent volumes are absent, and no other mount is exposed.
 - R52. Anonymous login has read-write access to the exposed volumes.
 - R53. The server denies all access to `ur0:tai/boot_config.txt` and to the app's own data folder under `ux0:data`, and denies every write, create, rename, and delete inside `ur0:tai` and `ux0:tai`, plus destructive commands on volume roots, `ur0:data`, `ux0:data`, and protected system directories. A rename checks both operands. Every check uses the canonical path.
@@ -777,6 +777,11 @@ global server-busy flag answering 450 to the app's own client's `PASV`. b58
 removes it; the path-scoped reservation guard is the only cross-lane exclusion
 (D85). M5 is the open row.
 
+**Multi-client amendment (2026-11-15).** FileZilla opens a separate control
+connection for transfers, so the one-client rule answered its second connection
+with `450 Busy`. b60 accepts up to four sessions with one data transfer at a
+time (D86); R50 and U7 above carry the amendment.
+
 ### Risks and accepted costs
 
 | Risk | Treatment |
@@ -969,11 +974,11 @@ removes it; the path-scoped reservation guard is the only cross-lane exclusion
 
 ### U7. FTP server state machine
 
-- **Goal:** A listener, one client slot, the command table, and the full denial set.
+- **Goal:** A listener, four client sessions, one data-transfer slot, the command table, and the full denial set.
 - **Requirements:** R47-R56, KTD11, KTD14.
 - **Dependencies:** U2, U4.
 - **Files:** `src/core/ftp/{ftp,server}.c` and headers, `tools/test/test_server.c`, `tools/fake/fake_ftp_client.c`.
-- **Approach:** Bind the control socket, then the data socket at control plus one. Accept one client; a second accept gets a 450 and is closed. Commands parse against the table; every path resolves through `path` and re-checks the denial table after normalization. The data phase follows KTD5: PASV arms one connection, a non-data command or a refusal disarms it, and an abort drains its own reply pair. A `STOR` overwrites an existing destination through the templed write and never asks the console (D41); the warning panel discloses it. `ftp.c` holds the shared line reader, remote path normalizer, and templed write so the client and server cannot drift.
+- **Approach:** Bind the control socket, then the data socket at control plus one. Accept up to four clients; a fifth accept gets a 450 and is closed. Each session owns its login, cwd, line reader, reply buffer, and rename state; one data transfer owns the shared data socket (D86). Commands parse against the table; every path resolves through `path` and re-checks the denial table after normalization. The data phase follows KTD5: PASV arms one connection, a non-data command or a refusal disarms it, and an abort drains its own reply pair. A `STOR` overwrites an existing destination through the templed write and never asks the console (D41); the warning panel discloses it. `ftp.c` holds the shared line reader, remote path normalizer, and templed write so the client and server cannot drift.
 - **Test scenarios:**
   - Greeting is 220; `USER anonymous` is 331 and `PASS anything` is 230; any other user is 530.
   - `PASV` returns the LAN address and control port plus one.

@@ -11,6 +11,7 @@
 #include <time.h>
 
 #define SERVER_TX_MAX 16384
+#define SERVER_MAX_CLIENTS 4
 #define SERVER_DATA_BUF 8192
 #define SERVER_DATA_BYTES_PER_TICK (32u * 1024u)
 #define SERVER_DATA_SLICE_MS 6
@@ -31,6 +32,30 @@ typedef enum {
     SDATA_STOR
 } ServerDataKind;
 
+typedef struct ServerSession {
+    FtpServer *server;
+    int used;
+    NetSocket *control;
+    NetAddress peer;
+
+    FtpLineReader lines;
+    char cwd[FTP_PATH_MAX];
+
+    int user_seen;
+    int user_ok;
+    int logged_in;
+
+    char tx[SERVER_TX_MAX];
+    size_t tx_len;
+    size_t tx_off;
+    int tx_backlog;
+    uint64_t control_deadline;
+
+    int rnfr_valid;
+    char rnfr_local[PATH_MAX_LEN];
+    char rnfr_virtual[FTP_PATH_MAX];
+} ServerSession;
+
 struct FtpServer {
     NetPort *net;
     FsPort *fs;
@@ -47,24 +72,13 @@ struct FtpServer {
 
     NetSocket *control_listener;
     NetSocket *data_listener;
-    NetSocket *control;
-    NetSocket *data;
-    NetAddress control_peer;
 
-    FtpLineReader lines;
-    char cwd[FTP_PATH_MAX];
-
-    int user_seen;
-    int user_ok;
-    int logged_in;
-
-    char tx[SERVER_TX_MAX];
-    size_t tx_len;
-    size_t tx_off;
-    int tx_backlog;
-    uint64_t control_deadline;
+    ServerSession sessions[SERVER_MAX_CLIENTS];
+    NetAddress last_peer;
 
     FtpDataState data_state;
+    int data_session;
+    NetSocket *data;
     ServerDataKind data_kind;
     int pending_accept;
     uint64_t pending_deadline;
@@ -94,10 +108,6 @@ struct FtpServer {
     FtpServerGuardFn guard;
     void *guard_ctx;
     int root_index;
-
-    int rnfr_valid;
-    char rnfr_local[PATH_MAX_LEN];
-    char rnfr_virtual[FTP_PATH_MAX];
 
     uint64_t next_link_check;
     int clients;
@@ -187,20 +197,40 @@ static void server_error_event(FtpServer *server, const char *detail)
     server_emit(server, &event);
 }
 
-static int server_append(FtpServer *server, const char *data, size_t len)
+static ServerSession *server_session_at(FtpServer *server, int index)
 {
-    if (len == 0)
+    if (server == NULL || index < 0 || index >= SERVER_MAX_CLIENTS)
+        return NULL;
+    ServerSession *session = &server->sessions[index];
+    return session->used ? session : NULL;
+}
+
+static int server_session_index(FtpServer *server, const ServerSession *session)
+{
+    if (server == NULL || session == NULL)
+        return -1;
+    return (int)(session - server->sessions);
+}
+
+static ServerSession *server_data_owner(FtpServer *server)
+{
+    return server_session_at(server, server->data_session);
+}
+
+static int server_append(ServerSession *session, const char *data, size_t len)
+{
+    if (session == NULL || len == 0)
         return 1;
-    if (server->tx_len + len > sizeof(server->tx))
+    if (session->tx_len + len > sizeof(session->tx))
         return 0;
-    memcpy(server->tx + server->tx_len, data, len);
-    server->tx_len += len;
+    memcpy(session->tx + session->tx_len, data, len);
+    session->tx_len += len;
     return 1;
 }
 
-static int server_append_raw(FtpServer *server, const char *text)
+static int server_append_raw(ServerSession *session, const char *text)
 {
-    return server_append(server, text, strlen(text));
+    return server_append(session, text, strlen(text));
 }
 
 static void server_trace(FtpServer *server, const char *fmt, ...)
@@ -226,10 +256,14 @@ static void server_trace_peer(FtpServer *server, const char *prefix,
 
 static void server_close_data(FtpServer *server);
 static void server_close_transfer(FtpServer *server);
-static void server_control_failed(FtpServer *server);
+static void server_control_failed(FtpServer *server, ServerSession *session);
 
-static void server_reply(FtpServer *server, int code, const char *fmt, ...)
+static void server_reply(ServerSession *session, int code, const char *fmt, ...)
 {
+    if (session == NULL || !session->used)
+        return;
+    FtpServer *server = session->server;
+
     char body[FTP_PATH_MAX + 64];
     va_list args;
     va_start(args, fmt);
@@ -240,37 +274,39 @@ static void server_reply(FtpServer *server, int code, const char *fmt, ...)
     int n = snprintf(line, sizeof(line), "%03d %s\r\n", code, body);
     if (n > 0)
         server_trace(server, "FTPR %.*s", n > 2 ? n - 2 : n, line);
-    if (n > 0 && !server_append(server, line, (size_t)n) &&
-        !server->tx_backlog) {
+    if (n > 0 && !server_append(session, line, (size_t)n) &&
+        !session->tx_backlog) {
         /* The peer is not draining its replies. Record it once; the command
          * loop stops reading non-ABOR/QUIT input until the buffer drains. */
-        server->tx_backlog = 1;
+        session->tx_backlog = 1;
         server_error_event(server, "REPLY BACKLOG");
     }
 }
 
-static void server_flush(FtpServer *server)
+static void server_flush(ServerSession *session)
 {
-    if (server->control == NULL)
+    if (session == NULL || !session->used || session->control == NULL)
         return;
+    FtpServer *server = session->server;
 
-    while (server->tx_off < server->tx_len) {
+    while (session->tx_off < session->tx_len) {
         size_t sent = 0;
         NetResult r = server->net->send(
-            server->net->ctx, server->control, server->tx + server->tx_off,
-            server->tx_len - server->tx_off, &sent);
+            server->net->ctx, session->control,
+            session->tx + session->tx_off,
+            session->tx_len - session->tx_off, &sent);
         if (r == NET_WOULD_BLOCK)
             return;
         if (r != NET_OK || sent == 0) {
-            server_control_failed(server);
+            server_control_failed(server, session);
             return;
         }
-        server->tx_off += sent;
+        session->tx_off += sent;
     }
 
-    server->tx_len = 0;
-    server->tx_off = 0;
-    server->tx_backlog = 0;
+    session->tx_len = 0;
+    session->tx_off = 0;
+    session->tx_backlog = 0;
 }
 
 static void server_drain_listener(FtpServer *server)
@@ -321,6 +357,7 @@ static void server_close_transfer(FtpServer *server)
     server->listing_single = 0;
     server->listing_single_used = 0;
     server->root_index = 0;
+    server->data_session = -1;
     if (server->guard != NULL)
         (void)server->guard(server->guard_ctx, FTP_GUARD_RELEASE, NULL, 0, 0);
 }
@@ -334,25 +371,29 @@ static void server_disarm(FtpServer *server)
     server_drain_listener(server);
 }
 
-/* A held path answers 450 and drops the armed PASV connection. When `hold` is
- * set, the accepted data command also claims the path for the transfer. */
-static int server_path_held(FtpServer *server, const char *local, int write,
-                            int tree, int hold)
+static int server_path_held(ServerSession *session, const char *local,
+                            int write, int tree, int hold)
 {
+    FtpServer *server = session->server;
     if (server->guard == NULL)
         return 0;
 
-    if (!server->guard(server->guard_ctx, FTP_GUARD_CHECK, local, write, tree))
-        return 0;
-    if (hold &&
-        server->guard(server->guard_ctx, FTP_GUARD_HOLD, local, write, tree)) {
-        server_reply(server, 451, "Resource busy.");
-        server_disarm(server);
+    if (server->guard(server->guard_ctx, FTP_GUARD_CHECK, local, write, tree)) {
+        server_reply(session, 450, "Path busy.");
+        if (server->data_session < 0 ||
+            server->data_session == server_session_index(server, session))
+            server_disarm(server);
         return 1;
     }
-    server_reply(server, 450, "Path busy.");
-    server_disarm(server);
-    return 1;
+    if (hold &&
+        server->guard(server->guard_ctx, FTP_GUARD_HOLD, local, write, tree)) {
+        server_reply(session, 451, "Resource busy.");
+        if (server->data_session < 0 ||
+            server->data_session == server_session_index(server, session))
+            server_disarm(server);
+        return 1;
+    }
+    return 0;
 }
 
 static void server_emit_state_and_client(FtpServer *server)
@@ -361,32 +402,33 @@ static void server_emit_state_and_client(FtpServer *server)
     server_client_event(server);
 }
 
-static void server_control_failed(FtpServer *server)
+
+static void server_control_failed(FtpServer *server, ServerSession *session)
 {
+    if (session == NULL || !session->used)
+        return;
+
     int had_transfer =
-        server->data_state == FTP_DATA_ACTIVE || server->pending_accept;
+        (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) &&
+        server->data_session == server_session_index(server, session);
     if (had_transfer)
         server_transfer_event(server, 0, FTP_CAUSE_NETWORK, "CONTROL LOST");
 
-    server_close_transfer(server);
-    server_close_data(server);
-
-    if (server->control != NULL) {
-        server->net->close(server->net->ctx, server->control);
-        server->control = NULL;
+    if (had_transfer) {
+        server_close_transfer(server);
+        server_close_data(server);
     }
 
-    server->clients = 0;
-    server->logged_in = 0;
-    server->user_seen = 0;
-    server->user_ok = 0;
-    server->rnfr_valid = 0;
-    server->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
-    server->tx_backlog = 0;
-    snprintf(server->cwd, sizeof(server->cwd), "/");
-    server->tx_len = 0;
-    server->tx_off = 0;
-    server->state = FTP_SERVER_ON;
+    if (session->control != NULL) {
+        server->net->close(server->net->ctx, session->control);
+        session->control = NULL;
+    }
+    session->used = 0;
+    server->clients--;
+    if (server->clients < 0)
+        server->clients = 0;
+    if (server->clients == 0)
+        server->state = FTP_SERVER_ON;
     server_emit_state_and_client(server);
     snprintf(server->detail, sizeof(server->detail), "CONTROL LOST");
     server_error_event(server, server->detail);
@@ -406,9 +448,13 @@ static void server_stop_internal(FtpServer *server, const char *detail)
     server_close_transfer(server);
     server_close_data(server);
 
-    if (server->control != NULL) {
-        server->net->close(server->net->ctx, server->control);
-        server->control = NULL;
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+        ServerSession *session = &server->sessions[i];
+        if (!session->used)
+            continue;
+        if (session->control != NULL)
+            server->net->close(server->net->ctx, session->control);
+        session->used = 0;
     }
     if (server->control_listener != NULL) {
         server->net->close(server->net->ctx, server->control_listener);
@@ -420,58 +466,51 @@ static void server_stop_internal(FtpServer *server, const char *detail)
     }
 
     server->clients = 0;
-    server->logged_in = 0;
-    server->user_seen = 0;
-    server->user_ok = 0;
-    server->rnfr_valid = 0;
-    server->tx_len = 0;
-    server->tx_off = 0;
     server->state = FTP_SERVER_OFF;
-    server_state_event(server);
+    server_emit_state_and_client(server);
+
     if (detail != NULL) {
         snprintf(server->detail, sizeof(server->detail), "%s", detail);
         server_error_event(server, server->detail);
     }
 }
 
-static void server_close_session(FtpServer *server, int send_221,
-                                 const char *detail)
+static void server_close_session(FtpServer *server, ServerSession *session,
+                                 int send_221, const char *detail)
 {
-    if (server->control == NULL)
+    if (session == NULL || !session->used)
         return;
 
     server_trace(server, "FTPD CLOSE");
     if (send_221)
-        server_reply(server, 221, "Goodbye.");
-    server_flush(server);
-    if (server->control == NULL)
+        server_reply(session, 221, "Goodbye.");
+    server_flush(session);
+    if (!session->used)
         return;
 
     int had_transfer =
-        server->data_state == FTP_DATA_ACTIVE || server->pending_accept;
+        (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) &&
+        server->data_session == server_session_index(server, session);
     if (had_transfer)
         server_transfer_event(server, 0,
                               send_221 ? FTP_CAUSE_USER : FTP_CAUSE_NETWORK,
                               send_221 ? "QUIT" : "CONTROL LOST");
 
-    server_close_transfer(server);
-    server_close_data(server);
-
-    if (server->control != NULL) {
-        server->net->close(server->net->ctx, server->control);
-        server->control = NULL;
+    if (had_transfer) {
+        server_close_transfer(server);
+        server_close_data(server);
     }
 
-    server->clients = 0;
-    server->logged_in = 0;
-    server->user_seen = 0;
-    server->user_ok = 0;
-    server->rnfr_valid = 0;
-    server->cwd[0] = '/';
-    server->cwd[1] = '\0';
-    server->state = FTP_SERVER_ON;
-    server->tx_len = 0;
-    server->tx_off = 0;
+    if (session->control != NULL) {
+        server->net->close(server->net->ctx, session->control);
+        session->control = NULL;
+    }
+    session->used = 0;
+    server->clients--;
+    if (server->clients < 0)
+        server->clients = 0;
+    if (server->clients == 0)
+        server->state = FTP_SERVER_ON;
     server_emit_state_and_client(server);
     if (detail != NULL) {
         snprintf(server->detail, sizeof(server->detail), "%s", detail);
@@ -524,13 +563,13 @@ static int volume_index(const char *token, size_t len)
  * `/` is the virtual root. A first segment must be a volume name, optionally
  * followed by `:` and any bytes below it. Returns 0 for an invalid path.
  */
-static int server_resolve(FtpServer *server, const char *arg,
+static int server_resolve(ServerSession *session, const char *arg,
                           char *virtual_out, size_t vcap, Path *local,
                           int *is_root)
 {
-    const char *input = (arg != NULL && arg[0] != '\0') ? arg : server->cwd;
+    const char *input = (arg != NULL && arg[0] != '\0') ? arg : session->cwd;
     char virtual[FTP_PATH_MAX];
-    if (!ftp_remote_normalize(server->cwd, input, virtual, sizeof(virtual)))
+    if (!ftp_remote_normalize(session->cwd, input, virtual, sizeof(virtual)))
         return 0;
 
     if (virtual[0] != '/')
@@ -771,9 +810,11 @@ static int server_next_listing_line(FtpServer *server, char *out, size_t cap)
 static void server_data_error(FtpServer *server, int code, FtpCause cause,
                               const char *detail)
 {
+    ServerSession *owner = server_data_owner(server);
     server_close_data(server);
     server_close_transfer(server);
-    server_reply(server, code, "%s", detail);
+    if (owner != NULL)
+        server_reply(owner, code, "%s", detail);
     server_transfer_event(server, 0, cause, detail);
 }
 
@@ -836,6 +877,7 @@ static int server_fill_data(FtpServer *server)
 static void server_finish_data(FtpServer *server, int ok, FtpCause cause,
                                const char *detail)
 {
+    ServerSession *owner = server_data_owner(server);
     server_close_data(server);
 
     server_trace(server, "FTPD FINISH kind=%d ok=%d open=%d", (int)server->data_kind,
@@ -847,7 +889,8 @@ static void server_finish_data(FtpServer *server, int ok, FtpCause cause,
             server_trace(server, "FTPD COMMIT r=%d step=%d", (int)r, (int)step);
             if (r != FS_OK) {
                 server_close_transfer(server);
-                server_reply(server, 451, "Storage write failed.");
+                if (owner != NULL)
+                    server_reply(owner, 451, "Storage write failed.");
                 server_transfer_event(server, 0, FTP_CAUSE_STORAGE,
                                       step == FTP_COMMIT_RENAME
                                           ? "DESTINATION RENAME FAILED"
@@ -862,10 +905,13 @@ static void server_finish_data(FtpServer *server, int ok, FtpCause cause,
     server_close_transfer(server);
 
     if (ok) {
-        server_reply(server, 226, "Transfer complete.");
+        if (owner != NULL)
+            server_reply(owner, 226, "Transfer complete.");
         server_transfer_event(server, 1, FTP_CAUSE_APP, NULL);
     } else {
-        server_reply(server, 426, "%s", detail != NULL ? detail : "Aborted.");
+        if (owner != NULL)
+            server_reply(owner, 426, "%s",
+                         detail != NULL ? detail : "Aborted.");
         server_transfer_event(server, 0, cause, detail);
     }
 }
@@ -985,6 +1031,7 @@ static void server_pump_data(FtpServer *server)
 
 static void server_begin_data(FtpServer *server)
 {
+    ServerSession *owner = server_data_owner(server);
     server->data_state = FTP_DATA_ACCEPTED;
     server->pending_accept = 0;
 
@@ -994,7 +1041,7 @@ static void server_begin_data(FtpServer *server)
         server_trace(server, "FTPD RETR OPEN %s r=%d", server->active_local,
                      (int)r);
         if (r != FS_OK) {
-            server_reply(server, 550, "Not found.");
+            if (owner != NULL) server_reply(owner, 550, "Not found.");
             server_close_data(server);
             server_close_transfer(server);
             return;
@@ -1005,7 +1052,7 @@ static void server_begin_data(FtpServer *server)
         server_trace(server, "FTPD STOR OPEN %s r=%d temp=%s",
                      server->active_local, (int)r, server->temp.temp.text);
         if (r != FS_OK) {
-            server_reply(server, 550, "Not found.");
+            if (owner != NULL) server_reply(owner, 550, "Not found.");
             server_close_data(server);
             server_close_transfer(server);
             return;
@@ -1017,7 +1064,7 @@ static void server_begin_data(FtpServer *server)
         server_trace(server, "FTPD LIST OPEN %s r=%d", server->active_local,
                      (int)r);
         if (r != FS_OK) {
-            server_reply(server, 550, "Not found.");
+            if (owner != NULL) server_reply(owner, 550, "Not found.");
             server_close_data(server);
             server_close_transfer(server);
             return;
@@ -1041,12 +1088,15 @@ static void server_begin_data(FtpServer *server)
     }
     server->data_deadline = server_now(server) + SERVER_DATA_IDLE_MS;
     server->data_state = FTP_DATA_ACTIVE;
-    server_reply(server, 150, "Opening data connection.");
+    if (owner != NULL) server_reply(owner, 150, "Opening data connection.");
 }
 
 static void server_try_accept(FtpServer *server)
 {
     if (server->data_state != FTP_DATA_ARMED || !server->pending_accept)
+        return;
+    ServerSession *owner = server_data_owner(server);
+    if (owner == NULL)
         return;
 
     /* Drain a bounded number of queued connections per tick. A foreign peer
@@ -1061,12 +1111,12 @@ static void server_try_accept(FtpServer *server)
             return;
         if (r != NET_OK) {
             server_trace(server, "FTPD ACCEPT FAIL r=%d", (int)r);
-            server_reply(server, 425, "Cannot open data connection.");
+            server_reply(owner, 425, "Cannot open data connection.");
             server_disarm(server);
             return;
         }
 
-        if (peer.addr != server->control_peer.addr) {
+        if (peer.addr != owner->peer.addr) {
             server_trace_peer(server, "FTPD FOREIGN", peer);
             server->net->close(server->net->ctx, data);
             continue;
@@ -1080,22 +1130,23 @@ static void server_try_accept(FtpServer *server)
     }
 }
 
-static int server_data_command(FtpServer *server, ServerDataKind kind,
+static int server_data_command(ServerSession *session, ServerDataKind kind,
                                const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root)) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         server_disarm(server);
         return 0;
     }
 
     if ((kind == SDATA_RETR || kind == SDATA_STOR) && is_root) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         server_disarm(server);
         return 0;
     }
@@ -1110,14 +1161,14 @@ static int server_data_command(FtpServer *server, ServerDataKind kind,
                             ? path_check_read(local.text, 1, &risk)
                             : path_check_write(local.text, 1, &risk);
         if (pr != PATH_OK) {
-            server_reply(server, 550, "Not found.");
+            server_reply(session, 550, "Not found.");
             server_disarm(server);
             return 0;
         }
     } else if (!is_root) {
         PathRisk risk = PATH_RISK_NORMAL;
         if (path_check_read(local.text, 1, &risk) != PATH_OK) {
-            server_reply(server, 550, "Not found.");
+            server_reply(session, 550, "Not found.");
             server_disarm(server);
             return 0;
         }
@@ -1128,23 +1179,23 @@ static int server_data_command(FtpServer *server, ServerDataKind kind,
         if (kind == SDATA_STOR) {
             /* A missing destination is the normal create case. */
             if (sr == FS_OK && entry.type == FS_ENTRY_DIR) {
-                server_reply(server, 550, "Not found.");
+                server_reply(session, 550, "Not found.");
                 server_disarm(server);
                 return 0;
             }
             if (sr != FS_OK && sr != FS_NOT_FOUND) {
-                server_reply(server, 550, "Not found.");
+                server_reply(session, 550, "Not found.");
                 server_disarm(server);
                 return 0;
             }
         } else {
             if (sr != FS_OK) {
-                server_reply(server, 550, "Not found.");
+                server_reply(session, 550, "Not found.");
                 server_disarm(server);
                 return 0;
             }
             if (kind == SDATA_RETR && entry.type != FS_ENTRY_FILE) {
-                server_reply(server, 550, "Not found.");
+                server_reply(session, 550, "Not found.");
                 server_disarm(server);
                 return 0;
             }
@@ -1152,8 +1203,10 @@ static int server_data_command(FtpServer *server, ServerDataKind kind,
         }
     }
 
+    /* The guard's refusal is answered on the owning session. */
+    server->data_session = server_session_index(server, session);
     if (!is_root &&
-        server_path_held(server, local.text, kind == SDATA_STOR, 0,
+        server_path_held(session, local.text, kind == SDATA_STOR, 0,
                          kind != SDATA_LIST))
         return 0;
 
@@ -1175,54 +1228,70 @@ static int server_data_command(FtpServer *server, ServerDataKind kind,
     return 1;
 }
 
-static void server_abort_command(FtpServer *server)
+static void server_abort_command(ServerSession *session)
 {
+    FtpServer *server = session->server;
+    if ((server->data_state == FTP_DATA_ACTIVE || server->pending_accept) &&
+        server->data_session != server_session_index(server, session)) {
+        server_reply(session, 225, "No transfer in progress.");
+        return;
+    }
     if (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) {
         server_close_transfer(server);
         server_close_data(server);
-        server_reply(server, 426, "Transfer aborted.");
-        server_reply(server, 226, "Abort successful.");
+        server_reply(session, 426, "Transfer aborted.");
+        server_reply(session, 226, "Abort successful.");
         server_transfer_event(server, 0, FTP_CAUSE_USER, "ABORTED");
         return;
     }
 
     if (server->data_state != FTP_DATA_NONE) {
         server_disarm(server);
-        server_reply(server, 225, "No transfer in progress.");
+        server_reply(session, 225, "No transfer in progress.");
         return;
     }
 
-    server_reply(server, 225, "No transfer in progress.");
+    server_reply(session, 225, "No transfer in progress.");
 }
 
-static void server_pasv(FtpServer *server)
+static void server_pasv(ServerSession *session)
 {
+    FtpServer *server = session->server;
     if (server->data_listener == NULL) {
-        server_reply(server, 425, "Cannot open data connection.");
+        server_reply(session, 425, "Cannot open data connection.");
+        return;
+    }
+
+    if ((server->data_state == FTP_DATA_ACTIVE || server->pending_accept ||
+         server->data_state == FTP_DATA_ARMED) &&
+        server->data_session != server_session_index(server, session)) {
+        server_reply(session, 450, "Another client is transferring.");
         return;
     }
 
     server_disarm(server);
     server_drain_listener(server);
+    server->data_session = server_session_index(server, session);
     server->data_state = FTP_DATA_ARMED;
 
     uint32_t a = server->lan_address.addr;
     unsigned p1 = server->data_port / 256;
     unsigned p2 = server->data_port % 256;
-    server_reply(server, 227,
+    server_reply(session, 227,
                  "Entering Passive Mode (%u,%u,%u,%u,%u,%u).", (a >> 24) & 0xFF,
                  (a >> 16) & 0xFF, (a >> 8) & 0xFF, a & 0xFF, p1, p2);
 }
 
-static void server_mlst(FtpServer *server, const char *arg)
+static void server_mlst(ServerSession *session, const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root)) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
@@ -1231,12 +1300,12 @@ static void server_mlst(FtpServer *server, const char *arg)
     const char *name = "/";
 
     if (!is_root) {
-        if (server_path_held(server, local.text, 0, 0, 0))
+        if (server_path_held(session, local.text, 0, 0, 0))
             return;
         PathRisk risk = PATH_RISK_NORMAL;
         if (path_check_read(local.text, 1, &risk) != PATH_OK ||
             server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK) {
-            server_reply(server, 550, "Not found.");
+            server_reply(session, 550, "Not found.");
             return;
         }
         name = virtual;
@@ -1247,41 +1316,42 @@ static void server_mlst(FtpServer *server, const char *arg)
 
     char line[1024];
     if (!format_mlsd_line(&entry, name, line, sizeof(line))) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
     line[strlen(line) - 2] = '\0';
 
     char head[FTP_PATH_MAX + 32];
     snprintf(head, sizeof(head), "250-Listing %s\r\n ", name);
-    server_append_raw(server, head);
-    server_append_raw(server, line);
-    server_append_raw(server, "\r\n250 End\r\n");
+    server_append_raw(session, head);
+    server_append_raw(session, line);
+    server_append_raw(session, "\r\n250 End\r\n");
 }
 
-static void server_feat(FtpServer *server)
+static void server_feat(ServerSession *session)
 {
-    server_append_raw(server, "211-Features:\r\n");
-    server_append_raw(server, " MLST type*;size*;modify*;perm*;\r\n");
-    server_append_raw(server, " UTF8\r\n");
-    server_append_raw(server, "211 End\r\n");
+    server_append_raw(session, "211-Features:\r\n");
+    server_append_raw(session, " MLST type*;size*;modify*;perm*;\r\n");
+    server_append_raw(session, " UTF8\r\n");
+    server_append_raw(session, "211 End\r\n");
 }
 
-static void server_handle_cwd(FtpServer *server, const char *arg)
+static void server_handle_cwd(ServerSession *session, const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root)) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
     if (is_root) {
-        snprintf(server->cwd, sizeof(server->cwd), "/");
-        server_reply(server, 250, "Directory changed.");
+        snprintf(session->cwd, sizeof(session->cwd), "/");
+        server_reply(session, 250, "Directory changed.");
         return;
     }
 
@@ -1290,34 +1360,35 @@ static void server_handle_cwd(FtpServer *server, const char *arg)
     if (path_check_read(local.text, 1, &risk) != PATH_OK ||
         server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK ||
         entry.type != FS_ENTRY_DIR) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
-    snprintf(server->cwd, sizeof(server->cwd), "%s", virtual);
-    server_reply(server, 250, "Directory changed.");
+    snprintf(session->cwd, sizeof(session->cwd), "%s", virtual);
+    server_reply(session, 250, "Directory changed.");
 }
 
-static void server_handle_cdup(FtpServer *server)
+static void server_handle_cdup(ServerSession *session)
 {
+    FtpServer *server = session->server;
     char next[FTP_PATH_MAX];
-    if (!ftp_remote_normalize(server->cwd, "..", next, sizeof(next))) {
-        server_reply(server, 550, "Not found.");
+    if (!ftp_remote_normalize(session->cwd, "..", next, sizeof(next))) {
+        server_reply(session, 550, "Not found.");
         return;
     }
     if (strcmp(next, "/") == 0) {
-        snprintf(server->cwd, sizeof(server->cwd), "/");
-        server_reply(server, 250, "Directory changed.");
+        snprintf(session->cwd, sizeof(session->cwd), "/");
+        server_reply(session, 250, "Directory changed.");
         return;
     }
 
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
-    if (!server_resolve(server, next, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, next, virtual, sizeof(virtual), &local,
                         &is_root) ||
         is_root) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
@@ -1326,136 +1397,141 @@ static void server_handle_cdup(FtpServer *server)
     if (path_check_read(local.text, 1, &risk) != PATH_OK ||
         server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK ||
         entry.type != FS_ENTRY_DIR) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
-    snprintf(server->cwd, sizeof(server->cwd), "%s", virtual);
-    server_reply(server, 250, "Directory changed.");
+    snprintf(session->cwd, sizeof(session->cwd), "%s", virtual);
+    server_reply(session, 250, "Directory changed.");
 }
 
-static void server_handle_mkd(FtpServer *server, const char *arg)
+static void server_handle_mkd(ServerSession *session, const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root) ||
         is_root) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
     PathRisk risk = PATH_RISK_NORMAL;
     if (path_check_write(local.text, 1, &risk) != PATH_OK) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    if (server_path_held(server, local.text, 1, 0, 0))
+    if (server_path_held(session, local.text, 1, 0, 0))
         return;
 
     if (server->fs->mkdir(server->fs->ctx, local.text) != FS_OK) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    server_reply(server, 250, "Directory created.");
+    server_reply(session, 250, "Directory created.");
 }
 
-static void server_handle_dele(FtpServer *server, const char *arg)
+static void server_handle_dele(ServerSession *session, const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root) ||
         is_root) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
     PathRisk risk = PATH_RISK_NORMAL;
     if (path_check_delete(local.text, 1, &risk) != PATH_OK) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    if (server_path_held(server, local.text, 1, 1, 0))
+    if (server_path_held(session, local.text, 1, 1, 0))
         return;
 
     if (server->fs->remove(server->fs->ctx, local.text) != FS_OK) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    server_reply(server, 250, "File deleted.");
+    server_reply(session, 250, "File deleted.");
 }
 
-static void server_handle_rmd(FtpServer *server, const char *arg)
+static void server_handle_rmd(ServerSession *session, const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root) ||
         is_root) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
     PathRisk risk = PATH_RISK_NORMAL;
     if (path_check_delete(local.text, 1, &risk) != PATH_OK) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    if (server_path_held(server, local.text, 1, 1, 0))
+    if (server_path_held(session, local.text, 1, 1, 0))
         return;
 
     if (server->fs->rmdir(server->fs->ctx, local.text) != FS_OK) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    server_reply(server, 250, "Directory removed.");
+    server_reply(session, 250, "Directory removed.");
 }
 
-static void server_handle_rnfr(FtpServer *server, const char *arg)
+static void server_handle_rnfr(ServerSession *session, const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    server->rnfr_valid = 0;
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    session->rnfr_valid = 0;
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root) ||
         is_root) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
     PathRisk risk = PATH_RISK_NORMAL;
     if (path_check_delete(local.text, 1, &risk) != PATH_OK) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    if (server_path_held(server, local.text, 1, 1, 0))
+    if (server_path_held(session, local.text, 1, 1, 0))
         return;
 
     FsEntry entry;
     if (server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
-    snprintf(server->rnfr_local, sizeof(server->rnfr_local), "%s", local.text);
-    snprintf(server->rnfr_virtual, sizeof(server->rnfr_virtual), "%s", virtual);
-    server->rnfr_valid = 1;
-    server_reply(server, 350, "Ready for destination name.");
+    snprintf(session->rnfr_local, sizeof(session->rnfr_local), "%s", local.text);
+    snprintf(session->rnfr_virtual, sizeof(session->rnfr_virtual), "%s", virtual);
+    session->rnfr_valid = 1;
+    server_reply(session, 350, "Ready for destination name.");
 }
 
-static void server_handle_rnto(FtpServer *server, const char *arg)
+static void server_handle_rnto(ServerSession *session, const char *arg)
 {
-    if (!server->rnfr_valid) {
-        server_reply(server, 503, "RNFR required first.");
+    FtpServer *server = session->server;
+    if (!session->rnfr_valid) {
+        server_reply(session, 503, "RNFR required first.");
         return;
     }
 
@@ -1464,46 +1540,47 @@ static void server_handle_rnto(FtpServer *server, const char *arg)
     int is_root = 0;
     int ok = 0;
 
-    if (server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (server_resolve(session, arg, virtual, sizeof(virtual), &local,
                        &is_root) &&
         !is_root) {
         PathRisk risk = PATH_RISK_NORMAL;
-        if (path_check_rename(server->rnfr_local, local.text, 1, &risk) ==
+        if (path_check_rename(session->rnfr_local, local.text, 1, &risk) ==
             PATH_OK) {
-            if (server_path_held(server, server->rnfr_local, 1, 1, 0) ||
-                server_path_held(server, local.text, 1, 1, 0)) {
+            if (server_path_held(session, session->rnfr_local, 1, 1, 0) ||
+                server_path_held(session, local.text, 1, 1, 0)) {
                 /* The 450 is already on the wire; a second reply would desync
                  * the client's command/reply pairing. */
-                server->rnfr_valid = 0;
+                session->rnfr_valid = 0;
                 return;
             }
-            ok = server->fs->rename(server->fs->ctx, server->rnfr_local,
+            ok = server->fs->rename(server->fs->ctx, session->rnfr_local,
                                     local.text) == FS_OK;
         }
     }
 
-    server->rnfr_valid = 0;
+    session->rnfr_valid = 0;
     if (!ok) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    server_reply(server, 250, "Renamed.");
+    server_reply(session, 250, "Renamed.");
 }
 
-static void server_handle_size(FtpServer *server, const char *arg)
+static void server_handle_size(ServerSession *session, const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root) ||
         is_root) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
-    if (server_path_held(server, local.text, 0, 0, 0))
+    if (server_path_held(session, local.text, 0, 0, 0))
         return;
 
     PathRisk risk = PATH_RISK_NORMAL;
@@ -1511,26 +1588,27 @@ static void server_handle_size(FtpServer *server, const char *arg)
     if (path_check_read(local.text, 1, &risk) != PATH_OK ||
         server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK ||
         entry.type != FS_ENTRY_FILE || !entry.size_known) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
-    server_reply(server, 213, "%llu", (unsigned long long)entry.size);
+    server_reply(session, 213, "%llu", (unsigned long long)entry.size);
 }
 
-static void server_handle_mdtm(FtpServer *server, const char *arg)
+static void server_handle_mdtm(ServerSession *session, const char *arg)
 {
+    FtpServer *server = session->server;
     char virtual[FTP_PATH_MAX];
     Path local;
     int is_root = 0;
 
-    if (!server_resolve(server, arg, virtual, sizeof(virtual), &local,
+    if (!server_resolve(session, arg, virtual, sizeof(virtual), &local,
                         &is_root) ||
         is_root) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
-    if (server_path_held(server, local.text, 0, 0, 0))
+    if (server_path_held(session, local.text, 0, 0, 0))
         return;
 
     PathRisk risk = PATH_RISK_NORMAL;
@@ -1538,13 +1616,13 @@ static void server_handle_mdtm(FtpServer *server, const char *arg)
     if (path_check_read(local.text, 1, &risk) != PATH_OK ||
         server->fs->stat(server->fs->ctx, local.text, &entry) != FS_OK ||
         entry.type != FS_ENTRY_FILE || !entry.mtime_known) {
-        server_reply(server, 550, "Not found.");
+        server_reply(session, 550, "Not found.");
         return;
     }
 
     char stamp[20];
     format_mdtm(entry.mtime, stamp, sizeof(stamp));
-    server_reply(server, 213, "%s", stamp);
+    server_reply(session, 213, "%s", stamp);
 }
 
 static int server_busy_command(const char *cmd)
@@ -1564,25 +1642,27 @@ static int server_data_command_name(const char *cmd)
            strcmp(cmd, "STOR") == 0;
 }
 
-static void server_handle_command(FtpServer *server, const char *line,
+static void server_handle_command(ServerSession *session, const char *line,
                                   size_t len)
 {
     (void)len;
+    FtpServer *server = session->server;
+    int index = server_session_index(server, session);
 
     char cmd[16];
     const char *space = strchr(line, ' ');
     size_t cmd_len = space != NULL ? (size_t)(space - line) : strlen(line);
     if (cmd_len == 0) {
-        server_reply(server, 500, "Command not understood.");
+        server_reply(session, 500, "Command not understood.");
         return;
     }
-    if (server->tx_backlog && strncmp(line, "ABOR", 4) != 0 &&
+    if (session->tx_backlog && strncmp(line, "ABOR", 4) != 0 &&
         strncmp(line, "QUIT", 4) != 0) {
         server_trace(server, "FTPC DROPPED %s", line);
         return;
     }
     if (cmd_len >= sizeof(cmd)) {
-        server_reply(server, 502, "Command not implemented.");
+        server_reply(session, 502, "Command not implemented.");
         return;
     }
 
@@ -1605,251 +1685,262 @@ static void server_handle_command(FtpServer *server, const char *line,
         arg++;
 
     if (strcmp(cmd, "ABOR") == 0) {
-        server_abort_command(server);
+        server_abort_command(session);
         return;
     }
 
-    if (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) {
-        if (strcmp(cmd, "NOOP") != 0 && strcmp(cmd, "QUIT") != 0 &&
-            strcmp(cmd, "PWD") != 0 && strcmp(cmd, "SIZE") != 0 &&
-            strcmp(cmd, "MDTM") != 0 && strcmp(cmd, "MLST") != 0 &&
-            strcmp(cmd, "ABOR") != 0) {
-            server_reply(server, 450, "Transfer in progress.");
+    int transfer_active =
+        server->data_state == FTP_DATA_ACTIVE || server->pending_accept;
+    if (server->data_state == FTP_DATA_ARMED &&
+        server->data_session != index && server_data_command_name(cmd)) {
+        server_reply(session, 450, "Another client is transferring.");
+        return;
+    }
+    if (transfer_active) {
+        if (server->data_session != index) {
+            /* Another client owns the data slot. Control-only commands stay
+             * available so its browse connection can still navigate. */
+            if (server_busy_command(cmd)) {
+                server_reply(session, 450, "Another client is transferring.");
+                return;
+            }
+        } else if (strcmp(cmd, "NOOP") != 0 && strcmp(cmd, "QUIT") != 0 &&
+                   strcmp(cmd, "PWD") != 0 && strcmp(cmd, "SIZE") != 0 &&
+                   strcmp(cmd, "MDTM") != 0 && strcmp(cmd, "MLST") != 0 &&
+                   strcmp(cmd, "ABOR") != 0) {
+            server_reply(session, 450, "Transfer in progress.");
             return;
         }
     }
 
-    /* An armed PASV connection is invalidated by any non-data command
-     * (KTD5); a refusal must not leave it for the next command to accept. */
+    /* An armed PASV connection is invalidated by a non-data command from its
+     * owner. A different session must not disarm it. */
     if (server->data_state == FTP_DATA_ARMED && !server->pending_accept &&
-        !server_data_command_name(cmd) && strcmp(cmd, "PASV") != 0 &&
-        strcmp(cmd, "ABOR") != 0) {
+        server->data_session == index && !server_data_command_name(cmd) &&
+        strcmp(cmd, "PASV") != 0 && strcmp(cmd, "ABOR") != 0) {
         server_disarm(server);
     }
 
-    if (!server->logged_in && strcmp(cmd, "USER") != 0 &&
+    if (!session->logged_in && strcmp(cmd, "USER") != 0 &&
         strcmp(cmd, "PASS") != 0 && strcmp(cmd, "QUIT") != 0 &&
         strcmp(cmd, "SYST") != 0 && strcmp(cmd, "NOOP") != 0 &&
         strcmp(cmd, "FEAT") != 0) {
-        server_reply(server, 530, "Please login with USER and PASS.");
+        server_reply(session, 530, "Please login with USER and PASS.");
         return;
     }
 
     if (strcmp(cmd, "USER") == 0) {
-        server->user_seen = 1;
-        server->user_ok = ci_equal(arg, "anonymous");
-        server->logged_in = 0;
-        if (server->user_ok)
-            server_reply(server, 331, "Please specify the password.");
+        session->user_seen = 1;
+        session->user_ok = ci_equal(arg, "anonymous");
+        session->logged_in = 0;
+        if (session->user_ok)
+            server_reply(session, 331, "Please specify the password.");
         else
-            server_reply(server, 530, "Login incorrect.");
+            server_reply(session, 530, "Login incorrect.");
         return;
     }
 
     if (strcmp(cmd, "PASS") == 0) {
-        if (!server->user_seen) {
-            server_reply(server, 503, "Login with USER first.");
+        if (!session->user_seen) {
+            server_reply(session, 503, "Login with USER first.");
             return;
         }
-        if (!server->user_ok) {
-            server_reply(server, 530, "Login incorrect.");
+        if (!session->user_ok) {
+            server_reply(session, 530, "Login incorrect.");
             return;
         }
-        server->logged_in = 1;
-        server_reply(server, 230, "Login successful.");
+        session->logged_in = 1;
+        server_reply(session, 230, "Login successful.");
         return;
     }
 
     if (strcmp(cmd, "SYST") == 0) {
-        server_reply(server, 215, "UNIX Type: L8");
+        server_reply(session, 215, "UNIX Type: L8");
         return;
     }
     if (strcmp(cmd, "NOOP") == 0) {
-        server_reply(server, 200, "OK.");
+        server_reply(session, 200, "OK.");
         return;
     }
     if (strcmp(cmd, "OPTS") == 0) {
         if (starts_with_ci(arg, "UTF8"))
-            server_reply(server, 200, "OK.");
+            server_reply(session, 200, "OK.");
         else
-            server_reply(server, 501, "Option not understood.");
+            server_reply(session, 501, "Option not understood.");
         return;
     }
     if (strcmp(cmd, "FEAT") == 0) {
-        server_feat(server);
+        server_feat(session);
         return;
     }
     if (strcmp(cmd, "QUIT") == 0) {
-        server_close_session(server, 1, NULL);
+        server_close_session(server, session, 1, NULL);
         return;
     }
     if (strcmp(cmd, "PWD") == 0) {
-        server_reply(server, 257, "\"%s\" is the current directory.",
-                     server->cwd);
+        server_reply(session, 257, "\"%s\" is the current directory.",
+                     session->cwd);
         return;
     }
     if (strcmp(cmd, "CWD") == 0) {
-        if (server->data_state != FTP_DATA_NONE)
+        if (server->data_state != FTP_DATA_NONE && server->data_session == index)
             server_disarm(server);
-        server_handle_cwd(server, arg);
+        server_handle_cwd(session, arg);
         return;
     }
     if (strcmp(cmd, "CDUP") == 0) {
-        if (server->data_state != FTP_DATA_NONE)
+        if (server->data_state != FTP_DATA_NONE && server->data_session == index)
             server_disarm(server);
-        server_handle_cdup(server);
+        server_handle_cdup(session);
         return;
     }
     if (strcmp(cmd, "TYPE") == 0) {
         if (ci_equal(arg, "I") || ci_equal(arg, "A"))
-            server_reply(server, 200, "Type set.");
+            server_reply(session, 200, "Type set.");
         else
-            server_reply(server, 504, "Type not supported.");
+            server_reply(session, 504, "Type not supported.");
         return;
     }
     if (strcmp(cmd, "MODE") == 0) {
         if (ci_equal(arg, "S"))
-            server_reply(server, 200, "Mode set.");
+            server_reply(session, 200, "Mode set.");
         else
-            server_reply(server, 504, "Mode not supported.");
+            server_reply(session, 504, "Mode not supported.");
         return;
     }
     if (strcmp(cmd, "STRU") == 0) {
         if (ci_equal(arg, "F"))
-            server_reply(server, 200, "Structure set.");
+            server_reply(session, 200, "Structure set.");
         else
-            server_reply(server, 504, "Structure not supported.");
+            server_reply(session, 504, "Structure not supported.");
         return;
     }
     if (strcmp(cmd, "PASV") == 0) {
-        if (server->data_state == FTP_DATA_ACTIVE || server->pending_accept) {
-            server_reply(server, 450, "Transfer in progress.");
-            return;
-        }
-        server_pasv(server);
+        server_pasv(session);
         return;
     }
 
     if (strcmp(cmd, "LIST") == 0) {
         if (server->data_state != FTP_DATA_ARMED && !server->pending_accept) {
-            server_reply(server, 425, "Use PASV first.");
+            server_reply(session, 425, "Use PASV first.");
             return;
         }
-        server_data_command(server, SDATA_LIST, arg);
+        server_data_command(session, SDATA_LIST, arg);
         return;
     }
     if (strcmp(cmd, "NLST") == 0) {
         if (server->data_state != FTP_DATA_ARMED && !server->pending_accept) {
-            server_reply(server, 425, "Use PASV first.");
+            server_reply(session, 425, "Use PASV first.");
             return;
         }
-        server_data_command(server, SDATA_NLST, arg);
+        server_data_command(session, SDATA_NLST, arg);
         return;
     }
     if (strcmp(cmd, "MLSD") == 0) {
         if (server->data_state != FTP_DATA_ARMED && !server->pending_accept) {
-            server_reply(server, 425, "Use PASV first.");
+            server_reply(session, 425, "Use PASV first.");
             return;
         }
-        server_data_command(server, SDATA_MLSD, arg);
+        server_data_command(session, SDATA_MLSD, arg);
         return;
     }
     if (strcmp(cmd, "RETR") == 0) {
         if (server->data_state != FTP_DATA_ARMED && !server->pending_accept) {
-            server_reply(server, 425, "Use PASV first.");
+            server_reply(session, 425, "Use PASV first.");
             return;
         }
-        server_data_command(server, SDATA_RETR, arg);
+        server_data_command(session, SDATA_RETR, arg);
         return;
     }
     if (strcmp(cmd, "STOR") == 0) {
         if (server->data_state != FTP_DATA_ARMED && !server->pending_accept) {
-            server_reply(server, 425, "Use PASV first.");
+            server_reply(session, 425, "Use PASV first.");
             return;
         }
-        server_data_command(server, SDATA_STOR, arg);
+        server_data_command(session, SDATA_STOR, arg);
         return;
     }
 
     if (strcmp(cmd, "MLST") == 0) {
-        server_mlst(server, arg);
+        server_mlst(session, arg);
         return;
     }
     if (strcmp(cmd, "SIZE") == 0) {
-        server_handle_size(server, arg);
+        server_handle_size(session, arg);
         return;
     }
     if (strcmp(cmd, "MDTM") == 0) {
-        server_handle_mdtm(server, arg);
+        server_handle_mdtm(session, arg);
         return;
     }
     if (strcmp(cmd, "MKD") == 0) {
-        server_handle_mkd(server, arg);
+        server_handle_mkd(session, arg);
         return;
     }
     if (strcmp(cmd, "DELE") == 0) {
-        server_handle_dele(server, arg);
+        server_handle_dele(session, arg);
         return;
     }
     if (strcmp(cmd, "RMD") == 0) {
-        server_handle_rmd(server, arg);
+        server_handle_rmd(session, arg);
         return;
     }
     if (strcmp(cmd, "RNFR") == 0) {
-        server_handle_rnfr(server, arg);
+        server_handle_rnfr(session, arg);
         return;
     }
     if (strcmp(cmd, "RNTO") == 0) {
-        server_handle_rnto(server, arg);
+        server_handle_rnto(session, arg);
         return;
     }
     if (strcmp(cmd, "PORT") == 0 || strcmp(cmd, "EPRT") == 0 ||
         strcmp(cmd, "REST") == 0 || strcmp(cmd, "APPE") == 0) {
-        server_reply(server, 502, "Command not implemented.");
+        server_reply(session, 502, "Command not implemented.");
         return;
     }
 
     if (server_busy_command(cmd)) {
-        server_reply(server, 450, "Transfer in progress.");
+        server_reply(session, 450, "Transfer in progress.");
         return;
     }
 
-    server_reply(server, 502, "Command not implemented.");
+    server_reply(session, 502, "Command not implemented.");
 }
 
-static void server_process_control(FtpServer *server)
+static void server_process_control(FtpServer *server, ServerSession *session)
 {
     char buf[512];
     for (;;) {
-        if (server->control == NULL)
+        if (session == NULL || !session->used || session->control == NULL)
             return;
 
         size_t got = 0;
-        NetResult r = server->net->receive(server->net->ctx, server->control,
+        NetResult r = server->net->receive(server->net->ctx, session->control,
                                            buf, sizeof(buf), &got);
         if (r == NET_WOULD_BLOCK)
             return;
         if (r == NET_CLOSED) {
-            server_close_session(server, 0, "CLIENT CLOSED");
+            server_close_session(server, session, 0, "CLIENT CLOSED");
             return;
         }
         if (r != NET_OK) {
-            server_close_session(server, 0, "CONTROL CONNECTION LOST");
+            server_close_session(server, session, 0,
+                                 "CONTROL CONNECTION LOST");
             return;
         }
         if (got == 0)
             return;
 
-        server->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
+        session->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
         for (size_t i = 0; i < got; ++i) {
-            FtpLineResult lr = ftp_line_feed(&server->lines, buf[i]);
+            FtpLineResult lr = ftp_line_feed(&session->lines, buf[i]);
             if (lr == FTP_LINE_READY)
-                server_handle_command(server, server->lines.line,
-                                      server->lines.len);
+                server_handle_command(session, session->lines.line,
+                                      session->lines.len);
             else if (lr == FTP_LINE_OVERFLOW)
-                server_reply(server, 500, "Command line too long.");
+                server_reply(session, 500, "Command line too long.");
 
-            if (server->control == NULL)
+            if (!session->used || session->control == NULL)
                 return;
         }
     }
@@ -1865,43 +1956,49 @@ static void server_accept_control(FtpServer *server)
     if (r != NET_OK || accepted == NULL)
         return;
 
-    if (server->clients != 0) {
+    int slot = -1;
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+        if (!server->sessions[i].used) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot < 0) {
+        server_trace_peer(server, "FTPD CONTROL FULL", peer);
         server->state = FTP_SERVER_REFUSING;
         server_state_event(server);
         size_t sent = 0;
-        NetResult sr = server->net->send(server->net->ctx, accepted,
-                                         "450 Busy.\r\n", 11, &sent);
+        const char *busy = "450 Busy: four clients at a time.\r\n";
+        NetResult sr = server->net->send(server->net->ctx, accepted, busy,
+                                         strlen(busy), &sent);
         if (sr == NET_WOULD_BLOCK)
-            (void)server->net->send(server->net->ctx, accepted,
-                                    "450 Busy.\r\n", 11, &sent);
+            (void)server->net->send(server->net->ctx, accepted, busy,
+                                    strlen(busy), &sent);
         server->net->close(server->net->ctx, accepted);
-        server->state = FTP_SERVER_SESSION;
+        if (server->clients > 0)
+            server->state = FTP_SERVER_SESSION;
         server_state_event(server);
         return;
     }
 
     server_trace_peer(server, "FTPD CONTROL", peer);
-    server->control = accepted;
-    server->control_peer = peer;
-    server->clients = 1;
+    ServerSession *session = &server->sessions[slot];
+    memset(session, 0, sizeof(*session));
+    session->server = server;
+    session->used = 1;
+    session->control = accepted;
+    session->peer = peer;
+    session->cwd[0] = '/';
+    session->cwd[1] = '\0';
+    session->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
+    ftp_line_init(&session->lines);
+    server->last_peer = peer;
+    server->clients++;
     server->state = FTP_SERVER_SESSION;
-    server->user_seen = 0;
-    server->user_ok = 0;
-    server->logged_in = 0;
-    server->rnfr_valid = 0;
-    server->control_deadline = server_now(server) + SERVER_CONTROL_IDLE_MS;
-    server->tx_backlog = 0;
-    snprintf(server->cwd, sizeof(server->cwd), "/");
-    ftp_line_init(&server->lines);
-    server->tx_len = 0;
-    server->tx_off = 0;
-    server->data_state = FTP_DATA_NONE;
-    server->pending_accept = 0;
-    server_close_transfer(server);
     server_emit_state_and_client(server);
-    server_reply(server, 220, "vitaFTPShell ready.");
+    server_reply(session, 220, "vitaFTPShell ready.");
 }
-
 FtpServer *ftp_server_create(NetPort *net, FsPort *fs, ClockPort *clock,
                              FtpServerEventFn emit, void *emit_ctx)
 {
@@ -1919,8 +2016,7 @@ FtpServer *ftp_server_create(NetPort *net, FsPort *fs, ClockPort *clock,
     server->emit_ctx = emit_ctx;
     server->state = FTP_SERVER_OFF;
     server->data_state = FTP_DATA_NONE;
-    snprintf(server->cwd, sizeof(server->cwd), "/");
-    ftp_line_init(&server->lines);
+    server->data_session = -1;
     return server;
 }
 
@@ -2016,8 +2112,13 @@ void ftp_server_tick(FtpServer *server, unsigned wait_ms)
         }
     }
 
-    server_flush(server);
-    if (server->control == NULL && server->clients == 0) {
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+        ServerSession *session = &server->sessions[i];
+        if (session->used)
+            server_flush(session);
+    }
+
+    if (server->clients == 0) {
         if (server->control_listener == NULL)
             return;
         NetWaitSet set;
@@ -2026,21 +2127,27 @@ void ftp_server_tick(FtpServer *server, unsigned wait_ms)
         set.items[0].socket = server->control_listener;
         set.items[0].flags = NET_WAIT_READ;
         NetReadySet ready;
-        if (server->net->wait(server->net->ctx, &set, wait_ms, &ready) == NET_OK &&
+        if (server->net->wait(server->net->ctx, &set, wait_ms, &ready) ==
+                NET_OK &&
             ready.count > 0)
             server_accept_control(server);
-        server_flush(server);
+        for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+            if (server->sessions[i].used)
+                server_flush(&server->sessions[i]);
+        }
         return;
     }
 
-    if (server->control == NULL)
-        return;
-
     NetWaitSet set;
     memset(&set, 0, sizeof(set));
-    set.items[set.count].socket = server->control;
-    set.items[set.count].flags = NET_WAIT_READ;
-    set.count++;
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+        ServerSession *session = &server->sessions[i];
+        if (!session->used || session->control == NULL)
+            continue;
+        set.items[set.count].socket = session->control;
+        set.items[set.count].flags = NET_WAIT_READ;
+        set.count++;
+    }
     if (server->data != NULL &&
         (server->data_state == FTP_DATA_ACTIVE ||
          server->data_state == FTP_DATA_ACCEPTED)) {
@@ -2070,49 +2177,61 @@ void ftp_server_tick(FtpServer *server, unsigned wait_ms)
 
     /* Control first: an ABOR must be able to stop the data pump. */
     for (unsigned i = 0; i < ready.count; ++i) {
-        if (ready.items[i].socket == server->control)
-            server_process_control(server);
+        NetSocket *socket = ready.items[i].socket;
+        if (socket == server->control_listener || socket == server->data ||
+            socket == server->data_listener)
+            continue;
+        for (int s = 0; s < SERVER_MAX_CLIENTS; ++s) {
+            ServerSession *session = &server->sessions[s];
+            if (session->used && session->control == socket) {
+                server_process_control(server, session);
+                break;
+            }
+        }
     }
 
-    if (server->control == NULL)
-        return;
-
-    if (ready.count > 0) {
-        for (unsigned i = 0; i < ready.count; ++i) {
-            if (ready.items[i].socket == server->control_listener)
-                server_accept_control(server);
-        }
+    for (unsigned i = 0; i < ready.count; ++i) {
+        if (ready.items[i].socket == server->control_listener)
+            server_accept_control(server);
     }
 
     if (server->pending_accept && server->data_state == FTP_DATA_ARMED)
         server_try_accept(server);
 
     server_pump_data(server);
-    server_flush(server);
 
     now = server_now(server);
-    if (server->control != NULL &&
-        (server->data_state == FTP_DATA_ACTIVE ||
-         server->data_state == FTP_DATA_ACCEPTED))
-        server->control_deadline = now + SERVER_CONTROL_IDLE_MS;
-
-    if (server->control != NULL && server->clients == 1 &&
-        now >= server->control_deadline) {
-        server_reply(server, 421, "Idle timeout.");
-        server_flush(server);
-        server_close_session(server, 0, "IDLE TIMEOUT");
-        return;
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+        ServerSession *session = &server->sessions[i];
+        if (!session->used)
+            continue;
+        int owns_data =
+            (server->data_state == FTP_DATA_ACTIVE ||
+             server->data_state == FTP_DATA_ACCEPTED) &&
+            server->data_session == i;
+        if (owns_data)
+            session->control_deadline = now + SERVER_CONTROL_IDLE_MS;
+        if (now >= session->control_deadline) {
+            server_reply(session, 421, "Idle timeout.");
+            server_flush(session);
+            server_close_session(server, session, 0, "IDLE TIMEOUT");
+        }
     }
 
     if (server->pending_accept && now >= server->pending_deadline) {
+        ServerSession *owner = server_data_owner(server);
         server_trace(server, "FTPD ACCEPT TIMEOUT");
-        server_reply(server, 425, "Cannot open data connection.");
+        if (owner != NULL)
+            server_reply(owner, 425, "Cannot open data connection.");
         server_disarm(server);
     }
     if (server->data_state == FTP_DATA_ACTIVE && now >= server->data_deadline)
         server_data_error(server, 426, FTP_CAUSE_NETWORK, "DATA IDLE 15S");
 
-    server_flush(server);
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+        if (server->sessions[i].used)
+            server_flush(&server->sessions[i]);
+    }
 }
 
 FtpServerState ftp_server_state(const FtpServer *server)
@@ -2139,7 +2258,7 @@ uint16_t ftp_server_control_port(const FtpServer *server)
 NetAddress ftp_server_peer(const FtpServer *server)
 {
     NetAddress none = {0, 0};
-    return server != NULL ? server->control_peer : none;
+    return server != NULL ? server->last_peer : none;
 }
 
 const char *ftp_server_last_command(const FtpServer *server)

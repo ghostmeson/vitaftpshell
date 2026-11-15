@@ -366,9 +366,9 @@ same name (D41).
 ### Client
 
 A 582, 288, 360 × 140 panel. `CLIENT` at 596, 296; `CONNECTED` green at the
-right when a client is on. With no client, `NO CLIENT` and `ONE CLIENT AT A
+right when a client is on. With no client, `NO CLIENT` and `UP TO 4 CLIENTS` at
 TIME`. With a client: the IP at 320, the operation at 342 and its path at 345.5,
-the bytes or `NO TRANSFER` at 362, and `ONE CLIENT AT A TIME` at 382.
+the bytes or `NO TRANSFER` at 362, and `UP TO 4 CLIENTS` at 382.
 
 ### Dock and legend
 

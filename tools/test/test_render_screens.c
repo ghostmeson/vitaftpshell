@@ -338,7 +338,7 @@ static void test_server(void)
     CHECK(trace_has_text("THE SERVER IS OFF AT LAUNCH."));
     CHECK(trace_has_text("NO CLIENT"));
     CHECK(trace_text_at("NO CLIENT", 596.0f, 320.0f));
-    CHECK(trace_text_at("ONE CLIENT AT A TIME", 596.0f, 342.0f));
+    CHECK(trace_text_at("UP TO 4 CLIENTS", 596.0f, 342.0f));
     CHECK(trace_text_at_color("START SERVER", 32.0f + (488.0f -
                               font_width("START SERVER", PX_LABEL)) * 0.5f,
                               340.0f + (40.0f - 14.0f) * 0.5f, C_FIELD));
@@ -378,7 +378,7 @@ static void test_server(void)
     CHECK(trace_text_at("192.168.1.50", 596.0f, 320.0f));
     CHECK(trace_text_at("UPLOAD", 596.0f, 342.0f));
     CHECK(trace_has_text("1.2 MB OF 29.5 MB"));
-    CHECK(trace_text_at("ONE CLIENT AT A TIME", 596.0f, 382.0f));
+    CHECK(trace_text_at("UP TO 4 CLIENTS", 596.0f, 382.0f));
     CHECK(trace_has_text_color("1 CLIENT", C_WHITE));
 
     s_state.server.run = UI_SERVER_OFF;
