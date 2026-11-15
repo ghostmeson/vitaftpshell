@@ -311,6 +311,13 @@ static void workspace_states(void)
     save_state("workspace-two-lanes", &state);
 
     base(&state);
+    state.local_shown = 1;
+    state.local_dock.waiting = 1;
+    state.local_dock.direction = XFER_DIR_LOCAL_COPY;
+    state.dock_primary = UI_DOCK_LANE_LOCAL;
+    save_state("workspace-waiting", &state);
+
+    base(&state);
     state.active_pane = UI_PANE_LOCAL;
     state.panes[UI_PANE_LOCAL].empty = 1;
     state.panes[UI_PANE_LOCAL].row_count = 0;

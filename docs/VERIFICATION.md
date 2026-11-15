@@ -17,7 +17,7 @@ cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
 **Build:** `vitaftpshell-v01.00-b55.vpk`
 **SHA-256:** `84e5ed73a8a6d6be73973d544cb4f19dd1dfe401bd972892542821907e4d2349`
 
-Twenty-one host suites pass with zero warnings and the preview renders 39
+Twenty-one host suites pass with zero warnings and the preview renders 40
 states. The threaded app test runs the real worker pthread, observes the first
 listing through the handoff, and joins on quit. The ASan/UBSan build of the
 integration suite and the threaded test is clean. A TSan run of the threaded
