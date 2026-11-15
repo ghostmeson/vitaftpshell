@@ -11,6 +11,22 @@ This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
 
+## b55 host run (review remediation)
+
+**Date:** 2026-11-15
+**Build:** `vitaftpshell-v01.00-b55.vpk`
+**SHA-256:** `84e5ed73a8a6d6be73973d544cb4f19dd1dfe401bd972892542821907e4d2349`
+
+Twenty host suites pass with zero warnings and the preview renders 39 states.
+The stack gate reports `handle_action` 6,656 B, the fixed chain 21,628 B, the
+folder-scan product 1,188 B, and the UI dispatch frame 80 B. The U1-U10 work
+adds the local-open failure and retry, two lanes with a held download, the
+WAIT resume re-check, prompt identity, a 6 KiB tick, the foreign data peer and
+its deadline, the 30 s idle close, the sidecar predicates and refusal, and the
+rename ASK/SKIP plans.
+
+M1-M13 on b55 remain `PENDING`; the project stays `building`.
+
 ## b49 host run (b41 parallel lanes)
 
 **Date:** 2026-11-14

@@ -1569,7 +1569,7 @@ word, in yellow.
 ## D72. One local job may run beside one network transfer
 
 **Date:** 2026-11-14
-**Status:** accepted; b41 implementation pending.
+**Status:** accepted; b49 ships the lanes, b55 the corrected local guard.
 
 **Context:** R38 and D9 gave one slot to the client, the server, and local work.
 A local copy therefore stalled or was refused while a transfer ran, although the
@@ -1599,7 +1599,7 @@ reservation table owns mutual exclusion.
 ## D73. A path collision is a confirm, not a silent refusal
 
 **Date:** 2026-11-14
-**Status:** accepted; b41 implementation pending. Supersedes the R67 interrupt
+**Status:** accepted; b49 ships the lanes, b55 the corrected local guard. Supersedes the R67 interrupt
 list.
 
 **Context:** With two lanes, a later operation can target a path the first one
@@ -1795,3 +1795,41 @@ private `.old` and `.tmp` names inside the app data folder.
 outside the app with a sidecar name is still removed by the next write to its
 base name; that open risk is recorded in `docs/FIXES.md`. The local pane can
 still show the store's `.old` debris.
+
+## D82. The local lane starts beside the network lane
+
+**Date:** 2026-11-15
+**Status:** accepted; b55.
+
+**Context:** D72 says a local job and a network transfer may run together, but
+the worker still refused every local action while a network transfer or server
+data command was active. The refusal also began a local batch before refusing
+it, so a later CANCEL reported a job that never started.
+
+**Decision:** `handle_action` refuses only when a local run or a held local plan
+owns the lane. It begins the batch after that guard. Cross-lane overlap is the
+reservation table's decision: a colliding item asks WAIT/SKIP/CANCEL on either
+lane, and a WAIT holds the item head-of-line with a visible WAITING state.
+
+**Consequences:** The last single-slot refusal is gone; D9 and D51's matching
+clauses are superseded. The network lane can wait on a local hold and the local
+lane on a network hold, and neither stops the other.
+
+## D83. A confirm carries the prompt it answers
+
+**Date:** 2026-11-15
+**Status:** accepted; b55.
+
+**Context:** The worker latched one pending prompt and consumed any
+`UI_CMD_CONFIRM`, ignoring which dialog the answer came from. A site-delete or
+stop-server answer arriving while a transfer prompt was deferred cleared the
+wrong state and neither action applied.
+
+**Decision:** Every worker confirm request carries a sequence. `PendingWork`
+remembers it, the reducer echoes it on the emitted command, and the worker
+accepts only its own id. A mismatch falls through to the local branches and
+leaves the deferred prompt latched, so the app shows it when the screen frees.
+
+**Consequences:** A local dialog can no longer satisfy a transfer prompt, and
+the same-kind ambiguity between the three transfer prompts is closed. UI-owned
+dialogs emit id 0.

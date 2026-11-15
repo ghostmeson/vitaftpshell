@@ -50,10 +50,10 @@ removes the 64 KiB `handle_action` array and the recursive batch call, enforces
 a worker-stack budget in `build.sh`, turns a refused sync into a recorded hint,
 counts refused batch items, and reads `FAILED` on a total failure. b43 has run
 on the console (operator report, 2026-11-14): copy, paste, new folder, rename,
-and download work, and the dock words read correctly in green. b49 adds the
-parallel lanes (resumable executor, reservations, server 450, two-lane dock) and
-is built and host-tested, not yet on hardware. M13 and M10 are partly observed;
-the project stays `building` until every row has a recorded PASS.
+and download work, and the dock words read correctly in green. b55 carries the
+review remediation (U1-U10) and is built and host-tested, not yet on hardware.
+M13 and M10 are partly observed; the project stays `building` until every row
+has a recorded PASS.
 
 ## Users
 
@@ -139,5 +139,5 @@ sessions, connect-to-first-listing, and server-matrix pass.
 | Controller-only density | Design phase reviews each screen before implementation |
 | Cross-volume batch move is not all-or-nothing | Each file is atomic; a batch failure leaves completed moves and reports `n OF m MOVED`, never deletes a moved file (D45) |
 | Planner and handoff caps are finite | A plan that overflows the arena or step table is refused, never truncated; a lost command is counted (D46) |
-| One transfer slot is shared by the client, the server, and local operations | The worker gates the client pump on the server and sets the server's external-busy flag while an app transfer owns the slot (D51) |
+| One network transfer and one local job may run together; the reservation table owns mutual exclusion | The worker runs both lanes, the server is external-busy while the network lane is active, and a colliding path asks WAIT/SKIP/CANCEL (D72) |
 | GPLv3 boundary | Keep the license and third-party notices intact; document provenance |

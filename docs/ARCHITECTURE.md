@@ -127,9 +127,11 @@ arena.
 
 **Operations and state (U8/U16/U17/U9/U15).**
 
-- `src/core/xfer.c` is the one slot: an ordered queue of descriptors, one active
-  item, one busy fact, the R41 decision recorded once per batch, and a latched
-  terminal outcome. It never touches a file or a peer.
+- `src/core/xfer.c` is the network transfer queue: an ordered queue of
+  descriptors, one active item, one busy fact, the R41 decision recorded once
+  per batch, and a latched terminal outcome. It never touches a file or a peer.
+  A local job runs beside it when canonical paths do not overlap; `reserve.c`
+  owns the cross-lane exclusion (D72).
 - `src/core/fsop_plan.c` is pure planning. It takes the action, the sources, the
   destination, and the directory facts, and returns ordered steps, a rollback
   list, the conflict gate, and per-step risk. It never calls `FsPort`; a
@@ -184,10 +186,11 @@ arena.
 - In the product the worker runs on a POSIX thread. The host integration test
   passes `worker_thread = 0` and calls `worker_step` inline through `app_tick`;
   the same worker code runs either way (D49).
-- The worker marks the server external-busy while an app-side transfer or queue
-  owns the one slot, so a PC data command answers 450 (D51). A local action
-  refuses while a transfer or server data command is active, and refuses a plan
-  whose facts overflow the scan cap rather than planning a subset.
+- The worker marks the server external-busy while the network lane is active,
+  so a PC data command answers 450 on a held path (D72). A local action starts
+  while the network lane runs; the reservation table sends a collision to the
+  WAIT/SKIP/CANCEL prompt, and a plan whose facts overflow the scan cap is
+  refused rather than planned as a subset.
 - A local action command carries a batch id, item index, total, and last flag.
   The worker collects the set, probes each destination once, asks one conflict
   question naming every existing path, then runs one plan per item. The
@@ -227,7 +230,8 @@ Two threads (D38).
 | Main | `UiState`, input, drawing | Open a socket, touch a file, wait on the worker |
 | Worker | Client session, server state and slot, transfer queue, local batch, all file and network I/O | Draw, read UI state |
 
-The worker is created with a 128 KiB stack (D57). `fsop_run` keeps its 8 KiB
+The worker is created with a 192 KiB stack (D77; D57 recorded the earlier
+128 KiB). `fsop_run` keeps its 8 KiB
 copy buffer in a separate `noinline` function so a rename does not reserve it;
 a local-action frame is budgeted against that stack.
 
@@ -483,7 +487,7 @@ asserts:
 - site round-trip, corrupt-file handling, atomic save, log formatting, and
   rotation;
 - the client and the server against a scripted peer in each direction;
-- queue order, the single slot, the conflict decision, terminal latching, and
+- queue order, the active network item, the conflict decision, and
   the fake-job walk;
 - planner order, merge, the conflict gate, the copy-into-itself refusal, the
   volume-root refusal, protected deletes, risk flags, and the plan caps;
@@ -540,7 +544,7 @@ depends on it, naming the claim and the reason. The open ones:
   KTD12 if it does not.
 - [C] IME dialog init sequence, first NONE window, and masked text behavior
   (D56).
-- [C] `pthread_attr_setstacksize` accepts a 128 KiB worker stack on the Vita
+- [C] `pthread_attr_setstacksize` accepts a 192 KiB worker stack on the Vita
   (D57); the app falls back to the pthread default if it does not.
 
 ## GPLv3 boundary
