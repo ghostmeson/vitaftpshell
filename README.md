@@ -140,10 +140,10 @@ refuses (D32).
 These are product rules, enforced in the policy layer and the screens as they
 land:
 
-- The server is **OFF at launch**. Starting it is an explicit action, and its ON
-  state and client count stay visible. The warning states that anonymous clients
-  can read and write the exposed volumes; `ur0:tai/boot_config.txt` is named
-  as denied.
+- The server is **OFF at launch**. Starting it is an explicit action, and its
+  ON state, `ACCESS READ-WRITE` readout, and client count stay visible. The
+  SERVER warning panel is removed (D88); this README and the project docs still
+  state the anonymous exposure and the `ur0:tai/boot_config.txt` denial.
 - The server denies all access to `ur0:tai/boot_config.txt`. It may read and
   write the app data folder and the `tai` folders (D87).
 - The local manager may write inside `ur0:tai` and `ux0:tai` without the

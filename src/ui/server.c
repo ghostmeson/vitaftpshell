@@ -97,30 +97,6 @@ static void status_draw(const UiState *state, const LayoutRect *r)
             server->focus_start, PX_LABEL);
 }
 
-static void warning_draw(const LayoutRect *r)
-{
-    Rect panel = {(float)r->x, (float)r->y, (float)r->w, (float)r->h};
-    ui_panel_frame(panel, 0, C_YELLOW);
-
-    font_text_tracked("WARNING", 596.0f, 84.0f, PX_LABEL, C_YELLOW, 2.0f);
-
-    static const char *const yellow[] = {
-        "ANONYMOUS CLIENTS CAN READ",
-        "AND WRITE UX0:, UR0:, AND UMA0.",
-    };
-    static const char *const dim[] = {
-        "UR0:TAI/BOOT_CONFIG.TXT IS DENIED.",
-        "AN UPLOAD REPLACES A FILE OF THE",
-        "SAME NAME.",
-        "THE SERVER IS OFF AT LAUNCH.",
-        "STOPPING CLOSES THE LISTENER",
-        "AND THE ACTIVE SESSION.",
-    };
-
-    ui_lines(yellow, 2, 596.0f, 108.0f, 16.0f, PX_MICRO, C_YELLOW);
-    ui_lines(dim, 6, 596.0f, 140.0f, 16.0f, PX_MICRO, C_DIM);
-}
-
 static void client_draw(const UiState *state, const LayoutRect *r)
 {
     const UiServer *server = &state->server;
@@ -128,23 +104,23 @@ static void client_draw(const UiState *state, const LayoutRect *r)
     Rect panel = {(float)r->x, (float)r->y, (float)r->w, (float)r->h};
     ui_panel_frame(panel, 0, C_CYAN);
 
-    font_text_tracked("CLIENT", 596.0f, 296.0f, PX_LABEL, C_DIM, 2.0f);
+    font_text_tracked("CLIENT", 596.0f, 84.0f, PX_LABEL, C_DIM, 2.0f);
 
     if (!server->client_active) {
-        font_text("NO CLIENT", 596.0f, 320.0f, PX_LABEL, C_DIM);
-        font_text("UP TO 4 CLIENTS", 596.0f, 342.0f, PX_MICRO, C_DIM);
+        font_text("NO CLIENT", 596.0f, 108.0f, PX_LABEL, C_DIM);
+        font_text("UP TO 4 CLIENTS", 596.0f, 130.0f, PX_MICRO, C_DIM);
         return;
     }
 
-    font_text_right("CONNECTED", 928.0f, 299.5f, PX_MICRO, C_GREEN);
+    font_text_right("CONNECTED", 928.0f, 87.5f, PX_MICRO, C_GREEN);
     font_text(server->client_addr[0] != '\0' ? server->client_addr : "--",
-              596.0f, 320.0f, PX_LABEL, C_WHITE);
+              596.0f, 108.0f, PX_LABEL, C_WHITE);
 
     const char *op = server->client_op[0] != '\0' ? server->client_op
                                                   : "BROWSING";
-    font_text(op, 596.0f, 342.0f, PX_LABEL, C_WHITE);
+    font_text(op, 596.0f, 130.0f, PX_LABEL, C_WHITE);
     font_text(server->client_path, 596.0f + font_width(op, PX_LABEL) + 10.0f,
-              345.5f, PX_MICRO, C_CYAN);
+              133.5f, PX_MICRO, C_CYAN);
 
     char bytes[96];
     if (server->client_total_known) {
@@ -153,12 +129,12 @@ static void client_draw(const UiState *state, const LayoutRect *r)
         fmt_size(done, sizeof(done), server->client_bytes, 1);
         fmt_size(total, sizeof(total), server->client_total, 1);
         snprintf(bytes, sizeof(bytes), "%s OF %s", done, total);
-        font_text(bytes, 596.0f, 362.0f, PX_MICRO, C_WHITE);
+        font_text(bytes, 596.0f, 150.0f, PX_MICRO, C_WHITE);
     } else {
-        font_text("NO TRANSFER", 596.0f, 362.0f, PX_MICRO, C_DIM);
+        font_text("NO TRANSFER", 596.0f, 150.0f, PX_MICRO, C_DIM);
     }
 
-    font_text("UP TO 4 CLIENTS", 596.0f, 382.0f, PX_MICRO, C_DIM);
+    font_text("UP TO 4 CLIENTS", 596.0f, 170.0f, PX_MICRO, C_DIM);
 }
 
 static void dock_server(const UiState *state)
@@ -229,12 +205,11 @@ void server_draw(const UiState *state)
 
     unsigned count = 0;
     const LayoutRect *r = layout_regions(LAYOUT_SERVER, &count);
-    if (count < 6)
+    if (count < 5)
         return;
 
     status_draw(state, &r[1]);
-    warning_draw(&r[2]);
-    client_draw(state, &r[3]);
+    client_draw(state, &r[2]);
     dock_server(state);
     legend_draw(state);
 }

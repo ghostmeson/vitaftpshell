@@ -314,8 +314,7 @@ static void test_server(void)
     render();
 
     CHECK(trace_has_rect(18.0f, 76.0f, 552.0f, 352.0f, C_PANEL));
-    CHECK(trace_has_rect(582.0f, 76.0f, 360.0f, 200.0f, C_PANEL));
-    CHECK(trace_has_rect(582.0f, 288.0f, 360.0f, 140.0f, C_PANEL));
+    CHECK(trace_has_rect(582.0f, 76.0f, 360.0f, 352.0f, C_PANEL));
     CHECK(trace_text_at("STATUS", 32.0f, 84.0f));
     CHECK(trace_text_at_color("OFF", 32.0f, 108.0f, C_DIM));
     CHECK(trace_text_at("FTP://", 32.0f, 166.5f));
@@ -330,13 +329,10 @@ static void test_server(void)
     CHECK(trace_text_right("0", 538.0f, 244.0f, PX_VALUE, C_WHITE));
     CHECK(trace_text_at("ACCESS", 32.0f, 278.0f));
     CHECK(trace_text_right("READ-WRITE", 538.0f, 274.0f, PX_VALUE, C_WHITE));
-    CHECK(trace_has_text("ANONYMOUS CLIENTS CAN READ"));
-    CHECK(trace_has_text("AND WRITE UX0:, UR0:, AND UMA0."));
-    CHECK(trace_has_text("UR0:TAI/BOOT_CONFIG.TXT IS DENIED."));
-    CHECK(trace_has_text("THE SERVER IS OFF AT LAUNCH."));
+    CHECK(trace_text_at("CLIENT", 596.0f, 84.0f));
     CHECK(trace_has_text("NO CLIENT"));
-    CHECK(trace_text_at("NO CLIENT", 596.0f, 320.0f));
-    CHECK(trace_text_at("UP TO 4 CLIENTS", 596.0f, 342.0f));
+    CHECK(trace_text_at("NO CLIENT", 596.0f, 108.0f));
+    CHECK(trace_text_at("UP TO 4 CLIENTS", 596.0f, 130.0f));
     CHECK(trace_text_at_color("START SERVER", 32.0f + (488.0f -
                               font_width("START SERVER", PX_LABEL)) * 0.5f,
                               340.0f + (40.0f - 14.0f) * 0.5f, C_FIELD));
@@ -372,11 +368,11 @@ static void test_server(void)
     CHECK(trace_has_text("RUNNING"));
     CHECK(trace_has_text("1 CLIENT"));
     CHECK(trace_has_text("X TO STOP"));
-    CHECK(trace_text_right("CONNECTED", 928.0f, 299.5f, PX_MICRO, C_GREEN));
-    CHECK(trace_text_at("192.168.1.50", 596.0f, 320.0f));
-    CHECK(trace_text_at("UPLOAD", 596.0f, 342.0f));
+    CHECK(trace_text_right("CONNECTED", 928.0f, 87.5f, PX_MICRO, C_GREEN));
+    CHECK(trace_text_at("192.168.1.50", 596.0f, 108.0f));
+    CHECK(trace_text_at("UPLOAD", 596.0f, 130.0f));
     CHECK(trace_has_text("1.2 MB OF 29.5 MB"));
-    CHECK(trace_text_at("UP TO 4 CLIENTS", 596.0f, 382.0f));
+    CHECK(trace_text_at("UP TO 4 CLIENTS", 596.0f, 170.0f));
     CHECK(trace_has_text_color("1 CLIENT", C_WHITE));
 
     s_state.server.run = UI_SERVER_OFF;
