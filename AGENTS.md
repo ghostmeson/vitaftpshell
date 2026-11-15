@@ -40,11 +40,12 @@ b43 removes the 64 KiB `handle_action` array and the recursive batch call, adds
 a build-time worker-stack budget check, makes a refused sync a recorded hint,
 counts refused batch items, and reads `FAILED` on a total failure. b43 has run
 on the console (operator report, 2026-11-14): copy, paste, new folder, rename,
-and download work, and the dock words read correctly in green. b49 adds the
-parallel lanes (resumable executor, reservations, server 450, two-lane dock),
-is built and host-tested, and is not yet on hardware. M13 and M10 are partly
-observed; M1–M9, M11, and M12 are pending, so the project is `building`, not
-`verified`. Do not start coding from this file alone: the plan
+and download work, and the dock words read correctly in green. b55 carries the
+review remediation (U1-U10): the failed-transfer terminal, the two-lane local
+guard with WAIT on both lanes, prompt identity, the UI stack budget, the
+budgeted transfer pumps, the server session bounds, and the single sidecar
+owner. M13 and M10 are partly observed; M1–M9, M11, and M12 are pending, so
+the project is `building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
 
@@ -78,8 +79,10 @@ shape; the transfer dock is where work is visible.
   listings.
 - Passwords are always remembered and stored unencrypted; they are never logged.
 - Multi-select and recursive folder operations are v1.
-- One transfer is active at a time; additional items queue, and a server-side
-  transfer uses the same slot.
+- One network transfer and one local job may run together when their canonical
+  paths do not overlap; each lane queues its own items, a collision asks
+  WAIT/SKIP/CANCEL, and a server-side transfer uses the network lane and
+  answers 450 on a held path (D72).
 - Plain FTP only in v1. No FTPS, SFTP, HTTP, or WebDAV.
 - No background daemon, taiHEN system plugin, kernel plugin, or boot component.
 - No PC-first UI and no VitaShell feature-parity race.
@@ -340,7 +343,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D77
+    DECISIONS.md       numbered decisions, D1-D83
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification

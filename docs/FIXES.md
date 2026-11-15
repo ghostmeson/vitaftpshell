@@ -132,6 +132,21 @@ matrix passes.
 | b49 | QUIT freed an in-flight run without aborting its temp | `fsop_run_abort` closes the source and removes the temp before destroy | executor suite | `HOST b49` |
 | b49 | The reservation arena was never reclaimed | Compact the surviving paths on release | `test_release_reclaims_arena` | `HOST b49` |
 
+
+## b55 review remediation
+
+| Build | Change | Evidence | Status |
+|---|---|---|---|
+| b55 | A local open failure returns a distinct client result; the worker owns one failed terminal and the post-call latch guard | `test_download_destination_failure`, `test_client` | `HOST b55` |
+| b55 | The local lane starts beside a network transfer; lane-scoped cancel; both lanes render WAITING | `test_two_lanes_progress`, `test_wait_resume_rechecks`, reducer and render cases | `HOST b55` |
+| b55 | Worker prompts carry a sequence; a mismatched answer leaves the deferred prompt latched | reducer id echo; `test_wait_resume_rechecks` | `HOST b55` |
+| b55 | The UI command buffer lives in App; the dispatch frame is 80 B and the gate checks it | gate reports 80 B; D79 | `HOST b55` |
+| b55 | The client and server pumps consume a per-tick budget and the wait is bounded by the local lane | `test_download_budget`, server suite | `HOST b55` |
+| b55 | CONNECT/REFRESH refuse or defer while the server is busy | code path; server suite | `HOST b55` |
+| b55 | The server drains foreign data peers, reports a reply backlog, checks its 450, and closes a 30 s idle session | `test_peer_check`, `test_peer_check_recovers`, `test_control_idle` | `HOST b55` |
+| b55 | The transfer sidecar has one owner; a failed restore names the kept copy; `.part` is hidden | `test_path`, `test_reserve`, `test_fsop_run` | `HOST b55` |
+| b55 | Dead exports removed, sites seeded by events, protected-root flag, action context, rename SKIP and capacity wording | suites; `test_fsop_plan` | `HOST b55` |
+
 ## b41 parallel lanes (b49)
 
 | Build | Change | Evidence | Status |

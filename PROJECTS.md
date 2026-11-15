@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-14 — Phase 6 parallel lanes (b43 hardware-tested; b49 implements U25–U27): b32 fixed the remote pane (READING, remote actions, DISCONNECT, keepalive); b36 added REFRESH, unsafe-name refusal, download totals, and MLST upload preflight; b37 closes the review pass: an iterated queue pump (no 128 KiB stack overflow), one session teardown that clears the overwrite latch, a 2000-row cap that lists as a truncated success, the ALL DRIVES download fallback, the high-risk delete warning, MLST send-failure handling, and plan/M1 alignment. b40 adds cursor COPY/MOVE, one batch terminal with past-tense words, the batch conflict preflight, full local cancel, the cyan cursor slab, the active-pane glow, and red failures. b43 fixes the b40 console crashes (worker stack overflow from a 64 KiB handle_action array and a recursive batch call), makes a refused sync a recorded hint rather than a failed commit, counts refused batch items, and stops a total failure reading COPIED in red. Recursive folders (R22/R23) remain deferred and refused. Twenty host suites, 39 preview states, ASan/UBSan clean | Install b49 and run M12: both lanes progress, a colliding paste asks WAIT/SKIP/CANCEL, WAIT resumes, a server STOR on a held path gets 450 while a sibling succeeds, and unrelated PASV/LIST still work. Then transcribe the remaining M rows | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b49.vpk` links the real app. b43 hardware-tested (operator report); b49 adds the parallel lanes and is built, not tested. b40 crashed and its four cores are in `logs/b40/`. M13 and M10 are PART; M1–M9, M11, and M12 are pending, so not `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-15 — Phase 6 review remediation (b55): a full review of the b49 diff found 29 findings and five lane-flow gaps; the remediation plan is `docs/plans/2026-11-15-1213-fix-b50-review-remediation-plan.md`, and U1-U10 landed: the failed-transfer terminal, the two-lane local guard and WAIT prompts, prompt identity, the UI stack budget (dispatch 80 B), budgeted transfer pumps, the server accept/reply/idle bounds, the single sidecar owner, and the dead-surface cleanup. Twenty host suites, 39 preview states, gate green | Finish U12 (threaded app test, sanitizer scripts, final evidence) and U13, then install b55 and run M1-M13 | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b55.vpk` (262,895 bytes) links the real app. M13/M10 are PART; M1-M9, M11, M12 are pending, so not `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
@@ -27,7 +27,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 3. Protocol engines | done | Client and server machines against scripted peers |
 | 4. Operations and state | done | Queue, planner, executor, reducer, handoff |
 | 5. Screens and composition | done | Seven surfaces, adapters, runtime, host integration test |
-| 6. Hardware verification | in progress | M1–M8 evidence; project becomes `verified` |
+| 6. Hardware verification | in progress | M1-M13 evidence on b55; project becomes `verified` |
 
 ## Current state
 

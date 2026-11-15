@@ -150,8 +150,10 @@ allowed outside the hazard band.
   colours: cyan running, yellow waiting on a held path, white `CANCELLING`,
   red failed, dim on a clean terminal. When the local lane is alone it takes the
   full dock with its own word, bar, bytes, and terminal, and that terminal
-  persists until the next local item. The badge is drawn over every screen that
-  draws the dock. A focused dock with both lanes asks `KEEP`, `CANCEL NETWORK`,
+  persists until the next local item. A waiting local lane alone takes the full
+  dock with the word `WAITING` in yellow, the subject `LOCAL`, and no bar; a
+  waiting network lane shows the same panel with the subject `NETWORK`. The
+  badge is drawn over every screen that draws the dock. A focused dock with both lanes asks `KEEP`, `CANCEL NETWORK`,
   `CANCEL LOCAL` (KEEP focused first); a single lane keeps the two-choice
   cancel. A server-mode transfer is not cancelled here; it ends through the
   server-stop confirm, so a server transfer plus a local job offers only KEEP
