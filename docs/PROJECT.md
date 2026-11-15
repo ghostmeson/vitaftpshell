@@ -21,7 +21,7 @@ server, the transfer queue, the local planner and executor, the input reducer
 and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime exist. `tools/test/run.sh` passes nineteen
 host suites, `tools/preview/run.sh` renders 39 settled states, and `build.sh`
-emits `vitaftpshell-v01.00-b49.vpk` with the real app linked. b16 and b18 have
+emits `vitaftpshell-v01.00-b55.vpk` with the real app linked. b16 and b18 have
 run on the console: b18 proved the drive browser, pinned the IME as the
 new-folder/rename blocker, showed the client failing at TCP connect, and showed
 the server with no client. b20 opened the IME and reached a rename, then the
