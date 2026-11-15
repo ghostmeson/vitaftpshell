@@ -27,8 +27,8 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b67.vpk`, 263,747 bytes,
-  SHA-256 `066d0a7cd2144ffce4472b1c1be575f0a6f4411eca0d6a641fc29e9801ab09da`.
+- **Current artifact:** `vitaftpshell-v01.00-b68.vpk`, 263,802 bytes,
+  SHA-256 `074a1421e345e4a3532a9bf58ab8a1ee26cbdc6fa7560e7926ba97cb9cd1e251`.
 - **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
   FileZilla upload and download work with two sessions; the app-local client
   transfers on all three volumes. The session log is `logs/session-b60.log`.
@@ -50,14 +50,14 @@ matrix passes.
   rename/delete and the full three-volume browse. M10 and M13 are partly
   observed; M1–M9, M11, and M12 are pending.
 
-## Open-issues pass (b67)
+## Open-issues pass (b68)
 
 | Build | Symptom | Cause and fix | Evidence | Status |
 |---|---|---|---|---|
-| b67 | **A download whose size changed after the listing was deleted as a partial when the final reply was lost.** | The keep rule trusts the caller's listing hint. Ask `SIZE` before PASV and use a 213 reply as the transfer's own size; 500/502/550 keep the listing hint (U1, R1, D89). | `test_download_size_preflight`; host run | `HOST b67` |
-| b67 | **A rename could create a `.vftp.part`/`.vftp.old` name.** | `path_check_rename` did not apply the sidecar denial to its destination. Reject the destination in the shared path rule; the source stays allowed so an aside can be repaired (U2, R2). | `test_sidecar_names`, `test_rename_sidecar_refused`; host run | `HOST b67` |
-| b67 | **The UI released its listing slot after every frame while it kept rendering the rows.** | The handoff held the slot only for the frame. `handoff_listing_adopt` keeps the held generation or releases it and acquires the newest; the app holds each pane until shutdown (U3, R3). | `test_listing_adopt`; host run | `HOST b67` |
-| b67 | **The owner's own RETR metadata read and the two-item queue terminal had no tests.** | Add a pending-RETR owner test with a guard that refuses the foreign session, and mark both queue items so the terminal names the cancelled remainder (U5, R5). | `test_owner_size_while_download`, `test_download_final_reply_loses_queue`; host run | `HOST b67` |
+| b67 | **A download whose size changed after the listing was deleted as a partial when the final reply was lost.** | The keep rule trusts the caller's listing hint. Ask `SIZE` before PASV and use a 213 reply as the transfer's own size; 500/502/550 keep the listing hint (U1, R1, D89). | `test_download_size_preflight`; host run | `HOST b68` |
+| b67 | **A rename could create a `.vftp.part`/`.vftp.old` name.** | `path_check_rename` did not apply the sidecar denial to its destination. Reject the destination in the shared path rule; the source stays allowed so an aside can be repaired (U2, R2). | `test_sidecar_names`, `test_rename_sidecar_refused`; host run | `HOST b68` |
+| b67 | **The UI released its listing slot after every frame while it kept rendering the rows.** | The handoff held the slot only for the frame. `handoff_listing_adopt` keeps the held generation or releases it and acquires the newest; the app holds each pane until shutdown (U3, R3). | `test_listing_adopt`; host run | `HOST b68` |
+| b67 | **The owner's own RETR metadata read and the two-item queue terminal had no tests.** | Add a pending-RETR owner test with a guard that refuses the foreign session, and mark both queue items so the terminal names the cancelled remainder (U5, R5). | `test_owner_size_while_download`, `test_download_final_reply_loses_queue`; host run | `HOST b68` |
 
 **Data-connection identity (U4).** The data accept cannot distinguish two sessions from one host: the listener is the fixed control+1 port (D59) and an FTP data connection's source port is ephemeral, so comparing ports would reject real clients. A per-PASV listener would need a `NetPort` bound-port output and a new platform claim. The fixed port stays; the same-host race is recorded here as accepted for v1.
 
@@ -200,7 +200,7 @@ here so they do not live only in a review report.
 
 | Item | Why it waited | Status |
 |---|---|---|
-| The `UiState` row pointer can outlive a released listing generation | Fixed in b67: the app holds the slot and adopts a newer generation in one step | `HOST b67` |
+| The `UiState` row pointer can outlive a released listing generation | Fixed in b67: the app holds the slot and adopts a newer generation in one step | `HOST b68` |
 | A kept `.vftp.old` is visible but not marked as debris | The row flag and render case are their own UI change (D81) | `PENDING` |
 | A failed aside cleanup still reports a failed commit | The honest notice needs a notice field on the progress record; the rename did happen | `PENDING` |
 | The queue's terminal and conflict latches have no production reader | The queue tests depend on them; removing them is a focused follow-up to D82's one-owner rule | `PENDING` |
