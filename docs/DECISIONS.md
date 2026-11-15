@@ -947,8 +947,8 @@ fixture, a draw-call assertion, and a preview file.
 ## D51. High-risk writes and the one slot are enforced in the worker too
 
 **Date:** 2026-11-10
-**Status:** accepted; the one-slot clause is superseded by D72 and D82. The
-high-risk write enforcement stands.
+**Status:** accepted; the one-slot and external-busy clauses are superseded by
+D72, D82, and D85. The high-risk write enforcement stands.
 
 **Context:** A reducer-only risk check cannot see the final name of a new folder
 or rename, and a marked batch can contain a high-risk item that is not the
@@ -1582,8 +1582,9 @@ when their canonical paths do not overlap. Two network transfers, two local
 jobs, and any overlapping read/write pair still serialize. A reservation covers
 the path and its temp/aside siblings; an ancestor/descendant conflict applies to
 a tree delete, rename, or recursive move, not to a directory listing. The server
-answers 450 on a held path, or while an app transfer occupies the network lane,
-and disarms the data connection. The worker interleaves the local executor with
+answers 450 on a held path, and disarms the data connection. (The "or while an
+app transfer occupies the network lane" clause was removed by D85; the
+path-scoped guard is the only exclusion.) The worker interleaves the local executor with
 the client, server, and queue; there is no second worker thread.
 
 **Amended 2026-11-14:** the containing directory is deliberately **not** reserved
@@ -1856,3 +1857,27 @@ centred 70×60 box, inside the bubble's straight edge. It ships as an indexed
 at small size. LiveArea art remains open; a change to the mark is a new decision.
 Red and green stay out of the icon so it can never be mistaken for a failure or
 a server alert.
+
+## D85. The server is not globally busy while the app transfers
+
+**Date:** 2026-11-15
+**Status:** accepted; b58.
+
+**Context:** D72 and D82 made the canonical-path reservation table the only
+cross-lane exclusion, but the server still carried the one-slot
+`external_busy` gate. The worker set it from the whole network lane, so the
+server refused `PASV`, `STOR`, `RETR`, and every mutating command with 450
+whenever the app had a transfer active, regardless of path. The b57 trace
+proved the self-deadlock: the app's own client sent `PASV` after `transfer_start`
+and the server answered `450 Transfer in progress`; the transfer failed with
+zero bytes. A PC client was also refused for unrelated paths.
+
+**Decision:** Remove `ftp_server_set_external_busy` and the global 450 gate.
+The server refuses a data or mutating command only when the path guard reports
+a held path, or when the server itself already has a data transfer active.
+
+**Consequences:** The app's client and its local server can transfer between
+different paths, and a PC can work in unrelated paths while the console
+transfers. A same-path collision still answers 450 through the reservation
+table. D51's external-busy clause and D72's "or while an app transfer occupies
+the network lane" clause are superseded; the held-path clause stands.

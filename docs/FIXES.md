@@ -27,26 +27,29 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b57.vpk`, 263,998 bytes,
-  SHA-256 `e51af216cc17c69a9252824f703b0fad91e192b3bb8742aafbdb3ae19817e398`.
+- **Current artifact:** `vitaftpshell-v01.00-b58.vpk`, 263,206 bytes,
+  SHA-256 `6632615ccf83afcf4e206183a2fe8df6bf9fb055215abc92b430aa5540f0ecae`.
 - **Last hardware-observed build:** b43 (operator report, 2026-11-14): copy,
   paste, new folder, rename, and download work and the dock words read correctly.
   b49 adds the b41 parallel lanes, is built, and is host-tested, not tested on hardware. b40 crashed; its four
   core dumps are analysed in `VERIFICATION.md`. b28, b32, b36, b38, and b39 were
   not separately tested.
-- **Latest hardware evidence:** b37 operator report (no log pulled yet);
-  `logs/session-b27.log` (local actions, server start, localhost control/login,
-  PASV data refusal); `logs/b20/` (complete worker-stack core); `logs/b18/`
-  (first diagnostic log and truncated core). The `logs/` tree is local and
-  git-ignored; copy it with `tools/logs/pull.sh <vita-ip>`.
-- **Matrix:** no M1–M13 row has passed on b57. The server browses, and local
-  MKD/rename/delete work on hardware; a server upload is the open defect (M5).
+- **Latest hardware evidence:** `logs/session-b57.log` (the b57 trace: the
+  app's own client's `transfer_start` → `PASV` → `450 Transfer in progress`,
+  the FileZilla `CWD` denial of the app folder, and successful downloads and
+  listings); `logs/b20/` (complete worker-stack core); `logs/b18/` (first
+  diagnostic log and truncated core). The `logs/` tree is local and git-ignored;
+  copy it with `tools/logs/pull.sh <vita-ip>`.
+- **Matrix:** no M1–M13 row has passed on b58. The server browses, and local
+  MKD/rename/delete work on hardware; the upload fix is built and awaits the
+  b58 hardware retry (M5).
 
-## Open defects
+## Upload defect (b57 → b58)
 
-| Build | Symptom | Instrument | Status |
+| Build | Symptom | Evidence | Status |
 |---|---|---|---|
-| b57 | **FTP server uploads never start.** FileZilla queues a file until it fails; MKD, rename, delete, and listings work, and the app's own client to localhost fails the same way. Downloads are not yet reported. | The server traces every command, reply, data accept, temp open, first read, commit, and close to `ux0:data/vitaFTPShell/session.log`; `PASS` is masked. `test_server` asserts the trace and the masking. | `PENDING b57` |
+| b57 | **FTP server uploads never start.** FileZilla queues a file until it fails; MKD, rename, delete, and listings work, and the app's own client to localhost fails the same way. | The server traces every command, reply, data accept, temp open, first read, commit, and close to `ux0:data/vitaFTPShell/session.log`; `PASS` is masked. The log showed `transfer_start` → `FTPC PASV` → `FTPR 450 Transfer in progress` on the app's own client. | `HW b57` |
+| b58 | The server refused every data and mutating command while the app's network lane was active, because the worker set the legacy global `external_busy` flag. The app's client therefore deadlocked against its own server, and a PC was refused on unrelated paths. | Remove `ftp_server_set_external_busy` and the global gate; the path guard still answers 450 on a held path (D85). | `test_held_path`; b57 trace; host run | `PENDING b58` |
 
 ## Build and install
 

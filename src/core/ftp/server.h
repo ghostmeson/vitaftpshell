@@ -73,10 +73,6 @@ void ftp_server_destroy(FtpServer *server);
 FtpServerResult ftp_server_start(FtpServer *server, uint16_t control_port);
 void ftp_server_stop(FtpServer *server);
 
-/* U13: the worker's one transfer slot. While an app-side transfer or a local
- * operation owns the slot, data and mutating commands answer 450. */
-void ftp_server_set_external_busy(FtpServer *server, int busy);
-
 /* U26: path arbitration. CHECK asks whether a path is held (1 = held); HOLD
  * claims a data command's path for the transfer; RELEASE drops the server
  * lane at the transfer end. A held path answers 450 and disarms PASV. */

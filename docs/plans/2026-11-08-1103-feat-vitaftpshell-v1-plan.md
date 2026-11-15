@@ -772,6 +772,11 @@ session bounds, and the sidecar owner, and it adds the threaded host test. The
 b55 rows in `docs/VERIFICATION.md` are the evidence for those scenarios. The
 matrix remains M1-M13.
 
+**Server upload fix (2026-11-15).** The b57 console trace showed the legacy
+global server-busy flag answering 450 to the app's own client's `PASV`. b58
+removes it; the path-scoped reservation guard is the only cross-lane exclusion
+(D85). M5 is the open row.
+
 ### Risks and accepted costs
 
 | Risk | Treatment |
@@ -1101,8 +1106,9 @@ The units above landed with these recorded additions and shapes:
 - The site-book view crosses the handoff bulk lane at 16 KiB (D46/D49); the
   save result and the edit-site payload are separate events.
 - The server gained `ftp_server_set_external_busy` so an app transfer and a PC
-  data command cannot own the one slot at the same time (D51). b41 replaces
-  this coarse flag with a path-scoped reservation check (KTD21).
+  data command could not own the one slot at the same time (D51). b41 added the
+  path-scoped reservation check (KTD21); b58 removed the coarse flag because it
+  blocked the app's own client (D85).
 - Local high-risk writes are checked in both the reducer and the worker; a fact
   scan that overflows refuses the plan instead of copying a prefix (D51).
 - The SERVER warning uses ten micro lines and the TEXT ENTRY unavailable notice
