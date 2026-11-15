@@ -133,7 +133,6 @@ typedef struct {
 } UiCommand;
 
 const char *ui_command_name(UiCommandType type);
-const char *ui_confirm_name(UiConfirmKind kind);
-const char *ui_field_name(UiField field);
+const char *ui_action_context(UiAction action);
 
 #endif

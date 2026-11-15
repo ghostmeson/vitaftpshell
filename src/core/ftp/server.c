@@ -2119,8 +2119,3 @@ void ftp_server_set_external_busy(FtpServer *server, int busy)
     if (server != NULL)
         server->external_busy = busy != 0;
 }
-
-uint16_t ftp_server_data_port(const FtpServer *server)
-{
-    return server != NULL ? server->data_port : 0;
-}

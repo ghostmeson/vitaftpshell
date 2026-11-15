@@ -130,31 +130,9 @@ static void *worker_main(void *arg)
     App *app = arg;
     while (!__atomic_load_n(&app->stop, __ATOMIC_ACQUIRE)) {
         worker_step(app->worker);
-        app->ports.clock->sleep_ms(app->ports.clock->ctx, 8);
+        app->ports.clock->sleep_ms(app->ports.clock->ctx, WORKER_TICK_MS);
     }
     return NULL;
-}
-
-static void fill_sites(App *app)
-{
-    const SiteBook *book = worker_sites(app->worker);
-    if (book == NULL)
-        return;
-
-    app->state.sites.count = (int)site_book_count(book);
-    if (app->state.sites.count > UI_SITES_MAX)
-        app->state.sites.count = UI_SITES_MAX;
-    for (int i = 0; i < app->state.sites.count; ++i) {
-        const Site *site = site_book_at(book, (unsigned)i);
-        UiSiteRow *row = &app->state.sites.rows[i];
-        memset(row, 0, sizeof(*row));
-        snprintf(row->name, sizeof(row->name), "%s", site->name);
-        snprintf(row->host, sizeof(row->host), "%s", site->host);
-        row->port = site->port;
-        row->anonymous = site->anonymous;
-        row->password_set = site->password[0] != '\0';
-        snprintf(row->username, sizeof(row->username), "%s", site->username);
-    }
 }
 
 static void open_ime(App *app, const UiCommand *command)
@@ -574,7 +552,6 @@ App *app_create(const AppPorts *ports, int worker_thread)
      * does not decide the startup view. */
     snprintf(app->state.panes[UI_PANE_LOCAL].path,
              sizeof(app->state.panes[UI_PANE_LOCAL].path), "*");
-    fill_sites(app);
     return app;
 }
 

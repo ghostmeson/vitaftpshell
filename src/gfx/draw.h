@@ -41,7 +41,6 @@ void draw_tri(float x0, float y0, float x1, float y1, float x2, float y2,
 
 void draw_set_additive(int on);
 
-void draw_set_clip(int x, int y, int w, int h);
 void draw_clear_clip(void);
 
 #endif

@@ -24,6 +24,9 @@
  * run either way.
  */
 
+/* One frame: input, reducer, worker drain, draw. */
+#define APP_FRAME_MS 16
+
 typedef struct {
     NetPort *net;
     FsPort *fs;

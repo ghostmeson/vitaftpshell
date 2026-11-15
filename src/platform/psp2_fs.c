@@ -235,9 +235,6 @@ static FsResult fs_open(void *ctx, const char *path, FsOpenMode mode,
     case FS_OPEN_READ:
         flags = SCE_O_RDONLY;
         break;
-    case FS_OPEN_WRITE_CREATE:
-        flags = SCE_O_WRONLY | SCE_O_CREAT;
-        break;
     case FS_OPEN_WRITE_TRUNC:
         flags = SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC;
         break;

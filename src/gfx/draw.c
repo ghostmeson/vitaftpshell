@@ -137,17 +137,6 @@ void draw_set_additive(int on)
     vita2d_set_blend_mode_add(on ? 1 : 0);
 }
 
-void draw_set_clip(int x, int y, int w, int h)
-{
-    if (w <= 0 || h <= 0) {
-        draw_clear_clip();
-        return;
-    }
-
-    vita2d_enable_clipping();
-    vita2d_set_clip_rectangle(x, y, x + w, y + h);
-}
-
 void draw_clear_clip(void)
 {
     vita2d_disable_clipping();

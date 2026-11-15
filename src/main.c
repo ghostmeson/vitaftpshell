@@ -40,7 +40,7 @@ int main(void)
     }
 
     while (app_tick(app))
-        ports.clock->sleep_ms(ports.clock->ctx, 16);
+        ports.clock->sleep_ms(ports.clock->ctx, APP_FRAME_MS);
 
     app_destroy(app);
     draw_shutdown();

@@ -52,8 +52,6 @@ typedef enum {
     FTP_DATA_DRAINING
 } FtpDataState;
 
-const char *ftp_cause_name(FtpCause cause);
-const char *ftp_stage_name(FtpStage stage);
 
 typedef struct {
     char line[FTP_LINE_MAX + 1];

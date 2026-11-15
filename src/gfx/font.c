@@ -191,28 +191,6 @@ void font_text_right(const char *s, float x_right, float y, float px,
     font_text(s, x_right - font_width(s, px), y, px, c);
 }
 
-int font_rects(const char *s, float x, float y, float px, Rect *out, int max)
-{
-    if (s == NULL || px <= 0.0f || out == NULL || max <= 0)
-        return 0;
-
-    int n = 0;
-    float cx = x;
-
-    for (const char *p = s; *p != '\0'; ++p) {
-        const uint8_t *rows = lookup(*p);
-        if (rows != NULL)
-            n = emit_glyph(rows, cx, y, px, out, max, n);
-
-        if (n >= max)
-            return max;
-
-        cx += (float)FONT_ADVANCE * px;
-    }
-
-    return n;
-}
-
 void font_fit(const char *s, float px, float max_w, char *out, size_t out_n)
 {
     if (out == NULL || out_n == 0)
