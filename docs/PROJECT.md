@@ -55,9 +55,11 @@ review remediation (U1-U10); b56 re-packages that code with the settled launcher
 icon (D84); b57 added a server protocol trace; b58 removes the global
 server-busy gate that refused `PASV`/`STOR`/`RETR` whenever the app's own network
 lane was active. The b57 log showed the app's client deadlocking against its own
-server: `transfer_start` → `PASV` → `450 Transfer in progress`. M5 is the open
-hardware row; M13 and M10 are partly observed. The project stays `building`
-until every row has a recorded PASS.
+server: `transfer_start` → `PASV` → `450 Transfer in progress`. b58 is
+hardware-verified for both directions from the app's own client. FileZilla's
+`450 Busy` is the one-client rule colliding with a second control connection;
+M5 is PART. M13 and M10 are partly observed. The project stays `building` until
+every row has a recorded PASS.
 
 ## Users
 

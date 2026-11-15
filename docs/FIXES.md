@@ -40,16 +40,17 @@ matrix passes.
   listings); `logs/b20/` (complete worker-stack core); `logs/b18/` (first
   diagnostic log and truncated core). The `logs/` tree is local and git-ignored;
   copy it with `tools/logs/pull.sh <vita-ip>`.
-- **Matrix:** no M1–M13 row has passed on b58. The server browses, and local
-  MKD/rename/delete work on hardware; the upload fix is built and awaits the
-  b58 hardware retry (M5).
+- **Matrix:** the b58 self-connection upload and download pass on hardware. The
+  FileZilla upload is blocked by the one-client rule: FileZilla's second control
+  connection answers `450 Busy`. M5 remains PART.
 
 ## Upload defect (b57 → b58)
 
 | Build | Symptom | Evidence | Status |
 |---|---|---|---|
 | b57 | **FTP server uploads never start.** FileZilla queues a file until it fails; MKD, rename, delete, and listings work, and the app's own client to localhost fails the same way. | The server traces every command, reply, data accept, temp open, first read, commit, and close to `ux0:data/vitaFTPShell/session.log`; `PASS` is masked. The log showed `transfer_start` → `FTPC PASV` → `FTPR 450 Transfer in progress` on the app's own client. | `HW b57` |
-| b58 | The server refused every data and mutating command while the app's network lane was active, because the worker set the legacy global `external_busy` flag. The app's client therefore deadlocked against its own server, and a PC was refused on unrelated paths. | Remove `ftp_server_set_external_busy` and the global gate; the path guard still answers 450 on a held path (D85). | `test_held_path`; b57 trace; host run | `PENDING b58` |
+| b58 | The server refused every data and mutating command while the app's network lane was active, because the worker set the legacy global `external_busy` flag. The app's client therefore deadlocked against its own server, and a PC was refused on unrelated paths. | Remove `ftp_server_set_external_busy` and the global gate; the path guard still answers 450 on a held path (D85). | `test_held_path`; b57 trace; b58 console: app-local upload of the 263,206-byte VPK and download both 226 | `HW b58` |
+| b58 | **FileZilla `450 Busy`.** The server already had a client (the app's remote pane), and FileZilla's extra control connection was refused. | The server accepts one client at a time (D41). Disconnect the app's remote pane, set FileZilla's maximum simultaneous transfers to 1, retry. If it still fails, FileZilla needs a second control connection and the one-client scope must be reopened. | b58 session log: app client connected while FileZilla got 450 Busy | `PENDING` |
 
 ## Build and install
 

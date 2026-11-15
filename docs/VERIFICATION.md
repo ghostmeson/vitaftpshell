@@ -36,7 +36,22 @@ refused on unrelated paths. b58 removes the global flag and leaves the
 path-scoped reservation guard as the only cross-lane exclusion (D85). A
 same-path transfer still gets 450; an unrelated path does not.
 
-The b57 FileZilla session in the same log had no `STOR`; it failed while trying
+**Console result (b58):** the app's own client uploaded
+`vitaftpshell-v01.00-b58.vpk` to `ur0:` (STOR 263,206 bytes, `FTPD COMMIT r=0`,
+226) and downloaded it (RETR, 226). Both directions pass. The self-connection
+defect is fixed on hardware.
+
+**FileZilla result (b58):** FileZilla reports `450 Busy` and disconnects. That
+reply comes only from the control accept path when the server already has a
+client. The same log shows the app's own remote pane connected from 84.8 s to
+the end (the localhost test); FileZilla's earlier session had already closed at
+64 s. FileZilla also opens a separate control connection per simultaneous
+transfer. The server accepts one client at a time (D41). Retest with the app's
+remote pane disconnected (SERVER shows `0 CLIENTS`) and FileZilla's maximum
+simultaneous transfers set to 1. If it still gets `450 Busy`, FileZilla needs a
+second control connection and the one-client scope has to be decided.
+
+The b57 FileZilla session in the older log had no `STOR`; it failed while trying
 to `CWD` into `ux0:data/vitaFTPShell`, which the server deliberately denies
 because it is the app's own data folder. Upload to a normal folder (`ux0:data/rt`,
 `uma0:`, and so on), not the app folder.
@@ -216,7 +231,7 @@ evidence are recorded here. The project therefore stays `building`.
 | M2 | LAN server with MLSD | MLSD is used, browse and download complete | pending | pending | PENDING |
 | M3 | LAN server with MLSD disabled | LIST fallback parses, browse and download complete | pending | pending | PENDING |
 | M4 | DOS-listing server | Names, sizes, and folders parse; a download completes | pending | pending | PENDING |
-| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete | pending | pending | PENDING |
+| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete | List, MKD, rename, delete pass; the app-local upload and download pass; FileZilla gets `450 Busy` when a second control connection arrives while the app holds the one client slot | `450 Busy` is the one-client limit; retest with `0 CLIENTS` and FileZilla limited to one connection | PART |
 | M6 | Denials through the server | `boot_config.txt`, `ux0:tai` upload, volume-root delete all refuse, and nothing is created | pending | pending | PENDING |
 | M7 | Second client and stop-during-write | 450 to the second client; stop during a write confirms and leaves no partial | pending | pending | PENDING |
 | M8 | Network loss and cancel | Server stops and reports; cancel takes effect within 5 s; no crash dump | pending | pending | PENDING |
