@@ -218,7 +218,6 @@ static void test_download_destination_failure(void)
 
     fake_fs_add_dir("ux0:data/TEST.BIN");
     press(app, INPUT_BIT(INPUT_DOWN));
-    press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_CROSS));
 
@@ -273,7 +272,6 @@ static void test_two_lanes_progress(void)
     select_remote(app);
 
     fake_peer_set_hold_data(peer, 1);
-    press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_CROSS));
@@ -344,7 +342,6 @@ static void test_two_cancel_presses(void)
 
     fake_peer_set_hold_data(peer, 1);
     press(app, INPUT_BIT(INPUT_DOWN));
-    press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 80; ++i) {
@@ -387,7 +384,6 @@ static void test_wait_resume_rechecks(void)
     select_remote(app);
 
     fake_peer_set_hold_data(peer, 1);
-    press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_CROSS));
@@ -631,8 +627,7 @@ static void test_connect_list_download(void)
     connect_site(app, peer);
     select_remote(app);
 
-    /* Rows are .., BIG.BIN, TEST.BIN; select TEST.BIN. */
-    press(app, INPUT_BIT(INPUT_DOWN));
+    /* The remote list is BIG.BIN, TEST.BIN; one Down selects TEST.BIN. */
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_SQUARE));
     CHECK(ui_state_mark_count(app_state(app), UI_PANE_REMOTE) == 1);
@@ -798,15 +793,25 @@ static void test_failed_connect_replaces_session(void)
 
 static void select_local_named(App *app, const char *name)
 {
-    /* Start from the top so a target above the current cursor is reachable. */
-    for (int i = 0; i < 8; ++i)
-        press(app, INPUT_BIT(INPUT_UP));
-    for (int i = 0; i < 8; ++i) {
-        const UiPaneState *pane = &app_state(app)->panes[UI_PANE_LOCAL];
-        if (pane->selected >= 0 && pane->selected < pane->row_count &&
-            strcmp(pane->rows[pane->selected].name, name) == 0)
+    /* Drive the cursor to the row by index, never across the last row: with a
+     * transfer active that boundary enters the dock instead of wrapping. */
+    const UiPaneState *pane = &app_state(app)->panes[UI_PANE_LOCAL];
+    int target = -1;
+    for (int i = 0; i < pane->row_count; ++i) {
+        if (strcmp(pane->rows[i].name, name) == 0) {
+            target = i;
+            break;
+        }
+    }
+    if (target < 0)
+        return;
+
+    for (int guard = 0; guard <= pane->row_count; ++guard) {
+        const UiPaneState *live = &app_state(app)->panes[UI_PANE_LOCAL];
+        if (live->selected == target)
             return;
-        press(app, INPUT_BIT(INPUT_DOWN));
+        press(app, live->selected < target ? INPUT_BIT(INPUT_DOWN)
+                                           : INPUT_BIT(INPUT_UP));
     }
 }
 
@@ -2175,8 +2180,7 @@ static void test_download_conflict(void)
     connect_site(app, peer);
     select_remote(app);
 
-    /* Rows are .., BIG.BIN, TEST.BIN. */
-    press(app, INPUT_BIT(INPUT_DOWN));
+    /* The remote list is BIG.BIN, TEST.BIN; one Down selects TEST.BIN. */
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {

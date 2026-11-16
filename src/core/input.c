@@ -85,6 +85,25 @@ static int push(UiInputEvent *out, int max, int *count, UiInputKind kind,
     return 1;
 }
 
+/* Map the raw stick to a signed row step: one at the deadzone edge, five at
+ * full deflection, linearly in between (R23, KTD5). */
+static int stick_step(int raw)
+{
+    int magnitude = raw < 0 ? -raw : raw;
+    if (magnitude < INPUT_STICK_DEADZONE)
+        return 0;
+
+    int step = INPUT_STICK_STEP_MIN +
+               (magnitude - INPUT_STICK_DEADZONE) *
+                   (INPUT_STICK_STEP_MAX - INPUT_STICK_STEP_MIN) /
+                   (INPUT_STICK_FULL - INPUT_STICK_DEADZONE);
+    if (step < INPUT_STICK_STEP_MIN)
+        step = INPUT_STICK_STEP_MIN;
+    if (step > INPUT_STICK_STEP_MAX)
+        step = INPUT_STICK_STEP_MAX;
+    return raw < 0 ? -step : step;
+}
+
 int input_repeat_poll(InputRepeat *repeat, const InputState *state,
                       uint64_t now_ms, UiInputEvent *out, int max)
 {
@@ -117,13 +136,7 @@ int input_repeat_poll(InputRepeat *repeat, const InputState *state,
         }
     }
 
-    int stick = state->stick_y;
-    if (stick < -INPUT_STICK_DEADZONE)
-        stick = -1;
-    else if (stick > INPUT_STICK_DEADZONE)
-        stick = 1;
-    else
-        stick = 0;
+    int stick = stick_step(state->stick_y);
 
     if (stick != 0 && now_ms >= repeat->next_stick_ms) {
         push(out, max, &count, UI_INPUT_STICK, UI_KEY_NONE, 0, stick);

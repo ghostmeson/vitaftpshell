@@ -15,6 +15,9 @@
 #define INPUT_REPEAT_DELAY_MS 400
 #define INPUT_REPEAT_MS 100
 #define INPUT_STICK_DEADZONE 32
+#define INPUT_STICK_FULL 127
+#define INPUT_STICK_STEP_MIN 1
+#define INPUT_STICK_STEP_MAX 5
 #define INPUT_STICK_REPEAT_MS 100
 
 typedef enum {
@@ -42,7 +45,9 @@ typedef struct {
     UiInputKind kind;
     UiKey key;
     int repeat;
-    int stick_y; /* -1, 0, or 1 after the deadzone */
+    /* The signed row step: -5..5, zero inside the deadzone; the deadzone edge
+     * is the first step. */
+    int stick_y;
 } UiInputEvent;
 
 typedef struct {

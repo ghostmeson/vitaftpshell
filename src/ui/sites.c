@@ -11,8 +11,6 @@
 #include "ui/dock.h"
 #include "ui/parts.h"
 
-#define SITES_ROWS_VISIBLE 6
-
 static void card_draw(const UiState *state, const LayoutRect *r)
 {
     const UiSiteList *sites = &state->sites;
@@ -123,21 +121,21 @@ static void table_draw(const UiState *state, const LayoutRect *r)
     int first = sites->first;
     if (first < 0)
         first = 0;
-    if (first > sites->count - SITES_ROWS_VISIBLE)
-        first = sites->count > SITES_ROWS_VISIBLE
-                    ? sites->count - SITES_ROWS_VISIBLE
+    if (first > sites->count - UI_SITES_VISIBLE)
+        first = sites->count > UI_SITES_VISIBLE
+                    ? sites->count - UI_SITES_VISIBLE
                     : 0;
-    for (int i = first; i < sites->count && i < first + SITES_ROWS_VISIBLE;
-         ++i)
+    for (int i = first;
+         i < sites->count && i < first + UI_SITES_VISIBLE; ++i)
         row_draw(sites, r, i, i - first);
 
-    if (sites->count > SITES_ROWS_VISIBLE) {
-        float track_h = (float)SITES_ROWS_VISIBLE * 30.0f;
-        float thumb = track_h * (float)SITES_ROWS_VISIBLE /
+    if (sites->count > UI_SITES_VISIBLE) {
+        float track_h = (float)UI_SITES_VISIBLE * 30.0f;
+        float thumb = track_h * (float)UI_SITES_VISIBLE /
                       (float)sites->count;
         if (thumb < 24.0f)
             thumb = 24.0f;
-        float max_first = (float)(sites->count - SITES_ROWS_VISIBLE);
+        float max_first = (float)(sites->count - UI_SITES_VISIBLE);
         float pos = (track_h - thumb) * (float)first /
                     (max_first > 0.0f ? max_first : 1.0f);
         draw_rect((float)(r->x + r->w) - 6.0f, 246.0f, 2.0f, track_h, C_HAIR);

@@ -151,8 +151,9 @@ allowed outside the hazard band.
 - **Status:** a status message replaces the idle hint on line three until the
   next key: red for a failure or refusal, yellow for a warning. The rest of the
   idle dock does not change.
-- **Focused dock:** only focusable when a transfer is active or queued. Down from
-  the last row enters it; the 1 px outline turns white; the legend becomes
+- **Focused dock:** only focusable when either lane has an active transfer or
+  a queued item. Down from the last row enters it; the 1 px outline turns
+  white; the legend becomes
   `[X] CANCEL  [O] TO LIST`; Cross opens the cancel CONFIRM; Circle returns to
   the last row. The dock’s state colours do not change.
 - **Two lanes:** one local job may run beside one network transfer. The
@@ -199,11 +200,17 @@ allowed outside the hazard band.
 ### Input
 
 - L/R switches the active pane and preserves both path and selection.
+- Up and Down move the active pane's selection one row. The list wraps: Up on
+  the first row selects the last, and Down on the last selects the first.
+- The left stick is a second list control: it moves the selection by its
+  deflection, one row at the deadzone edge up to five at full deflection, and
+  repeats every 100 ms. The view scrolls to keep the selection visible, and
+  the stick wraps with the list.
+- Down from the last row enters the dock instead of wrapping only when either
+  lane has an active transfer or a queued item.
 - Cross opens a directory, or transfers the selected file or marked set.
 - Circle goes to the parent; at a volume root or `/` it says so.
 - Square marks; Triangle opens ACTIONS; Start opens SERVER; Select opens SITES.
-- Down from the last row enters the dock only when a transfer is active or
-  queued.
 - On the session-lost state, Cross reconnects and Circle dismisses.
 
 ### Legend
@@ -250,6 +257,10 @@ five states are in
   `C_CYAN_DIM`), `ANON` (dim) or `LOGIN` (cyan) right-aligned at `x+w-14`. The
   selected row is a cyan slab with near-black name, host, and badge. A
   scrollbar appears only when the book exceeds six rows.
+- Up and Down wrap the selection at both ends: Down on the last site selects
+  the first and resets the six-row window to the top, and Up on the first
+  selects the last. The stick moves the selection by its deflection with the
+  same wrap and window reset.
 - Long names and hosts end in `..`; the editor holds the full values.
 
 ### States

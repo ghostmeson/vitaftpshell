@@ -74,19 +74,69 @@ static void test_stick(void)
     input_repeat_init(&repeat);
     UiInputEvent events[4];
 
-    InputState s = state(0, 0, -100);
-    CHECK(input_repeat_poll(&repeat, &s, 0, events, 4) == 1);
-    CHECK(events[0].kind == UI_INPUT_STICK);
-    CHECK(events[0].stick_y == -1);
+    /* Inside the deadzone nothing moves; 32 is the edge and the first step.
+     * The magnitude maps linearly to 1..5 with integer division (KTD5). */
+    InputState s = state(0, 0, 31);
+    CHECK(input_repeat_poll(&repeat, &s, 0, events, 4) == 0);
     CHECK(input_repeat_poll(&repeat, &s, 50, events, 4) == 0);
+
+    s = state(0, 0, 32);
     CHECK(input_repeat_poll(&repeat, &s, 100, events, 4) == 1);
-
-    s = state(0, 0, 0);
-    CHECK(input_repeat_poll(&repeat, &s, 120, events, 4) == 0);
-
-    s = state(0, 0, 100);
+    CHECK(events[0].kind == UI_INPUT_STICK);
+    CHECK(events[0].stick_y == 1);
+    CHECK(input_repeat_poll(&repeat, &s, 150, events, 4) == 0);
     CHECK(input_repeat_poll(&repeat, &s, 200, events, 4) == 1);
     CHECK(events[0].stick_y == 1);
+
+    /* Returning to centre resets the cadence, so the next deflection fires
+     * immediately even though the previous step was 100 ms ago. */
+    s = state(0, 0, 0);
+    CHECK(input_repeat_poll(&repeat, &s, 220, events, 4) == 0);
+    s = state(0, 0, 33);
+    CHECK(input_repeat_poll(&repeat, &s, 230, events, 4) == 1);
+    CHECK(events[0].stick_y == 1);
+
+    s = state(0, 0, 0);
+    CHECK(input_repeat_poll(&repeat, &s, 250, events, 4) == 0);
+    s = state(0, 0, 63);
+    CHECK(input_repeat_poll(&repeat, &s, 260, events, 4) == 1);
+    CHECK(events[0].stick_y == 2);
+
+    s = state(0, 0, 0);
+    CHECK(input_repeat_poll(&repeat, &s, 280, events, 4) == 0);
+    s = state(0, 0, 95);
+    CHECK(input_repeat_poll(&repeat, &s, 290, events, 4) == 1);
+    CHECK(events[0].stick_y == 3);
+
+    s = state(0, 0, 0);
+    CHECK(input_repeat_poll(&repeat, &s, 310, events, 4) == 0);
+    s = state(0, 0, 127);
+    CHECK(input_repeat_poll(&repeat, &s, 320, events, 4) == 1);
+    CHECK(events[0].stick_y == 5);
+
+    s = state(0, 0, 0);
+    CHECK(input_repeat_poll(&repeat, &s, 340, events, 4) == 0);
+    s = state(0, 0, -33);
+    CHECK(input_repeat_poll(&repeat, &s, 350, events, 4) == 1);
+    CHECK(events[0].stick_y == -1);
+
+    s = state(0, 0, 0);
+    CHECK(input_repeat_poll(&repeat, &s, 370, events, 4) == 0);
+    s = state(0, 0, -63);
+    CHECK(input_repeat_poll(&repeat, &s, 380, events, 4) == 1);
+    CHECK(events[0].stick_y == -2);
+
+    s = state(0, 0, 0);
+    CHECK(input_repeat_poll(&repeat, &s, 400, events, 4) == 0);
+    s = state(0, 0, -95);
+    CHECK(input_repeat_poll(&repeat, &s, 410, events, 4) == 1);
+    CHECK(events[0].stick_y == -3);
+
+    s = state(0, 0, 0);
+    CHECK(input_repeat_poll(&repeat, &s, 430, events, 4) == 0);
+    s = state(0, 0, -127);
+    CHECK(input_repeat_poll(&repeat, &s, 440, events, 4) == 1);
+    CHECK(events[0].stick_y == -5);
 }
 
 static void test_change_direction(void)

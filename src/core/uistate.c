@@ -352,15 +352,22 @@ static void clamp_pane(UiPaneState *pane)
         pane->scroll = 0;
 }
 
-static void move_selection(UiPaneState *pane, int delta)
+static void move_selection(UiPaneState *pane, int delta, int wrap)
 {
     if (pane->row_count <= 0)
         return;
-    int next = pane->selected + delta;
-    if (next < 0)
-        next = 0;
-    if (next >= pane->row_count)
-        next = pane->row_count - 1;
+
+    int next;
+    if (wrap) {
+        next = ((pane->selected + delta) % pane->row_count +
+                pane->row_count) % pane->row_count;
+    } else {
+        next = pane->selected + delta;
+        if (next < 0)
+            next = 0;
+        if (next >= pane->row_count)
+            next = pane->row_count - 1;
+    }
     pane->selected = next;
 
     if (pane->selected < pane->scroll)
@@ -370,10 +377,12 @@ static void move_selection(UiPaneState *pane, int delta)
     clamp_pane(pane);
 }
 
-static void scroll_rows(UiPaneState *pane, int delta)
+/* The dock entry is available while either lane can still be cancelled: an
+ * item running now or one queued behind it (R24, KTD5). */
+static int dock_focusable(const UiState *state)
 {
-    pane->scroll += delta;
-    clamp_pane(pane);
+    return state->dock.active || state->dock.queued > 0 ||
+           state->local_dock.active || state->local_dock.queued > 0;
 }
 
 static const UiRow *selected_row(const UiState *state, UiPane pane)
@@ -442,6 +451,15 @@ static void set_transfer_dock(UiDock *dock, const UiStateEvent *event,
     dock->done = event->bytes;
     dock->total = event->total;
     dock->total_known = event->total_known;
+}
+
+/* The worker reports the batch position (item_index of item_total). The items
+ * after the active one are the queue the dock can still cancel, so the dock
+ * reads the depth from the event instead of keeping a second counter (KTD5). */
+static void set_lane_queue(UiDock *lane, const UiStateEvent *event)
+{
+    int queued = event->item_total - event->item_index;
+    lane->queued = queued > 0 ? queued : 0;
 }
 
 static void open_confirm(UiState *state, UiConfirmKind kind)
@@ -866,16 +884,19 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
 
     switch (key) {
     case UI_KEY_UP:
-        move_selection(pane, -1);
+        move_selection(pane, -1, 1);
         return;
     case UI_KEY_DOWN:
-        if (pane->row_count == 0 ||
-            pane->selected >= pane->row_count - 1) {
-            if (state->dock.active || state->dock.queued > 0)
+        if (pane->row_count == 0) {
+            if (dock_focusable(state))
                 set_focus(state, UI_FOCUS_DOCK);
             return;
         }
-        move_selection(pane, 1);
+        if (pane->selected >= pane->row_count - 1 && dock_focusable(state)) {
+            set_focus(state, UI_FOCUS_DOCK);
+            return;
+        }
+        move_selection(pane, 1, 1);
         return;
     case UI_KEY_CROSS: {
         const UiRow *row = selected_row(state, state->active_pane);
@@ -1084,21 +1105,40 @@ static void set_site_failure(UiState *state, const char *text)
              text != NULL && text[0] != '\0' ? text : "NO REPLY");
 }
 
+/* The site book is a wrapping list too. A wrap starts a fresh window instead
+ * of leaving the old offset behind: down shows the top, up shows the last
+ * window (R24, AE11). */
+static void move_site_selection(UiState *state, int delta)
+{
+    UiSiteList *sites = &state->sites;
+    if (sites->count <= 0)
+        return;
+
+    int raw = sites->selected + delta;
+    int next = ((raw % sites->count) + sites->count) % sites->count;
+    int wrapped = raw < 0 || raw >= sites->count;
+    sites->selected = next;
+
+    if (wrapped) {
+        sites->first = delta > 0 ? 0 : sites->count - UI_SITES_VISIBLE;
+        if (sites->first < 0)
+            sites->first = 0;
+    }
+    if (sites->selected < sites->first)
+        sites->first = sites->selected;
+    if (sites->selected >= sites->first + UI_SITES_VISIBLE)
+        sites->first = sites->selected - UI_SITES_VISIBLE + 1;
+}
+
 static void handle_sites_key(UiState *state, const UiStateEvent *event,
                              UiCommand *out, int max, int *count)
 {
     switch (event->key) {
     case UI_KEY_UP:
-        if (state->sites.selected > 0)
-            state->sites.selected--;
-        if (state->sites.selected < state->sites.first)
-            state->sites.first = state->sites.selected;
+        move_site_selection(state, -1);
         return;
     case UI_KEY_DOWN:
-        if (state->sites.selected + 1 < state->sites.count)
-            state->sites.selected++;
-        if (state->sites.selected >= state->sites.first + 6)
-            state->sites.first = state->sites.selected - 5;
+        move_site_selection(state, 1);
         return;
     case UI_KEY_CROSS: {
         if (state->sites.count <= 0) {
@@ -2130,9 +2170,17 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         handle_key(state, event, out, max, &count);
         break;
     case UI_EVT_STICK:
+        if (event->stick_y == 0)
+            break;
         if (state->screen == UI_SCREEN_WORKSPACE &&
             state->focus == UI_FOCUS_LIST) {
-            scroll_rows(&state->panes[state->active_pane], event->stick_y);
+            /* The stick moves the cursor like a list control: the step is the
+             * deflection and the view follows, never a detached scroll. */
+            move_selection(&state->panes[state->active_pane], event->stick_y,
+                           1);
+        } else if (state->screen == UI_SCREEN_SITES &&
+                   state->focus == UI_FOCUS_SITES) {
+            move_site_selection(state, event->stick_y);
         }
         break;
     case UI_EVT_LISTING_BEGIN: {
@@ -2227,6 +2275,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         } else {
             state->sites.connect_from_sites = 0;
         }
+        /* The session's queued batch dies with it, so a dead queue must not
+         * keep the dock entry alive. */
+        state->dock.queued = 0;
         if (state->screen == UI_SCREEN_ACTIONS &&
             state->active_pane == ui_pane_remote_view()) {
             /* The ledger's enabled flags describe the dead session. Return to
@@ -2323,6 +2374,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->done = 0;
         lane->item_index = event->item_index;
         lane->item_total = event->item_total;
+        set_lane_queue(lane, event);
         lane->elapsed_ms = 0;
         lane->elapsed_known = 0;
         lane->rate_known = 0;
@@ -2359,6 +2411,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->rate_known = event->rate_known;
         lane->elapsed_ms = event->elapsed_ms;
         lane->elapsed_known = event->elapsed_known;
+        set_lane_queue(lane, event);
         lane_terminal(state, lane);
         break;
     }
@@ -2383,12 +2436,18 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         set_transfer_dock(lane, event, UI_DOCK_FAILED);
         lane->notice = 0;
         lane->file_kept = event->file_kept;
+        if (event->item_index > 0)
+            lane->item_index = event->item_index;
+        if (event->item_total > 0)
+            lane->item_total = event->item_total;
+        set_lane_queue(lane, event);
         lane_terminal(state, lane);
         break;
     }
     case UI_EVT_BATCH_DONE: {
         UiDock *lane = &state->local_dock;
         lane->active = 0;
+        lane->queued = 0;
         state->local_shown = 1;
         if (event->direction_known)
             lane->direction = (XferDirection)event->direction;
@@ -2585,9 +2644,11 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
                                         : 0;
         if (state->sites.first > state->sites.selected)
             state->sites.first = state->sites.selected;
-        if (state->sites.count > 6 && state->sites.selected >=
-                                          state->sites.first + 6)
-            state->sites.first = state->sites.selected - 5;
+        if (state->sites.count > UI_SITES_VISIBLE &&
+            state->sites.selected >=
+                state->sites.first + UI_SITES_VISIBLE)
+            state->sites.first =
+                state->sites.selected - UI_SITES_VISIBLE + 1;
         break;
     default:
         break;

@@ -22,6 +22,7 @@
  */
 
 #define UI_ROWS_VISIBLE 10
+#define UI_SITES_VISIBLE 6
 #define UI_CONFIRM_VIEW 5
 #define UI_CONFIRM_MAX 64
 #define UI_CLIP_MAX 64
@@ -96,7 +97,7 @@ typedef enum {
 
 typedef struct {
     int active;
-    int queued;
+    int queued; /* items behind the active one, from the worker's batch */
     int focused;
     int waiting;
     UiDockState state;
@@ -336,7 +337,7 @@ typedef struct {
     int pane; /* UiPane, or -1 for a pane-less error */
     UiKey key;
     int repeat;
-    int stick_y;
+    int stick_y; /* signed row step, -5..5 */
     int ok;
     char path[PATH_MAX_LEN];
     char text[256];

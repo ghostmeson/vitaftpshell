@@ -56,6 +56,7 @@ static UiRow s_readonly_rows[] = {
 };
 
 static UiRow s_many_rows[15];
+static UiRow s_forty_rows[40];
 
 static UiConfirmItem s_confirm_items[12];
 
@@ -105,6 +106,15 @@ static int send_event(UiStateEvent *event)
     return s_command_count;
 }
 
+static int send_stick(int step)
+{
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_STICK;
+    event.stick_y = step;
+    return send_event(&event);
+}
+
 static UiCommand *command(UiCommandType type)
 {
     for (int i = 0; i < s_command_count; ++i) {
@@ -139,11 +149,13 @@ static void test_workspace_nav(void)
     CHECK(s_state.panes[UI_PANE_LOCAL].selected == 1);
     send_key(UI_KEY_DOWN);
     CHECK(s_state.panes[UI_PANE_LOCAL].selected == 2);
+    /* No transfer: the last row wraps instead of entering the dock. */
     send_key(UI_KEY_DOWN);
-    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 2);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 0);
     CHECK(s_state.dock.focused == 0);
 
     s_state.dock.active = 1;
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
     send_key(UI_KEY_DOWN);
     CHECK(s_state.dock.focused == 1);
     CHECK(s_state.focus == UI_FOCUS_DOCK);
@@ -168,24 +180,154 @@ static void test_workspace_nav(void)
     CHECK(s_state.active_pane == UI_PANE_LOCAL);
 }
 
-static void test_stick_scroll(void)
+static void test_stick_selection(void)
 {
     reset();
     for (int i = 0; i < 15; ++i)
         snprintf(s_many_rows[i].name, sizeof(s_many_rows[i].name), "F%02d", i);
     ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_many_rows, 15, 0);
 
+    send_stick(1);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 1);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 0);
+
+    send_stick(5);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 6);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 0);
+
+    send_stick(5);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 11);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 2);
+
+    send_stick(-5);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 6);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 2);
+
+    /* A step above the window moves the view back with the cursor. */
+    send_stick(-5);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 1);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 1);
+}
+
+static void test_stick_wrap(void)
+{
+    reset();
+    for (int i = 0; i < 40; ++i)
+        snprintf(s_forty_rows[i].name, sizeof(s_forty_rows[i].name), "F%02d",
+                 i);
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_forty_rows, 40, 0);
+    s_state.panes[UI_PANE_LOCAL].selected = 38;
+    s_state.panes[UI_PANE_LOCAL].scroll = 29;
+
+    /* A full deflection from row 38 of 40 lands on row 3. */
+    send_stick(5);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 3);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 3);
+
+    send_stick(-5);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 38);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 29);
+
+    /* Up on the first row wraps to the last; Down on the last wraps back. */
+    s_state.panes[UI_PANE_LOCAL].selected = 0;
+    s_state.panes[UI_PANE_LOCAL].scroll = 0;
+    send_key(UI_KEY_UP);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 39);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 30);
+
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 0);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 0);
+}
+
+static void test_dock_entry(void)
+{
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+
+    /* With no transfer, Down on the last row wraps and never enters the
+     * dock. */
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 0);
+    CHECK(s_state.focus == UI_FOCUS_LIST);
+    CHECK(s_state.dock.focused == 0);
+
+    /* A network transfer reserves the dock entry. */
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    s_state.dock.active = 1;
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.focus == UI_FOCUS_DOCK);
+    CHECK(s_state.dock.focused == 1);
+    send_key(UI_KEY_UP);
+    CHECK(s_state.focus == UI_FOCUS_LIST);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 2);
+
+    /* A local job does too, while the network lane is idle. */
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    s_state.local_dock.active = 1;
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.focus == UI_FOCUS_DOCK);
+
+    /* A queued item in either lane keeps the dock focusable. */
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    s_state.dock.queued = 1;
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.focus == UI_FOCUS_DOCK);
+
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    s_state.local_dock.queued = 2;
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.focus == UI_FOCUS_DOCK);
+
+    /* The worker's batch position is the queue depth the dock reads: a
+     * three-item batch starts with two items still queued. */
+    reset();
     UiStateEvent event;
     memset(&event, 0, sizeof(event));
-    event.kind = UI_EVT_STICK;
-    event.stick_y = 1;
+    event.kind = UI_EVT_TRANSFER_STARTED;
+    event.direction = XFER_DIR_DOWNLOAD;
+    event.direction_known = 1;
+    event.item_index = 1;
+    event.item_total = 3;
+    snprintf(event.text, sizeof(event.text), "ONE.BIN");
     send_event(&event);
-    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 1);
-    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 0);
-    event.stick_y = 1;
+    CHECK(s_state.dock.active == 1);
+    CHECK(s_state.dock.queued == 2);
+
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_TRANSFER_DONE;
+    event.item_index = 3;
+    event.item_total = 3;
     send_event(&event);
-    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 2);
-    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 0);
+    CHECK(s_state.dock.active == 0);
+    CHECK(s_state.dock.queued == 0);
+
+    /* A finished local item with another behind it is queued, not active:
+     * the dock still takes the Down entry. */
+    reset();
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_TRANSFER_STARTED;
+    event.direction = XFER_DIR_LOCAL_COPY;
+    event.direction_known = 1;
+    event.item_index = 1;
+    event.item_total = 2;
+    snprintf(event.text, sizeof(event.text), "ONE.TXT");
+    send_event(&event);
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_TRANSFER_DONE;
+    event.direction = XFER_DIR_LOCAL_COPY;
+    event.direction_known = 1;
+    event.item_index = 1;
+    event.item_total = 2;
+    send_event(&event);
+    CHECK(s_state.local_dock.active == 0);
+    CHECK(s_state.local_dock.queued == 1);
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.focus == UI_FOCUS_DOCK);
 }
 
 static void test_marks(void)
@@ -867,13 +1009,112 @@ static void test_sites_scroll(void)
                  sizeof(s_state.sites.rows[i].name), "SITE%d", i);
     }
     send_key(UI_KEY_SELECT);
-    for (int i = 0; i < 7; ++i)
+    for (int i = 0; i < 6; ++i)
         send_key(UI_KEY_DOWN);
     CHECK(s_state.sites.selected == 6);
     CHECK(s_state.sites.first == 1);
+
+    /* The seventh Down wraps and resets the window to the top. */
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.sites.selected == 0);
+    CHECK(s_state.sites.first == 0);
+
+    /* Up on the first site wraps to the last and shows the last window. */
     send_key(UI_KEY_UP);
-    CHECK(s_state.sites.selected == 5);
+    CHECK(s_state.sites.selected == 6);
     CHECK(s_state.sites.first == 1);
+}
+
+static void test_sites_stick(void)
+{
+    reset();
+    s_state.sites.count = 8;
+    for (int i = 0; i < 8; ++i) {
+        snprintf(s_state.sites.rows[i].name,
+                 sizeof(s_state.sites.rows[i].name), "SITE%d", i);
+    }
+    send_key(UI_KEY_SELECT);
+    for (int i = 0; i < 7; ++i)
+        send_key(UI_KEY_DOWN);
+    CHECK(s_state.sites.selected == 7);
+    CHECK(s_state.sites.first == 2);
+
+    /* The stick moves by its step, wraps, and resets the window. */
+    send_stick(1);
+    CHECK(s_state.sites.selected == 0);
+    CHECK(s_state.sites.first == 0);
+
+    send_stick(-1);
+    CHECK(s_state.sites.selected == 7);
+    CHECK(s_state.sites.first == 2);
+
+    send_stick(-5);
+    CHECK(s_state.sites.selected == 2);
+    CHECK(s_state.sites.first == 2);
+
+    send_stick(5);
+    CHECK(s_state.sites.selected == 7);
+    CHECK(s_state.sites.first == 2);
+
+    send_stick(5);
+    CHECK(s_state.sites.selected == 4);
+    CHECK(s_state.sites.first == 0);
+}
+
+/* R25: only the workspace lists and the site book wrap. ACTIONS, CONFIRM, and
+ * the site editor keep their clamped or field-cycling navigation, and a stick
+ * event cannot move them. */
+static void test_stick_scope(void)
+{
+    reset();
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    int first_action = s_state.actions.visible[0];
+    int last_action =
+        s_state.actions.visible[s_state.actions.visible_count - 1];
+    send_stick(5);
+    CHECK(s_state.actions.selected == first_action);
+    send_key(UI_KEY_UP);
+    CHECK(s_state.actions.selected == first_action);
+    s_state.actions.selected = last_action;
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.actions.selected == last_action);
+
+    reset();
+    for (int i = 0; i < 12; ++i) {
+        s_confirm_items[i].name = "ITEM";
+        s_confirm_items[i].size = 1;
+        s_confirm_items[i].size_known = 1;
+    }
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_CONFIRM_REQUEST;
+    event.confirm = UI_CONFIRM_DELETE;
+    event.items = s_confirm_items;
+    event.item_count = 12;
+    send_event(&event);
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    send_stick(-5);
+    CHECK(s_state.confirm.choice_focus == 0);
+    CHECK(s_state.confirm.item_scroll == 0);
+    send_key(UI_KEY_LEFT);
+    CHECK(s_state.confirm.choice_focus == 0);
+    for (int i = 0; i < 12; ++i)
+        send_key(UI_KEY_DOWN);
+    CHECK(s_state.confirm.item_scroll == 7);
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.confirm.item_scroll == 7);
+
+    reset();
+    s_state.sites.count = 1;
+    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_SQUARE);
+    CHECK(s_state.screen == UI_SCREEN_SITE_EDITOR);
+    int field = s_state.editor.field;
+    send_stick(5);
+    CHECK(s_state.editor.field == field);
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.editor.field != field);
 }
 
 static void test_confirm_busy_guard(void)
@@ -2312,7 +2553,9 @@ int main(void)
     test_right_local_listing_independent();
     test_transfer_targets();
     test_session_loss_only_remote();
-    test_stick_scroll();
+    test_stick_selection();
+    test_stick_wrap();
+    test_dock_entry();
     test_marks();
     test_open_and_parent();
     test_sites_editor();
@@ -2328,6 +2571,8 @@ int main(void)
     test_cursor_copy_folder();
     test_delete_confirm_items();
     test_sites_scroll();
+    test_sites_stick();
+    test_stick_scope();
     test_confirm_busy_guard();
     test_path_busy_prompt();
     test_two_lane_dock();
