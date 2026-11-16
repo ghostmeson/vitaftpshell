@@ -27,6 +27,10 @@ compile_commands.json
 *.swo
 *~
 
+# Python bytecode from the docs gate; the gate is stdlib-only source
+__pycache__/
+*.pyc
+
 # Local logs, patches, and crash dumps
 *.log
 *.orig
