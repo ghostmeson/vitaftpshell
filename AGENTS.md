@@ -11,8 +11,9 @@ anything.
 client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
 volumes, and an anonymous read-write FTP server. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
-suites pass. A console pass of the v1 verification matrix is still pending, so
-the project is `building`, not `verified`.
+suites pass. Remote recursive transfer (R22/R23) is the remaining v1
+requirement; the console matrix runs once at v1 code freeze (D95), so the
+project is `building`, not `verified`.
 
 The live state and the single next action are on [the board](PROJECTS.md); the
 hardware evidence is in [the evidence record](docs/VERIFICATION.md).
@@ -270,7 +271,8 @@ destructive-confirmation rules, the FTP-client connect/PASV diagnostics, the
 remote-pane session/action rules, and the remote refresh/name/upload/folder
 rules; D85-D91 record the server sessions, access policy, warning removal, kept
 download, owner metadata, and the SIZE upload fallback; D92-D94 record the
-per-session data ports, the one-fact-one-home rule, and the documentation gate.
+per-session data ports, the one-fact-one-home rule, and the documentation gate;
+D95 records the one-pass verification sequencing.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
@@ -321,7 +323,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D94
+    DECISIONS.md       numbered decisions, D1-D95
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     VERIFICATION.md    hardware matrix, build evidence, and the test record
     THIRD_PARTY.md     reused code, licenses, protocol references

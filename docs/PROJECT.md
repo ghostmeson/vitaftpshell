@@ -18,8 +18,9 @@ card to a PC, without making the PC the workspace.
 client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
 volumes, and an anonymous read-write FTP server. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
-suites pass. A console pass of the v1 verification matrix is still pending, so
-the project is `building`, not `verified`.
+suites pass. Remote recursive transfer (R22/R23) is the remaining v1
+requirement; the console matrix runs once at v1 code freeze (D95), so the
+project is `building`, not `verified`.
 
 The live state and the single next action are on [the board](../PROJECTS.md); the
 hardware evidence is in [the evidence record](VERIFICATION.md).
@@ -64,9 +65,9 @@ rows that prove them on hardware.
 
 | Feature | Requirements | Matrix |
 |---|---|---|
-| FTP client — saved sites, browse, download, upload, mutations | R11, R13, R41 | M1, M2, M3, M14 |
-| Local file manager — browse, marks, copy/move, rename, delete, new folder | R30, R31, R39 | M11, M12, M13 |
-| Anonymous FTP server — four sessions, per-session data ports, path guard | R50, R51 | M5, M6, M7 |
+| FTP client — saved sites, browse, download, upload, mutations | R11, R13, R41 | M1, M2, M3, M14, M17, M18, M20, M22 |
+| Local file manager — browse, marks, copy/move, rename, delete, new folder | R30, R31, R39 | M11, M12, M13, M19, M23 |
+| Anonymous FTP server — four sessions, per-session data ports, path guard | R50, R51 | M5, M6, M7, M21 |
 
 ## Roadmap
 
@@ -81,7 +82,7 @@ rows that prove them on hardware.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | Console runs reported for the transfer and file-manager paths; the row-level the full matrix transcription is the open work |
+| Phase 6: v1 completion and verification | Remote recursion (R22/R23) is the remaining requirement; the full matrix runs once on the code-freeze build (D95), and the row-level evidence is the open work |
 
 ## Failure policy
 
@@ -102,7 +103,8 @@ rows that prove them on hardware.
 
 ## Success
 
-The v1 matrix in the requirements plan is the definition of done: anonymous
+The v1 matrix in [`VERIFICATION.md`](VERIFICATION.md) is the definition of
+done: anonymous
 download from `ftp.gnu.org`, upload to a login site, local batch work, anonymous
 server access from a PC, cancellation, and protected-path refusal, all on
 hardware. The strategy metrics are transfer completion rate, crash-free

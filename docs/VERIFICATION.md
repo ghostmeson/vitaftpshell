@@ -1,15 +1,22 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b72.vpk
-**SHA-256:** 9bb0ae6c7109be44c75a1fc89c7119aef4fdb8e211ff46ae9211702e4316888f
-**ELF:** build/vitaftpshell, 535,976 bytes
+**Build:** vitaftpshell-v01.00-b74.vpk (packaged 2026-11-16; not run on hardware)
+**SHA-256:** b25a5af7650ea1b1adbca512caeb70bc66827fecde3ab0032ba38d5a0d3e4046
+**ELF:** build/vitaftpshell, 536,192 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-16
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy, b62 trims the warning text, b63 removes the warning panel (D88), b66 carries the b63 review remediation, b68 closes its deferred preflight, sidecar, and listing-lifetime items, and b72 closes the non-hardware residual sweep; the b72 hardware retry is pending; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Status:** b74 is the current artifact and is host-tested only. The last
+hardware-observed build is b60: FileZilla upload and download with two
+sessions, and app-local transfers on all three volumes. b43 is the last
+row-level operator report. M5, M10, M13, and M14 are PART; every other row is
+PENDING until the v1 code-freeze pass (D95).
 
-This file is the U14 evidence record. A row is PASS only when the observed
-result matches its pass condition and the evidence is recorded here. A row that
-cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+This file is the U14 evidence record and the one home for the matrix. A row is
+added or amended when the behavior it proves lands, and it names what the user
+does and what pass means. A row is PASS only when the observed result matches
+its pass condition and the evidence is recorded here; a row that cannot be run
+is BLOCKED, never PASS. The matrix runs once on the v1 code-freeze build
+(D95), and `verified` requires every row PASS.
 
 ## Residual open-issues sweep (b72, host)
 
@@ -369,11 +376,18 @@ evidence are recorded here. The project therefore stays `building`.
 | Mounted volumes | pending |
 | PC-side MLSD server | pending |
 | PC-side LIST-only server | pending |
+| External login site | pending |
+| External writable server | pending |
 | DOS-listing server | pending |
 | FileZilla | pending |
 | Scratch folder | pending |
 
 ## Matrix
+
+Rows are added with the behavior they prove and executed once at v1 code
+freeze (D95). M17-M23 cover the surfaces the first sixteen rows did not
+exercise, and the remote-recursion rows land with R22/R23. A row's title names
+the behavior; the build it was observed on lives in its evidence.
 
 | Row | Setup | Expected | Observed | Evidence | Result |
 |---|---|---|---|---|---|
@@ -385,14 +399,21 @@ evidence are recorded here. The project therefore stays `building`.
 | M6 | Denials through the server | `boot_config.txt`, `ux0:tai` upload, volume-root delete all refuse, and nothing is created | pending | pending | PENDING |
 | M7 | Second client and stop-during-write | A second client is accepted; a fifth is refused; a data command during the owner's transfer answers 450; stop during a write confirms and leaves no partial | pending | pending | PENDING |
 | M8 | Network loss and cancel | Server stops and reports; cancel takes effect within 5 s; no crash dump | pending | pending | PENDING |
-| M9 | b40 selection and palette | Cursor slab legible in both panes, ACTIONS, and SITES; marks and risk stay visible; active pane outline and bloom; confirm list unchanged; failures red, neutral notices not | pending | pending | PENDING |
-| M10 | b40 cursor copy and dock words | COPY/PASTE without a mark; three-item batch ends `COPIED 3 ITEMS`; all-skipped `SKIPPED`; partial yellow; rename and new folder name themselves; no `2 OF 1` | COPY/PASTE and RENAME/NEW FOLDER work without marks; dock words read correctly in green (`COPIED`, `MOVED`, `DELETED`, `RENAMED`, `FOLDER CREATED`, `DOWNLOADED`) | b43 operator report 2026-11-14 | PART |
-| M11 | b40 local cancel and conflict prompt | Large local copy stops within 5 s with no partial; one conflict prompt names every existing destination; CANCEL ends the batch; cancelled delete reports `DELETED n OF m` | pending | pending | PENDING |
-| M12 | b41 parallel lanes and collision | Local copy and unrelated download progress; colliding paste asks WAIT/SKIP/CANCEL; WAIT resumes; server `STOR` on a held path gets 450; unrelated `PASV`/`LIST` work | pending | pending | PENDING |
-| M13 | b43 crash pass | Copy a file across every volume pair, copy a folder, rename across the extension, and create a folder while the clipboard is armed; all complete, the dock names the operation, no `.psp2dmp` appears, and a refused sync logs `sync skipped` instead of failing | Copy, paste, folder copy, rename, new folder with the clipboard armed, and download all complete; no crash observed | b43 operator report 2026-11-14; session log not pulled | PART |
+| M9 | Selection and palette | Cursor slab legible in both panes, ACTIONS, and SITES; marks and risk stay visible; active pane outline and bloom; confirm list unchanged; failures red, neutral notices not | pending | pending | PENDING |
+| M10 | Cursor copy and dock words | COPY/PASTE without a mark; three-item batch ends `COPIED 3 ITEMS`; all-skipped `SKIPPED`; partial yellow; rename and new folder name themselves; no `2 OF 1` | COPY/PASTE and RENAME/NEW FOLDER work without marks; dock words read correctly in green (`COPIED`, `MOVED`, `DELETED`, `RENAMED`, `FOLDER CREATED`, `DOWNLOADED`) | b43 operator report 2026-11-14 | PART |
+| M11 | Local cancel and conflict prompt | Large local copy stops within 5 s with no partial; one conflict prompt names every existing destination; CANCEL ends the batch; cancelled delete reports `DELETED n OF m` | pending | pending | PENDING |
+| M12 | Parallel lanes and collision | Local copy and unrelated download progress; colliding paste asks WAIT/SKIP/CANCEL; WAIT resumes; server `STOR` on a held path gets 450; unrelated `PASV`/`LIST` work | pending | pending | PENDING |
+| M13 | Crash pass | Copy a file across every volume pair, copy a folder, rename across the extension, and create a folder while the clipboard is armed; all complete, the dock names the operation, no `.psp2dmp` appears, and a refused sync logs `sync skipped` instead of failing | Copy, paste, folder copy, rename, new folder with the clipboard armed, and download all complete; no crash observed | b43 operator report 2026-11-14; session log not pulled | PART |
 | M14 | Upload to an external login site | The app's client uploads a file to a login-protected remote site over plain FTP, and the dock reports the completed transfer | App-local upload of a file to the app's own server passes (b58: STOR 263,206 bytes, 226); the external login site is not in the log | Run the upload against an external login site | PART |
 | M15 | Remote mutation on an external server | Rename, delete, and new folder on an external server each report their reply, and the remote pane reflects the result | pending | pending | PENDING |
 | M16 | Trailing dot and space folding | A file named with a trailing dot and one with a trailing space, created through the app, are refused or resolve to the name the filesystem reports; the denial for `ur0:tai/boot_config.txt` holds for the folded spelling too | pending | pending | PENDING |
+| M17 | Sites, editor, and persistence | Create an anonymous site and a login site in SITE EDITOR, edit one, delete one, then relaunch the app. Passes when: name, host, port, username, and password accept text entry; the password is masked in the editor and never appears in SITES or the session log; SITES marks each site ANON or LOGIN; a delete asks first and CANCEL changes nothing; after relaunch the remaining sites, the last local path, the last site, and the server port are restored | pending | pending | PENDING |
+| M18 | Text entry and the SERVER port | Cross on the SERVER port field, accept a new port, relaunch; then open a site field and cancel the IME. Passes when: the IME opens seeded with the current port and a five-character limit; accepting applies the port and it survives a relaunch; cancelling leaves the saved value and the focus unchanged | pending | pending | PENDING |
+| M19 | Local basics, free space, and absent volumes | On the mounted volumes, create a folder, rename it, delete it with the confirm, mark three files, and read the free-space figure; look at the row for an unmounted volume. Passes when: each operation completes and the dock names it; the delete confirm names the items and says it cannot be undone, and CANCEL changes nothing; the marked count and total size match the selection; free space shows a value for a mounted volume and `--` before a report; an absent volume is absent, not an error row | pending | pending | PENDING |
+| M20 | Existing-destination prompts | Upload a file that already exists on a server that reports it through MLST; repeat against a SIZE-only server; paste a file over an existing local file. Passes when: one prompt per batch offers OVERWRITE ALL, SKIP EXISTING, and CANCEL; SKIP leaves the destination byte-identical; OVERWRITE replaces it; CANCEL leaves it untouched; an existing destination folder merges; a folder destination is refused before any STOR | pending | pending | PENDING |
+| M21 | Server lifecycle, port, and visibility | Start and stop the server, edit the port, turn Wi-Fi off and try to start, and hold a port in use; visit every screen while the server is ON with a client attached. Passes when: OFF at launch; START turns ON with the local IP, port, and ACCESS READ-WRITE; the ON state and client count stay visible on every screen; stop closes the listener and reports; start without a network errors and stays OFF; a port in use leaves it OFF and names the port; the edited port survives a relaunch | pending | pending | PENDING |
+| M22 | Reconnect and queue clear | Connect to a site, queue three downloads, clear the queue from the dock, then drop Wi-Fi during a session and reconnect. Passes when: SELECT on the dock with items queued opens CLEAR QUEUE, names the count, and removes only the queued items; a dropped connection marks the session lost, stops the active transfer with an error, keeps the local pane usable, and RECONNECT returns to the same site | pending | pending | PENDING |
+| M23 | Risk marks and writable tai | Browse `ux0:tai` and `ur0:tai`, copy a file in, rename it, delete it, and try `boot_config.txt` from the local pane. Passes when: the yellow risk mark and the ACTIONS risk text appear on the tai rows; the copy, rename, and delete inside tai succeed; `boot_config.txt` is refused by name and nothing is created; no system directory is removed | pending | pending | PENDING |
 
 ## Install and launch
 

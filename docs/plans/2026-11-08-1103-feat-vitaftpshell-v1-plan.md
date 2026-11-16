@@ -767,8 +767,8 @@ findings and five lane-flow gaps. The remediation is a separate plan,
 landed in b55. It fixes the transfer terminal, the local-action guard U26 left
 in place, prompt identity, the UI stack budget, the pump budget, the server
 session bounds, and the sidecar owner, and it adds the threaded host test. The
-b55 rows in `docs/VERIFICATION.md` are the evidence for those scenarios. The
-matrix remains M1-M13.
+b55 rows in `docs/VERIFICATION.md` are the evidence for those scenarios. The matrix's rows and evidence live in
+`docs/VERIFICATION.md`.
 
 **Server upload fix (2026-11-15).** The b57 console trace showed the legacy
 global server-busy flag answering 450 to the app's own client's `PASV`. b58
@@ -1131,7 +1131,7 @@ The units above landed with these recorded additions and shapes:
 - **Requirements:** Success Criteria, R73.
 - **Dependencies:** U13.
 - **Files:** `docs/VERIFICATION.md`.
-- **Approach:** Install the VPK with Unsafe Homebrew enabled. Run each matrix row, record the session log excerpt, the elapsed connect-to-listing, and every failure with its class. Fix findings in the unit that owns them and rebuild; never patch a binary by hand.
+- **Approach:** Install the VPK with Unsafe Homebrew enabled. Run each matrix row once the v1 code is complete (D95), and record the session log excerpt, the elapsed connect-to-listing, and every failure with its class. Fix findings in the unit that owns them and rebuild; never patch a binary by hand.
 - **Test expectation:** the matrix below is the test.
 - **Verification:** The matrix passes with zero app-class failures, or the failing row is written down with its evidence.
 
@@ -1390,28 +1390,19 @@ The units above landed with these recorded additions and shapes:
 - **Patterns to follow:** The existing decision numbering and the fix-row format.
 - **Test scenarios:**
   - The documentation link and code-fence check reports no issues.
-  - No doc claims `verified` without M1-M13 evidence.
+  - No doc claims `verified` without every matrix row's evidence.
   - The design sheet and the rendered preview agree on the slab, the bloom, the dock words, and red.
   - `AGENTS.md` and `PROJECT.md` no longer state that every operation shares one slot.
 - **Verification:** The documentation check passes; the tracker names the current build and the single next action.
 
 ### Hardware matrix
 
-| Row | Setup | Passes when |
-|---|---|---|
-| M1 | `ftp.gnu.org`, anonymous, passive | First listing within the 35 s session budget (12 s connect, 10 s first listing); a 1 MB+ download completes with matching size |
-| M2 | LAN server with MLSD | MLSD is used, browse and download complete |
-| M3 | LAN server with MLSD disabled | LIST fallback parses, browse and download complete |
-| M4 | DOS-listing server | Names, sizes, and folders parse; a download completes |
-| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete |
-| M6 | Denials through the server | `boot_config.txt`, `ux0:tai` upload, volume-root delete all refuse, and nothing is created |
-| M7 | Second client and stop-during-write | 450 to the second client; stop during a write confirms and leaves no partial |
-| M8 | Network loss and cancel | Server stops and reports; cancel takes effect within 5 s; no crash dump |
-| M9 | b40 selection and palette | Cursor slab is legible in both panes, ACTIONS, and SITES; marks and risk stay visible on it; the active pane shows the outline and bloom; the confirm list is unchanged; failures are red and neutral notices are not |
-| M10 | b40 cursor copy and dock words | COPY and PASTE work without a mark; a three-item batch ends `COPIED 3 ITEMS`; an all-skipped batch ends `SKIPPED`; a partial batch is yellow; RENAME and NEW FOLDER report their own words; no `2 OF 1` |
-| M11 | b40 local cancel and conflict prompt | A large local copy stops within 5 s, leaves no partial, and leaves the destination unchanged; the local conflict prompt names the real destinations; CANCEL ends the batch; a cancelled delete reports `DELETED n OF m` |
-| M12 | b41 parallel lanes and collision | A local copy and an unrelated download both progress; the local badge shows cyan running while both run and yellow while waiting; a colliding paste asks WAIT, SKIP, or CANCEL; WAIT resumes; the three-choice cancel stops only the chosen lane; a server `STOR` on a held path gets 450 and disarms while a sibling succeeds; unrelated `PASV` and `LIST` still work; a PC `STOR` while an app transfer is on the wire gets 450 |
-| M13 | b43 crash pass | A file copy between every pair of volumes completes, the file is readable, and the dock names the operation; a folder copy completes; a rename that changes the extension completes; NEW FOLDER while the clipboard is armed completes; no new `.psp2dmp` is written; a refused sync still commits and logs `sync skipped` |
+The rows, their setup, and their pass conditions live in
+[`docs/VERIFICATION.md`](../VERIFICATION.md), which is the one home for the
+matrix and records the observed result for each row. A row is added there with
+the behavior it proves, and it is PASS only with console evidence. The final
+build runs every row, because the client, server, executor, worker, and dock all
+change across the line.
 
 ---
 
@@ -1446,7 +1437,7 @@ A unit is not done because its tests pass; it is done when its scenarios pass, t
 - Every `[C]` claim lives in an adapter and names the claim and the reason.
 - Every row of the matrix in `docs/VERIFICATION.md` has run on the console with its evidence before the project moves to `verified`.
 - Every local and network batch ends once, with done, skipped, failed, and cancelled counts; no batch ends green after a failed item.
-- Every hardware row records the build it passed on, and the final build re-runs M1-M13 because b41 changes the client, server, executor, and dock paths.
+- Every hardware row records the build it passed on, and the final build runs every matrix row, because the client, server, executor, worker, and dock change across the line.
 - A local cancel stops within 5 s, removes the partial, and leaves the destination byte-identical.
 - One local job and one network transfer can run together when their canonical paths do not overlap; overlapping paths wait or prompt, and a server client gets 450 only on a held path.
 - No screen still draws the old thin-only cursor in the active pane; the inactive pane keeps its thin bar, and no surface paints a neutral notice red.

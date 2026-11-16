@@ -22,13 +22,13 @@ This file is an **index**, not the full evidence record:
 | `PART` | One part is hardware-observed; the named remainder is not. |
 
 Do not promote a `HOST` or `PENDING` row to `HW` without a console observation
-recorded in `VERIFICATION.md`. The project stays `building` until the M1–M13
-matrix passes.
+recorded in `VERIFICATION.md`. The project stays `building` until the full matrix
+passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b72.vpk`, 265,072 bytes,
-  SHA-256 `9bb0ae6c7109be44c75a1fc89c7119aef4fdb8e211ff46ae9211702e4316888f`.
+- **Current artifact:** `vitaftpshell-v01.00-b74.vpk`, 265,736 bytes,
+  SHA-256 `b25a5af7650ea1b1adbca512caeb70bc66827fecde3ab0032ba38d5a0d3e4046`.
 - **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
   FileZilla upload and download work with two sessions; the app-local client
   transfers on all three volumes. The session log is `logs/session-b60.log`.
@@ -45,15 +45,16 @@ matrix passes.
 - **Matrix:** the b58 self-connection upload and download pass on hardware.
   b60 accepts up to four clients with one data transfer at a time (D86);
   FileZilla's browse and transfer connections both connect, and its upload and
-  download pass. b61–b63 are contained in b66, and b66–b72 are the current
-  line; none of them has run on hardware since b60. M5 remains PART only for a
-  FileZilla rename/delete and the full three-volume browse. M10 and M13 are
-  partly observed; M1–M9, M11, and M12 await the b72 console run.
+  download pass. b61-b74 are the current line, and none of them has run on
+  hardware since b60. M5 remains PART only for a FileZilla rename/delete and
+  the full three-volume browse; M10 and M13 are partly observed; every other
+  row awaits the code-freeze pass (D95).
 
 ## Network closure (b73-b74, host)
 
-The per-session data ports, the SIZE preflight refresh, and the threaded
-transfer suite; the artifact is `vitaftpshell-v01.00-b73.vpk`.
+The per-session data ports, the SIZE preflight refresh, the threaded transfer
+suite, the reachable SERVER port editor, and the shared test peer; the artifact
+is `vitaftpshell-v01.00-b74.vpk`.
 
 | Build | Symptom | Cause and fix | Evidence | Status |
 |---|---|---|---|---|

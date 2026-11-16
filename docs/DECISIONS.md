@@ -2130,3 +2130,28 @@ is a count of remaining drift that the sweep drives to zero before deleting the
 file. The gate proves structure and known wording, not the truth of prose nobody
 has written; a new scope claim still needs review, and the gate does not claim
 otherwise.
+
+## D95. v1 verification is one console pass at code freeze
+
+**Date:** 2026-11-16
+**Status:** accepted; it supersedes the board's install-and-run step, not any
+product rule.
+
+**Context:** b74 is packaged and host-tested, and the matrix still carries rows
+written for earlier builds. The owner chose not to run a console row per build:
+the v1 code is not complete, so a row that passes now proves a build that will
+change. The matrix is the test script for the finished product, and it should be
+read as one.
+
+**Decision:** `docs/VERIFICATION.md` is the one home for the matrix. A row is
+added or amended when the behavior it proves lands, names what the user does,
+and states what pass means. The matrix is executed once on the v1 code-freeze
+build, as a test user would; that pass promotes rows from PENDING or PART. No
+interim build claims a console row, and host evidence never becomes `HW`. A row
+is PASS only with its observed result and evidence. A defect found in the final
+pass is fixed, and the affected rows run again on the new build.
+
+**Consequences:** b74 stays host-only and every row stays PENDING or PART. The
+board's next action is the remaining code, not a console run. The matrix grows
+as v1 completes, including the remote-recursion rows when R22/R23 land, and the
+plan points at the matrix instead of duplicating it, so a new row cannot drift.
