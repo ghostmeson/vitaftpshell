@@ -52,7 +52,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - **Server is a compatibility surface.** It exists so VitaShell users need one app, but it does not drive the workspace design. Governs R47-R56. (session-settled: user-directed — chosen over a two-way hub and dropping server mode: it completes the tool without changing the core bet.)
 - **Anonymous read-write on the Vita volumes.** The server exposes `ux0:`, `ur0:`, and `uma0:` without login and with write access, starting OFF. Governs R47-R56. (session-settled: user-directed — chosen over authenticated read-write and read-only: matches VitaShell and keeps upload simple.)
 - **Always remember passwords.** Saved login sites store passwords unencrypted and reconnect without retyping; the UI states the risk. Governs R11-R18. (session-settled: user-directed — chosen over optional and never: FileZilla-like convenience, with plaintext storage accepted.)
-- **Multi-select and local recursive folders.** Batch file operations and local folder operations are v1, not later polish; remote recursive folder transfer stays deferred (R22, R23). Governs R28-R46. (session-settled: user-directed — chosen over files-only and single-item: a file manager must move folders.)
+- **Multi-select, local recursion, and remote recursion.** Batch file operations and local folder operations are v1, not later polish; remote recursive folder transfer is also a v1 requirement, planned under its own behavior design and not built yet (R22, R23). Governs R28-R46. (session-settled: user-directed — chosen over files-only, single-item, and deferring remote folders: a file manager must move folders on both sides.)
 - **GPLv3, no vendored engine.** The project stays GPLv3; the FTP core, the file-operation policy, and the UI are written here, and COCKPIT's MIT graphics layer is adapted with its notice. Governs R28-R37. (session-settled: user-approved — chosen over vendoring VitaShell's file manager: its copy engine is bound to its own UI and would bypass this project's templed writes and path table; the license is kept deliberately, not forced.)
 - **Plain FTP only.** No FTPS, SFTP, HTTP, or WebDAV in v1; secure transports are a later decision. Governs R19-R27. (session-settled: user-directed — chosen over FTPS and both: plain FTP is the launch target.)
 - **No background daemon.** Transfers and the server end when the app exits; no kernel plugin or boot component. Governs R47-R63. (session-settled: user-directed — chosen over a daemon later and now: the app owns its lifetime.)
@@ -113,8 +113,8 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - R19. The client uses passive FTP only; active mode is not offered in v1. The data channel connects to the control connection's peer address; a PASV reply's advertised host is ignored and its port is used (D63).
 - R20. Directory listings use MLSD when the server offers it, fall back to LIST, parse Unix and DOS formats, skip `.` and `..`, and sort directories before files.
 - R21. Remote browsing supports enter, parent, refresh, and shows name, type, and size when known; unknown size renders `--`. A listing is capped at 2000 rows and marks a truncated one `FIRST 2000` (KTD7).
-- R22. The client downloads files. Recursive folder download is deferred from v1 and refused with `FOLDER NOT SUPPORTED` (D65).
-- R23. The client uploads files. Recursive folder upload is deferred from v1 and refused with `FOLDER NOT SUPPORTED` (D65).
+- R22. The client downloads files, and a remote folder is downloaded recursively with its subtree. Remote recursion is a v1 requirement that is planned and not built yet; the current build refuses a folder with `FOLDER NOT SUPPORTED` (D65).
+- R23. The client uploads files, and a local folder is uploaded recursively with its subtree. Remote recursion is a v1 requirement that is planned and not built yet; the current build refuses a folder with `FOLDER NOT SUPPORTED` (D65).
 - R24. The client creates remote directories, renames, deletes files, and deletes directories; every remote delete requires an explicit confirmation that names the items and says it cannot be undone.
 - R25. A remote command failure reports the server reply or a mapped reason; the app does not claim success.
 - R26. A dropped control connection marks the session disconnected, stops active transfers with an error, and offers reconnect to the same site; a dropped data connection aborts the active transfer and keeps the session when the control channel is healthy. Resolve, connect, login, and the first listing share a 35-second budget, with caps of 3 s resolve, 12 s connect, 5 s greeting and login, and 10 s first listing (D62); a data-channel read has its own 20 s idle deadline (D63), and expiry puts the dock in a stalled state naming the last completed step, stops the transfer, and keeps the session when only the data channel timed out.
@@ -149,8 +149,8 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 
 - R47. The server is OFF at launch and never starts automatically.
 - R48. SERVER shows OFF or ON, control port (default 1337), local IP, connected client count, and `ACCESS READ-WRITE`. The port can be edited from SERVER. The warning panel is removed (D88); the docs state the anonymous exposure and the `boot_config.txt` denial. When a client is connected, it names the current operation, path, and transferred and total bytes, with `--` when unknown.
-- R49. Cross starts and stops the server; starting without a network shows a clear error and leaves it OFF. A bind failure names the port, says another server may be using it, and leaves the server OFF so the port can be changed.
-- R50. The server accepts up to four clients; a fifth connection is refused with a busy reply. One data transfer owns the PASV/data port at a time, and another session's data or PASV command gets a busy reply (D86).
+- R49. Cross starts and stops the server; starting without a network shows a clear error and leaves it OFF. A control-port bind failure names the port, says another server may be using it, and leaves the server OFF so the port can be changed; a session's data-port bind failure answers its PASV with 425, leaves the server ON, and arms nothing (D92).
+- R50. The server accepts up to four clients; a fifth connection is refused with a busy reply. Each session owns its own passive data port, bound on its first PASV and held until the server stops, and one data transfer runs at a time; another session's data or PASV command gets a busy reply (D86, D92).
 - R51. The server exposes the mounted subset of `ux0:`, `ur0:`, and `uma0:` as top-level directories; absent volumes are absent, and no other mount is exposed.
 - R52. Anonymous login has read-write access to the exposed volumes.
 - R53. The server may read, write, create, rename, and delete in the app data folder under `ux0:data` and under `ur0:tai`/`ux0:tai`. It denies all access to `ur0:tai/boot_config.txt` and destructive commands on volume roots, `ur0:data`, `ux0:data`, and protected system directories. A rename checks both operands. Every check uses the canonical path (D87).
@@ -218,7 +218,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - F5. Cancel or recover
   - **Trigger:** The user cancels an active transfer, or the WiFi connection drops.
   - **Actors:** A1, A2, A3.
-  - **Steps:** The data stream stops, an incomplete destination is removed, and the dock reports the failure with its class (R73). A dropped control connection marks the session disconnected and offers reconnect; a data-only failure offers a retry of that item. A dropped network stops the server and says so.
+  - **Steps:** The data stream stops, an incomplete destination is removed, and the dock reports the failure with its class (R73). A dropped control connection marks the session disconnected and offers reconnect; a data-only failure leaves the item failed, and a failed item is retried by running it again. A dropped network stops the server and says so.
   - **Outcome:** No partial file looks complete, and the local pane remains usable.
   - **Covers:** R26, R35, R40, R42, R59, R63, R73.
 
@@ -384,11 +384,9 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - Resume or restart of partial transfers.
 - Scheduled transfers, folder sync, and comparison.
 - More than one network transfer at a time, or more than one local job at a time.
-- Remote recursive folder upload and download (R22, R23).
 - A loopback upload from the app's client to its own server; it follows the normal 450 rule.
 - Dock terminal words for remote-pane rename, delete, and new-folder; those keep their status-line feedback.
 - Retrying a failed local batch from the dock; marks are the retry path.
-- Multiple simultaneous server clients.
 - An encrypted credential vault or master password.
 - Additional transfer protocols beyond plain FTP.
 - Themes, plugins, and alternate HUD layouts.
@@ -426,7 +424,7 @@ None.
 | Question | Answer |
 |---|---|
 | Authid and mounts | One UNSAFE eboot for all three volumes. D32, KTD1 |
-| Passive data-port strategy | Control port plus one, single, bound to the LAN address. D39, KTD6 |
+| Passive data-port strategy | One port per session slot, bound on that slot's first PASV and held until stop; slot 0 keeps the port one above the control. D92, KTD6 |
 | Threading and writers | One worker thread owns every long operation; the UI thread owns UI state only. D38, KTD3, KTD4 |
 | Listing limits and memory | 2000 rows per pane in a fixed arena, `FIRST 2000` notice, no paging. KTD7 |
 | Site and settings format | Two line-oriented percent-encoded text files under `ux0:data/`, temp-then-rename. KTD8 |
@@ -449,7 +447,7 @@ None.
 | Completion rate | Zero app-class failures plus 95% over non-cancelled, non-network attempts, minimum 20. D33 |
 | Cross-volume copy or move | All-or-nothing with destination rollback. D36, R42 |
 | Single remote delete | Confirms, like a local delete. D34, R24 |
-| One-press retry | The dock retries the failed item after a data-channel failure. D35 |
+| One-press retry | Retired for v1: no retry command exists, and a failed item is retried by running it again. D35 |
 | Server on network change | Stops, returns to OFF, and names the reason. D37 |
 | Server-side upload overwrite | Replaces the existing file without a console prompt; the warning discloses it. D41 |
 
@@ -493,7 +491,7 @@ The 2026-11-14 correction pass is grounded in the shipped b39 code rather than i
 - KTD3. One worker thread owns every long operation: the client session, the server listener and its one slot, the transfer queue, and the local batch job. The main thread owns the UI and never performs I/O beyond the frame draw. (session-settled: user-approved — chosen over a single cooperative loop: a blocking name resolve would freeze a frame and R70 forbids it.) See D38.
 - KTD4. Thread handoff is two fixed-capacity rings plus published listing snapshots. Commands and events are plain fixed-size records with no pointers into either thread's state. Both ring indices and the listing publish index use release/acquire ordering, not plain stores. A pane has three listing generations: the worker fills one the UI has released, publishes it with a release store, and the UI copies the index once at a frame boundary; the worker never fills the two most recently published generations. Each ring has a per-class overflow rule: progress coalesces to the newest value, while terminal transfer state, a cancel acknowledgement, and a server state change are latched flags that cannot be dropped. The site book saves through a bulk lane carrying a generation number, because it is not a fixed-size record.
 - KTD5. All sockets are non-blocking. The worker waits through an aggregate `NetPort` call — a handle set, a timeout, and the ready subset — so no file outside an adapter names `select`. The adapter implements the wait with the libc `select` over the socket layer and keeps `sceNetEpollWait` as the fallback if a mixed control, data, and listener set misbehaves. Each stage carries a deadline and no stage blocks on a file body. Resolution is the one bounded blocking call, and it runs on the worker, never on the UI thread. A data phase has four sub-states — armed after PASV, accepted, active, and draining — and any non-data command or refusal invalidates it; after an abort the control channel drains the 426/226 pair before the next command is parsed.
-- KTD6. The server's passive data port is the control port plus one, bound to the LAN address and advertised as that address and port. The address comes from the `NetPort` link query, which reports up or down and an address that is explicitly unknown rather than `0.0.0.0`; when it is unknown the server does not start. The port editor accepts 1024-65534 so the data port stays valid, and a bind failure on either port names both. See D39.
+- KTD6. The server binds only the control port at start. Each of its four session slots owns a passive data port derived from the control port and the slot index, bound on that slot's first PASV and held until the server stops, and a data connection is attributed by the port it arrives on (D92). The advertised address comes from the `NetPort` link query, which reports up or down and an address that is explicitly unknown rather than `0.0.0.0`; when it is unknown the server does not start. The port editor accepts 1024–65531 so no slot's data port exceeds 65535. A control-port bind failure at start names that port and leaves the server OFF; a data-port bind failure answers that PASV with 425 and leaves the server ON. See D92.
 - KTD7. Each pane holds at most 2000 rows in a fixed arena. A longer directory keeps the first 2000 in the source's order and the pane band shows `FIRST 2000` in yellow; no paging, because LIST has no offset and a re-read costs more than the cap.
 - KTD8. Sites and settings are two line-oriented text files, `sites.cfg` and `settings.cfg`, under `ux0:data/`, with a version header and percent-encoded fields. Saving writes a temporary file, closes it, and renames it over the target. A file that fails to parse is read for whatever lines are valid and is never overwritten until the user saves.
 - KTD9. The session log is `session.log` beside those files, one tab-separated record per line: monotonic milliseconds since start, event name, then `key=value` fields. At 64 KiB it is renamed to `session.old.log` and a new file starts; only one generation is kept. Passwords never appear, and a server's reply text is never a log field, because a hostile server can echo a credential back; site names and hosts may be logged.
@@ -791,14 +789,14 @@ amendment.
 
 | Risk | Treatment |
 |---|---|
-| Anonymous read-write server on the LAN | OFF at launch, visible ON state and client count, a warning that names the volumes, the denial table, and one log line per accepted client and per finished transfer. Accepted: the product is a compatibility surface, and the risk is disclosed before the first start. |
+| Anonymous read-write server on the LAN | OFF at launch, the visible ON state and client count, the README and project docs naming the volumes and the denial table, and one log line per accepted client and per finished transfer. Accepted: the product is a compatibility surface, and the risk is stated before the first start. |
 | `UNSAFE` is required to install | Stated in the README and the install flow; the permission level is used only for file access. Accepted: a server that cannot write two of its three volumes is not the product (D32). |
 | SceNet behavior is unverified on hardware | Everything unverified is isolated in `psp2_net.c` with a `[C]` note, and M1 is the first proof. The connect path is the same shape `vita-cap-test` uses. |
 | A rename that cannot replace a target | The capability is asked at run time and the fallback is planned, logged, and reversible (KTD12). |
 | Memory for listing generations | Three generations per pane at 2000 rows is about 3.4 MB; the assumption is a 6 MB budget, measured in U14. |
 | A PC browsing while a local batch runs | Listings and unrelated commands are allowed; only a command whose resolved path is held by the local job answers 450 and disarms. KTD21 owns the check. |
 | A server upload overwriting an existing file | Decided in D41: overwrite without a console prompt, disclosed in the warning. A 550 alternative is recorded there if the disclosure proves insufficient. |
-| UNSAFE plus an anonymous writer can damage saved data | The app's own folder is excluded from the server, and the protected and denied tables cover the boot paths. Accepted: everything else is the user's own storage, which is the point of the server. |
+| UNSAFE plus an anonymous writer can damage saved data | The boot paths stay denied and the protected table covers the system roots, while the app's own folder and the `tai` folders are writable by design (D87). Accepted: everything else is the user's own storage, which is the point of the server. |
 | A local step starves the network lane | The network tick waits up to 50-100 ms. b41 budgets the local slice and shortens the wait while local work is pending; the timing is measured on hardware in M12. |
 | A batch loses a command | Batch metadata plus a bounded idle flush reports the shortfall as incomplete, and the ring's lost counter is read. |
 | The local conflict prompt is wrong today | b40 fixes the blank prompt rows and makes CANCEL end the batch before the new batch terminal depends on it. |
@@ -983,10 +981,12 @@ amendment.
 - **Requirements:** R47-R56, KTD11, KTD14.
 - **Dependencies:** U2, U4.
 - **Files:** `src/core/ftp/{ftp,server}.c` and headers, `tools/test/test_server.c`, `tools/fake/fake_ftp_client.c`.
-- **Approach:** Bind the control socket, then the data socket at control plus one. Accept up to four clients; a fifth accept gets a 450 and is closed. Each session owns its login, cwd, line reader, reply buffer, and rename state; one data transfer owns the shared data socket (D86). Commands parse against the table; every path resolves through `path` and re-checks the denial table after normalization. The data phase follows KTD5: PASV arms one connection, a non-data command or a refusal disarms it, and an abort drains its own reply pair. A `STOR` overwrites an existing destination through the templed write and never asks the console (D41); the docs disclose it because the SERVER warning panel is removed (D88). `ftp.c` holds the shared line reader, remote path normalizer, and templed write so the client and server cannot drift.
+- **Approach:** Bind only the control socket at start. Each session's first PASV binds that slot's data listener, and the listener is held until stop; the 227 reply carries the arming session's port (D92). Accept up to four clients; a fifth accept gets a 450 and is closed. Each session owns its login, cwd, line reader, reply buffer, and rename state, plus its own data port; one data transfer runs at a time (D86). Commands parse against the table; every path resolves through `path` and re-checks the denial table after normalization. The data phase follows KTD5: PASV arms one connection, a non-data command or a refusal disarms it, and an abort drains its own reply pair. A `STOR` overwrites an existing destination through the templed write and never asks the console (D41); the docs disclose it because the SERVER warning panel is removed (D88). `ftp.c` holds the shared line reader, remote path normalizer, and templed write so the client and server cannot drift.
 - **Test scenarios:**
   - Greeting is 220; `USER anonymous` is 331 and `PASS anything` is 230; any other user is 530.
-  - `PASV` returns the LAN address and control port plus one.
+  - `PASV` returns the LAN address and the arming session's own data port; slot 0 gets the port one above the control, and each later slot one more.
+  - A data connection to a slot's port is attributed to that session, and two sessions from one address transfer on their own ports in turn (D92).
+  - A data-port bind failure answers 425 and leaves the server ON; a control-port bind failure at start leaves it OFF.
   - `LIST /UX0:/DATA` returns Unix lines; `MLSD` returns facts; `NLST` returns names.
   - `RETR` sends the bytes and 226; a missing file returns 550.
   - `STOR ux0:data/x.bin` writes a temp file and renames on close; a mid-write disconnect leaves the previous destination untouched and no temp file.
@@ -995,7 +995,7 @@ amendment.
   - `STOR ux0:tai/boot_config.txt` returns 550 and creates nothing, including `UR0:/TAI/./BOOT_CONFIG.TXT` and a repeated-separator spelling.
   - `DELE /UX0:` and `RMD /UR0:` return 550; `RNFR /UX0:/DATA` and `RNTO /UX0:/DATA-OLD` return 550 with nothing moved.
   - `CWD /UX0:/DATA` maps to `ux0:data`; `CWD /../../` clamps to `/`.
-  - A second client while one is connected receives 450 and is closed; the first is unaffected.
+  - A second client while one is connected is accepted as a second session; a fifth connection receives 450 and is closed, and the four sessions are unaffected.
   - A data command, or a mutating command, whose resolved path is held by the other lane receives 450, and no data connection stays armed; a data command while an app network transfer is on the wire also receives 450, while an unrelated `LIST` still succeeds (U26 owns the shared predicate).
   - A data connection from an address other than the control peer's is closed and delivers no bytes.
   - An `ABOR` during a write returns 426 then 226, and the next command's reply is aligned.

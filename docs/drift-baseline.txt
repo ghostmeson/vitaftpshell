@@ -52,10 +52,6 @@ README.md	retired-phrase	pre-alpha
 README.md	retired-phrase	recursive folders
 README.md	status-block	status:begin
 docs/ARCHITECTURE.md	build-token	b41
-docs/ARCHITECTURE.md	retired-phrase	control+1
-docs/DESIGN.md	retired-phrase	1024-65534
-docs/DESIGN.md	retired-phrase	TO RETRY
-docs/DESIGN.md	retired-phrase	control port plus one
 docs/FIXES.md	retired-phrase	control+1
 docs/PROJECT.md	build-token	b16
 docs/PROJECT.md	build-token	b18
@@ -103,7 +99,6 @@ docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs
 docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/plans/archive/
 docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/plans/archive/README.md
 docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	inventory	docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md
-docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	reference	D92
 docs/plans/README.md	build-token	b40
 docs/plans/README.md	build-token	b41
 docs/plans/README.md	build-token	b50
