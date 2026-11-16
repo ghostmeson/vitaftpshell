@@ -6,28 +6,35 @@ anything.
 
 ## Status
 
-`building`. Phases 1, 2, and 3 are complete: the build shape, the six port
-contracts and host fakes, the COCKPIT gfx base with the seven-surface layout
-table, the reply/listing/path/format policy, the site book/settings/store/log
-policy, and the passive FTP client and server state machines all exist.
-`tools/test/run.sh` passes ten host suites and `tools/preview/run.sh` renders a
-960x544 PNG. The VPK is still a stub (`vitaftpshell-v01.00-b8.vpk`): no screen
-or platform adapter exists yet, and the engine is not linked into the app target
-until U13. Do not start coding from this file alone: the plan is the source of
-truth for behavior, sequencing, and verification, and `docs/DESIGN.md` is the
-layout authority.
+<!-- status:begin -->
+`building`. vitaFTPShell is one PS Vita app with three roles: a passive FTP
+client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
+volumes, and an anonymous read-write FTP server. The seven screens, the
+app/worker runtime, and the six Vita adapters are implemented, and the host
+suites pass. A console pass of the v1 verification matrix is still pending, so
+the project is `building`, not `verified`.
+
+The live state and the single next action are on [the board](PROJECTS.md); the
+hardware evidence is in [the evidence record](docs/VERIFICATION.md).
+<!-- status:end -->
+
+Do not start coding from this file alone: the plan is the source of truth for
+behavior, sequencing, and verification, and `docs/DESIGN.md` is the layout
+authority.
 
 ## Read order
 
 1. `STRATEGY.md` — why the product exists, who it serves, boundaries, metrics.
-2. `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — the plan: R1-R73, KTD1-KTD18, U1-U17 in six phases, the verification contract.
+2. `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — the plan: R1-R74, KTD1-KTD25, U1-U28 in six phases, the verification contract.
 3. `PROJECTS.md` — current phase and the single next action.
 4. `docs/PROJECT.md` — scope, non-goals, roadmap, failure policy.
 5. `docs/ARCHITECTURE.md` — planned layers, ports, and allowed platform files.
 6. `docs/DESIGN.md` — the settled layout, states, and input; the sheets in `docs/design/`.
 7. `docs/DECISIONS.md` — numbered decisions with context and consequences.
-8. `docs/THIRD_PARTY.md` — reused code, licenses, and protocol references.
-9. `docs/README.md` — the documentation map.
+8. `docs/FIXES.md` — chronological fix index with hardware status; start here
+   before re-debugging a known failure.
+9. `docs/THIRD_PARTY.md` — reused code, licenses, and protocol references.
+10. `docs/README.md` — the documentation map.
 
 ## What this is
 
@@ -40,13 +47,17 @@ shape; the transfer dock is where work is visible.
 
 - v1 ships all three roles: client, local file manager, and FTP server.
 - The server is anonymous read-write on the mounted `ux0:`, `ur0:`, and `uma0:`
-  volumes, OFF at launch, and accepts one client at a time.
+  volumes, OFF at launch, and accepts up to four clients with one data transfer
+  at a time (D86).
 - The client is passive FTP only, tries MLSD then LIST, and parses Unix and DOS
   listings.
 - Passwords are always remembered and stored unencrypted; they are never logged.
-- Multi-select and recursive folder operations are v1.
-- One transfer is active at a time; additional items queue, and a server-side
-  transfer uses the same slot.
+- Multi-select and local recursive folder operations are v1; remote recursive
+  transfer is a v1 requirement that is planned, not built (R22/R23, D65).
+- One network transfer and one local job may run together when their canonical
+  paths do not overlap; each lane queues its own items, a collision asks
+  WAIT/SKIP/CANCEL, and a server-side transfer uses the network lane and
+  answers 450 on a held path (D72).
 - Plain FTP only in v1. No FTPS, SFTP, HTTP, or WebDAV.
 - No background daemon, taiHEN system plugin, kernel plugin, or boot component.
 - No PC-first UI and no VitaShell feature-parity race.
@@ -55,9 +66,9 @@ shape; the transfer dock is where work is visible.
 - GPLv3. Keep the license and the third-party notices intact.
 - One `UNSAFE` eboot. The server and the local pane need all three volumes, and
   the safe authid refuses them (D32).
-- The local manager may write inside `ur0:tai` and `ux0:tai` behind the
-  high-risk confirmation; the server never may; `boot_config.txt` is denied for
-  every role (D30, D31).
+- The local manager and the server may write inside `ur0:tai` and `ux0:tai`;
+  the server exposes the app's own data folder. `ur0:tai/boot_config.txt` is
+  denied for every role (D87).
 - Every started transfer records one cause class, and the release gate is zero
   `app`-class failures plus 95% over attempts that were neither cancelled nor
   network-interrupted (D33).
@@ -134,10 +145,11 @@ Policy and UI state must run on the host against fake `NetPort`, `FsPort`,
 - Unix, DOS, and MLSD listing parsing;
 - path joining, parent, and the protected-path rules;
 - batch conflict decisions and queue order;
-- recursive folder planning and the copy-into-itself refusal;
+- local recursive folder planning and the copy-into-itself refusal;
 - cancellation and partial-file cleanup decisions;
 - server command handling and path denial;
-- the input reducer and screen transitions.
+- the input reducer and screen transitions;
+- the transfer slot, the local plan and rollback, and the handoff rings.
 
 A test that only proves a function returns a constant is not a test. A hardware
 run is the only evidence that promotes the project to `verified`.
@@ -156,18 +168,17 @@ run is the only evidence that promotes the project to `verified`.
    and deletes to it, including through server mode.
 2. **No kernel plugin.** Do not add a `.skprx`, a `*KERNEL` entry, or a boot
    component. v1 has no system-level surface.
-3. **Server OFF by default.** Starting it is an explicit action. The ON state and
-   client count stay visible on every screen. The warning says anonymous clients
-   can read and write the exposed volumes and that the app data folder is
-   excluded.
+3. **Server OFF by default.** Starting it is an explicit action. The ON state,
+   the `ACCESS READ-WRITE` readout, and the client count stay visible. The SERVER
+   warning panel is removed (D88); the README and project docs still state the
+   anonymous exposure and the `ur0:tai/boot_config.txt` denial.
 4. **Protected paths.** Volume roots, `ur0:data`, `ux0:data`, `ur0:tai`, and
-   `ux0:tai` cannot be renamed, moved, or deleted. The server denies all access to
-   `ur0:tai/boot_config.txt` and the app's own data folder under `ux0:data`, and
-   denies every write, create, rename, and delete under `ur0:tai` and `ux0:tai`.
-   The local manager may write inside the `tai` folders only after the high-risk
-   confirmation (D30); nothing in the app writes, renames, or deletes
-   `boot_config.txt`. Every check uses the canonical path from D42, and a rename
-   checks both operands.
+   `ux0:tai` cannot be renamed, moved, or deleted. The server and the local
+   manager may read and write inside the app data folder and the `tai` folders;
+   `ur0:tai/boot_config.txt` stays denied for every role (D87). The local
+   high-risk confirmation is retired; the yellow risk mark remains a warning.
+   Every check uses the canonical path from D42, and a rename checks both
+   operands.
 5. **Never delete or recreate a system directory.** `ur0:`, `ux0:`, `uma0:`,
    `ur0:data`, `ux0:data`, `ur0:tai`, and `ux0:tai` belong to the console. The
    app creates only its own data folder.
@@ -183,10 +194,15 @@ run is the only evidence that promotes the project to `verified`.
 
 - Target: PS Vita 3.65 Enso, VitaSDK 2026.08, libvita2d.
 - `./build.sh` builds one UNSAFE eboot and one VPK; `./tools/test/run.sh` runs
-  the layering guard and the host tests; `./tools/preview/run.sh` renders the
-  gfx layer on the host; `./send.sh <vita-ip>` uploads the current VPK. The
-  renderer's libvita2d link and the SDK stubs join when U13 adds the gfx and
-  adapter sources to the app target.
+  the layering guard, the docs guard, and the host tests;
+  `./tools/preview/run.sh` renders the screens on the host;
+  `./send.sh <vita-ip>` uploads the current VPK. The app target links the real
+  core, gfx, ui, app, and adapters with libvita2d and the SDK stubs the
+  adapters call.
+- `build.sh` runs `tools/check_worker_stack.py` against the linked ELF and fails
+  before packaging when `handle_action` or the fixed worker chain exceeds its
+  stack budget (D77). A stack overflow is a console run and a core dump to find,
+  so the build refuses it on the host.
 - Every build emits `vitaftpshell-v<version>-b<build>.vpk`.
 - `send.sh` refuses an artifact whose build number does not match
   `BUILD_NUMBER`, so a failed build cannot upload the previous VPK.
@@ -202,6 +218,9 @@ run is the only evidence that promotes the project to `verified`.
 
 - Update `PROJECTS.md` after every job. One row, one next action.
 - Update the plan when behavior changes; do not leave the truth only in chat.
+- Record every fixed defect in `docs/FIXES.md` with its build, evidence, and
+  `HW`/`HOST`/`PENDING` status. The detailed evidence stays in
+  `docs/VERIFICATION.md`.
 - Put feature additions under `docs/features/` with a dated document.
 - Put screen mockups and design notes under `docs/design/`.
 - Add a numbered entry to `docs/DECISIONS.md` for every product or architecture
@@ -219,8 +238,10 @@ A job is finished when:
 - the build produces one uniquely named VPK;
 - `PROJECTS.md` reflects the phase and next action;
 - `docs/` reflects the change, including a decision when one was made;
+- the fix is indexed in `docs/FIXES.md` with its hardware status;
 - no new `[C]` claim escaped the adapter;
-- the documentation link and code-fence check reports no issues;
+- the documentation gate and the workspace link and code-fence check report no
+  issues;
 - `verified` is not claimed without hardware evidence.
 
 ## What not to do
@@ -228,7 +249,7 @@ A job is finished when:
 - Do not invent screen geometry outside `docs/DESIGN.md`.
 - Do not add SFTP, FTPS, HTTP, WebDAV, or SMB in v1.
 - Do not add a background transfer daemon or a boot-time server.
-- Do not write to `boot_config.txt`, `ur0:tai`, or `ux0:tai`.
+- Do not write to `ur0:tai/boot_config.txt`; the `tai` contents and the app data folder are writable by design (D87).
 - Do not render a number the platform cannot report.
 - Do not hide the server's ON state or its anonymous access.
 - Do not remove the COCKPIT MIT notice from the derived graphics files.
@@ -240,22 +261,30 @@ A job is finished when:
 None at the product or architecture level. The planning session resolved authid,
 passive ports, threading, listing caps, the site and log formats, MLSD, the server
 foundation, the local `tai` policy, and the five deferred product choices; the
-answers are D30-D40 and the plan's KTDs.
+answers are D30-D43 and the plan's KTDs; D44-D47 record the standalone
+repository and the Phase 4 implementation shapes; D48-D52 record the Phase 5
+composition, UI evidence, and safety backstops; D53-D63 record the Phase 6
+all-drives root, always-on log, action feedback, IME sequence, worker stack,
+the no-selection rule, the server address/free-space policy, the clipboard, the
+destructive-confirmation rules, the FTP-client connect/PASV diagnostics, the
+remote-pane session/action rules, and the remote refresh/name/upload/folder
+rules; D85-D91 record the server sessions, access policy, warning removal, kept
+download, owner metadata, and the SIZE upload fallback; D92-D94 record the
+per-session data ports, the one-fact-one-home rule, and the documentation gate.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
 
 - the exact listing-arena size, after a memory measurement on hardware;
 - the reply-line cap, nominally 4096 bytes, against real servers;
-- whether `sceIoRename` replaces an existing target, and which fallback KTD12
-  needs as a result;
-- the `FsEntry.mtime` unit (the server assumes Unix seconds) and whether the
-  adapter must convert or report unknown;
+- whether `sceIoRename` replaces an existing target; the adapter reports 0, so
+  the aside fallback is always used (D48);
+- the `FsEntry.mtime` unit (the server assumes Unix seconds); the adapter
+  reports unknown and the UI renders `--` (D48);
 - directory sync after a rename: `FsPort` has no call for it, so power-loss
   durability needs a port extension or a confirmed platform guarantee;
-- the IME initialization order;
 - the mksfoex flags this SDK build needs;
-- the icon and LiveArea art.
+- the LiveArea art (the launcher icon is settled, D84).
 
 ## Directory map
 
@@ -272,10 +301,17 @@ vitaFTPShell/
   LICENSES/            third-party license notices (COCKPIT MIT)
   .github/workflows/   host-test CI
   src/
-    main.c             composition root; a build-shape stub until U13
+    main.c             composition root; constructs adapters, starts the app
+    core/              policy: parsers, path, store, log, queue, planner,
+                       executor, input/UI state, handoff
     core/ftp/          passive FTP client and server state machines
-  sce_sys/             placeholder icon and LiveArea art (U14 replaces)
+    gfx/               theme, font, draw primitives; draw.c owns vita2d
+    ui/                the seven screens, dock, legends, shared parts, render
+    app/               app frame loop and the one worker
+    platform/          port headers and the six psp2_* adapters
+  sce_sys/             launcher icon and placeholder LiveArea art (U14 replaces the LiveArea art)
   tools/
+    check_worker_stack.py  linked-ELF worker stack budget check (build gate)
     test/run.sh        layering guard and host test runner
     fake/              NetPort, FsPort, input, IME, clock, log, and FTP peers
     preview/           software vita2d shim and the 960x544 renderer
@@ -285,9 +321,11 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D43
+    DECISIONS.md       numbered decisions, D1-D94
+    FIXES.md           chronological fix index with HW/HOST/PENDING status
+    VERIFICATION.md    hardware matrix, build evidence, and the test record
     THIRD_PARTY.md     reused code, licenses, protocol references
-    plans/             the v1 plan: requirements, decisions, units, verification
+    plans/             the v1 plan and the active implementation plans
     features/          future feature documents
     design/            the settled screen sheets and renders
 ```

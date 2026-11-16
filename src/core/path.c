@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define APP_DATA "ux0:data/vitaFTPShell"
 
 static char lower(char c)
 {
@@ -34,6 +33,30 @@ static int ci_prefix(const char *text, const char *prefix)
         prefix++;
     }
     return 1;
+}
+
+int path_ci_equal(const char *a, const char *b)
+{
+    return ci_equal(a, b);
+}
+
+int path_is_ancestor(const char *a, const char *b)
+{
+    if (a == NULL || b == NULL || a[0] == '\0' || b[0] == '\0')
+        return 0;
+
+    size_t len = strlen(a);
+    while (len > 0 && a[len - 1] == '/')
+        len--;
+    if (len == 0)
+        return 0;
+    if (!ci_prefix(b, a))
+        return 0;
+    if (b[len] == '\0')
+        return 0;
+    if (a[len - 1] == ':')
+        return 1;
+    return b[len] == '/';
 }
 
 static int is_under(const char *path, const char *dir)
@@ -285,6 +308,9 @@ int path_is_high_risk(const char *path)
 
 static PathResult check_path(const char *path, int server_role, PathRisk *risk)
 {
+    /* The server_role no longer selects a write denial; boot_config below is
+     * denied for every role and the protected-path table is shared. */
+    (void)server_role;
     Path canonical;
     PathResult result = path_canonicalize(path, &canonical);
     if (result != PATH_OK)
@@ -294,13 +320,6 @@ static PathResult check_path(const char *path, int server_role, PathRisk *risk)
 
     if (ci_equal(p, "ur0:tai/boot_config.txt"))
         return PATH_DENIED;
-
-    if (server_role) {
-        if (is_under(p, "ur0:tai") || is_under(p, "ux0:tai"))
-            return PATH_DENIED;
-        if (is_under(p, APP_DATA))
-            return PATH_DENIED;
-    }
 
     if (path_is_protected(p))
         return PATH_PROTECTED;
@@ -320,17 +339,61 @@ PathResult path_check_read(const char *path, int server_role, PathRisk *risk)
     const char *p = canonical.text;
     if (server_role && ci_equal(p, "ur0:tai/boot_config.txt"))
         return PATH_DENIED;
-    if (server_role && is_under(p, APP_DATA))
-        return PATH_DENIED;
 
     if (risk != NULL)
         *risk = path_is_high_risk(p) ? PATH_RISK_HIGH : PATH_RISK_NORMAL;
     return PATH_OK;
 }
 
+PathSidecarKind path_sidecar_kind(const char *path)
+{
+    if (path == NULL)
+        return PATH_SIDECAR_NONE;
+    const char *name = path;
+    for (const char *p = path; *p != '\0'; ++p) {
+        if (*p == '/' || *p == ':')
+            name = p + 1;
+    }
+    if (ends_with_ci(name, PATH_SIDECAR_TEMP))
+        return PATH_SIDECAR_PART;
+    if (ends_with_ci(name, PATH_SIDECAR_ASIDE))
+        return PATH_SIDECAR_OLD;
+    return PATH_SIDECAR_NONE;
+}
+
+int path_is_sidecar(const char *path)
+{
+    return path_sidecar_kind(path) != PATH_SIDECAR_NONE;
+}
+
+int path_is_sidecar_of(const char *candidate, const char *base)
+{
+    if (candidate == NULL || base == NULL)
+        return 0;
+    char expected[PATH_MAX_LEN];
+    if (path_sidecar_path(expected, sizeof(expected), base, PATH_SIDECAR_TEMP) &&
+        ci_equal(candidate, expected))
+        return 1;
+    return path_sidecar_path(expected, sizeof(expected), base,
+                             PATH_SIDECAR_ASIDE) &&
+           ci_equal(candidate, expected);
+}
+
+int path_sidecar_path(char *out, size_t cap, const char *target,
+                      const char *suffix)
+{
+    if (out == NULL || cap == 0 || target == NULL || suffix == NULL)
+        return 0;
+    int n = snprintf(out, cap, "%s%s", target, suffix);
+    return n > 0 && (size_t)n < cap;
+}
+
 PathResult path_check_write(const char *path, int server_role, PathRisk *risk)
 {
-    return check_path(path, server_role, risk);
+    PathResult result = check_path(path, server_role, risk);
+    if (result == PATH_OK && path_is_sidecar(path))
+        return PATH_DENIED;
+    return result;
 }
 
 PathResult path_check_delete(const char *path, int server_role, PathRisk *risk)
@@ -350,6 +413,10 @@ PathResult path_check_rename(const char *from, const char *to, int server_role,
     PathResult b = check_path(to, server_role, &to_risk);
     if (b != PATH_OK)
         return b;
+    /* A rename may not create a sidecar, and it may not steal a live temp.
+     * The aside stays a legal source so a leftover can be repaired. */
+    if (path_is_sidecar(to) || path_sidecar_kind(from) == PATH_SIDECAR_PART)
+        return PATH_DENIED;
 
     if (risk != NULL)
         *risk = (from_risk == PATH_RISK_HIGH || to_risk == PATH_RISK_HIGH)

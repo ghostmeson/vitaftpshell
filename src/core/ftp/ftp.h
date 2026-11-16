@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core/cause.h"
 #include "core/path.h"
 #include "platform/fs.h"
 
@@ -22,25 +23,26 @@
 #define FTP_PATH_MAX 1024
 #define FTP_REPLY_TEXT_MAX 512
 
-typedef enum {
-    FTP_CAUSE_APP = 0,
-    FTP_CAUSE_SERVER,
-    FTP_CAUSE_NETWORK,
-    FTP_CAUSE_STORAGE,
-    FTP_CAUSE_USER
-} FtpCause;
+/* The FTP role keeps its historical names; the classes themselves are shared
+ * with the local operation executor and the transfer queue. */
+typedef OpCause FtpCause;
+typedef OpStage FtpStage;
 
-typedef enum {
-    FTP_STAGE_NONE = 0,
-    FTP_STAGE_RESOLVE,
-    FTP_STAGE_CONNECT,
-    FTP_STAGE_GREETING,
-    FTP_STAGE_LOGIN,
-    FTP_STAGE_FIRST_LISTING,
-    FTP_STAGE_COMMAND,
-    FTP_STAGE_DATA,
-    FTP_STAGE_TRANSFER
-} FtpStage;
+#define FTP_CAUSE_APP OP_CAUSE_APP
+#define FTP_CAUSE_SERVER OP_CAUSE_SERVER
+#define FTP_CAUSE_NETWORK OP_CAUSE_NETWORK
+#define FTP_CAUSE_STORAGE OP_CAUSE_STORAGE
+#define FTP_CAUSE_USER OP_CAUSE_USER
+
+#define FTP_STAGE_NONE OP_STAGE_NONE
+#define FTP_STAGE_RESOLVE OP_STAGE_RESOLVE
+#define FTP_STAGE_CONNECT OP_STAGE_CONNECT
+#define FTP_STAGE_GREETING OP_STAGE_GREETING
+#define FTP_STAGE_LOGIN OP_STAGE_LOGIN
+#define FTP_STAGE_FIRST_LISTING OP_STAGE_FIRST_LISTING
+#define FTP_STAGE_COMMAND OP_STAGE_COMMAND
+#define FTP_STAGE_DATA OP_STAGE_DATA
+#define FTP_STAGE_TRANSFER OP_STAGE_TRANSFER
 
 typedef enum {
     FTP_DATA_NONE = 0,
@@ -50,8 +52,6 @@ typedef enum {
     FTP_DATA_DRAINING
 } FtpDataState;
 
-const char *ftp_cause_name(FtpCause cause);
-const char *ftp_stage_name(FtpStage stage);
 
 typedef struct {
     char line[FTP_LINE_MAX + 1];
@@ -92,6 +92,11 @@ int ftp_text_contains(const char *text, const char *needle);
  * stale `.vftp.old` aside is restored when the target is missing and cleared
  * when both exist. Completion syncs, closes, and renames into place, using the
  * aside fallback when the platform cannot replace on rename.
+ *
+ * Only close and rename decide the commit. The sync calls are durability hints:
+ * a platform that refuses sync-by-fd must not turn a fully written file into a
+ * reported failure (D76). `sync_failed` records that the hint was refused so a
+ * caller can log it.
  */
 typedef struct {
     Path target;
@@ -99,10 +104,18 @@ typedef struct {
     Path aside;
     FsFile *file;
     int open;
+    int sync_failed;
 } FtpTempWrite;
 
+typedef enum {
+    FTP_COMMIT_OK = 0,
+    FTP_COMMIT_CLOSE,
+    FTP_COMMIT_RENAME
+} FtpCommitStep;
+
 FsResult ftp_temp_open(FsPort *fs, const char *target, FtpTempWrite *out);
-FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp);
+/* `step` may be NULL; when set it names the failed step on an error. */
+FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp, FtpCommitStep *step);
 void ftp_temp_abort(FsPort *fs, FtpTempWrite *temp);
 
 #endif

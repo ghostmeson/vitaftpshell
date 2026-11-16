@@ -13,15 +13,17 @@ card to a PC, without making the PC the workspace.
 
 ## Status
 
-`building`. Strategy, requirements, the screen-by-screen design, and the
-architecture plan are complete. Phases 1, 2, and 3 are done: the build shape,
-six port contracts and fakes, the gfx base and layout table, the reply/listing/
-path/format policy, the site/settings/store/log policy, and the passive FTP
-client and server state machines exist. `tools/test/run.sh` passes ten host
-suites, `tools/preview/run.sh` renders a 960x544 PNG, and `build.sh` emits
-`vitaftpshell-v01.00-b8.vpk` from a stub `src/main.c`. No screen or platform
-adapter exists yet, the engine is not linked into the app target until U13, and
-nothing has run on hardware.
+<!-- status:begin -->
+`building`. vitaFTPShell is one PS Vita app with three roles: a passive FTP
+client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
+volumes, and an anonymous read-write FTP server. The seven screens, the
+app/worker runtime, and the six Vita adapters are implemented, and the host
+suites pass. A console pass of the v1 verification matrix is still pending, so
+the project is `building`, not `verified`.
+
+The live state and the single next action are on [the board](../PROJECTS.md); the
+hardware evidence is in [the evidence record](VERIFICATION.md).
+<!-- status:end -->
 
 ## Users
 
@@ -35,26 +37,36 @@ nothing has run on hardware.
 
 | Capability | In v1 |
 |---|---|
-| FTP client | Saved sites, anonymous and login, passive FTP, browse, download, upload, create, rename, delete, recursive folders |
-| Local manager | Browse the mounted `ux0:`/`ur0:`/`uma0:` volumes, multi-select, create, rename, copy, move, delete, recursive folders, free space |
-| FTP server | Anonymous read-write, mounted `ux0:`/`ur0:`/`uma0:`, OFF at launch, one client, visible ON state |
-| Transfers | One active, queued batch, progress, cancel, overwrite/skip/cancel conflict prompt |
+| FTP client | Saved sites, anonymous and login, passive FTP, browse, download, upload, create, rename, delete; remote recursive transfer is planned, not built (R22/R23, D65) |
+| Local manager | Browse the mounted `ux0:`/`ur0:`/`uma0:` volumes, multi-select, create, rename, copy, move, delete, local recursive folder operations, free space |
+| FTP server | Anonymous read-write, mounted `ux0:`/`ur0:`/`uma0:`, OFF at launch, up to four clients with one data transfer at a time, visible ON state |
+| Transfers | One network transfer and one local job may run together, each with its own queued batch, progress, cancel, and overwrite/skip/cancel conflict prompt |
 | Interface | Two live panes, site manager, server panel, actions, confirms, system text entry, inline errors |
 
 The full behavior is in
 [`plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md),
-requirements R1-R70.
+requirements R1-R74.
 
 ## Non-goals
 
 - SFTP, FTPS, HTTP, WebDAV, or SMB in v1.
-- Resume, sync, scheduled transfers, or multiple active transfers.
-- Multiple simultaneous server clients.
+- Resume, sync, scheduled transfers, or more than one transfer per lane.
 - A background daemon, kernel plugin, `*KERNEL` entry, or boot-time component.
 - A PC-first desktop workflow or a desktop-client port.
 - VitaShell feature parity: archive extraction, USB mounting, media playback.
 - An encrypted credential vault or a master password.
 - Themes, plugins, or alternate HUD layouts.
+
+## Feature traceability
+
+The three primary features, the requirements that define them, and the matrix
+rows that prove them on hardware.
+
+| Feature | Requirements | Matrix |
+|---|---|---|
+| FTP client — saved sites, browse, download, upload, mutations | R11, R13, R41 | M1, M2, M3, M14 |
+| Local file manager — browse, marks, copy/move, rename, delete, new folder | R30, R31, R39 | M11, M12, M13 |
+| Anonymous FTP server — four sessions, per-session data ports, path guard | R50, R51 | M5, M6, M7 |
 
 ## Roadmap
 
@@ -67,9 +79,9 @@ requirements R1-R70.
 | Phase 1: Build shape | Source tree, `build.sh`, one VPK, the layering guard — done |
 | Phase 2: Contracts, graphics, and shared policy | Ports, fakes, gfx, parsers, path table, store, log — done |
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
-| Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — next |
-| Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test |
-| Phase 6: Hardware verification | M1–M8 evidence; project becomes `verified` |
+| Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
+| Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
+| Phase 6: Hardware verification | Console runs reported for the transfer and file-manager paths; the row-level the full matrix transcription is the open work |
 
 ## Failure policy
 
@@ -100,9 +112,12 @@ sessions, connect-to-first-listing, and server-matrix pass.
 
 | Risk | Mitigation |
 |---|---|
-| Anonymous read-write server exposes the three Vita volumes | OFF by default, visible ON state, client count, warning, denied app data folder and tai writes, protected-path denial |
+| Anonymous read-write server exposes the three Vita volumes, including app data and `tai` | OFF by default, visible ON state, `ACCESS READ-WRITE`, client count; the warning panel is removed (D88); `boot_config.txt` and system roots stay protected |
 | Passwords stored unencrypted | State it before the first save; never log them; no false encryption claim |
-| WiFi path is built but not hardware-verified | First hardware session proves connect, PASV, transfer, and timeouts |
+| WiFi path has a hardware report but no row-level evidence yet | Record connect, PASV, transfer, and timeout results in `VERIFICATION.md` |
 | Public FTP may decline | Personal servers keep the product useful; no protocol widening in v1 |
 | Controller-only density | Design phase reviews each screen before implementation |
+| Cross-volume batch move is not all-or-nothing | Each file is atomic; a batch failure leaves completed moves and reports `n OF m MOVED`, never deletes a moved file (D45) |
+| Planner and handoff caps are finite | A plan that overflows the arena or step table is refused, never truncated; a lost command is counted (D46) |
+| One network transfer and one local job may run together; the reservation table owns mutual exclusion | The worker runs both lanes; a server command answers 450 only on a held path, never because another lane is merely active (D72, D85) |
 | GPLv3 boundary | Keep the license and third-party notices intact; document provenance |

@@ -76,9 +76,12 @@ static void test_pasv(void)
     CHECK(out.addr == peer.addr);
     CHECK(out.port == 5004);
 
+    /* The PASV host is ignored; the control peer and the reply port win. */
     NetAddress foreign = {0x0A000001u, 21};
     CHECK(reply_parse_pasv("Entering Passive Mode (192,168,1,42,19,140)",
-                           &foreign, &out) == REPLY_PASV_REFUSED);
+                           &foreign, &out) == REPLY_PASV_OK);
+    CHECK(out.addr == foreign.addr);
+    CHECK(out.port == 5004);
 
     CHECK(reply_parse_pasv("Entering Passive Mode (192,168,1,42,0,0)", &peer,
                            &out) == REPLY_PASV_MALFORMED);

@@ -17,6 +17,34 @@
  * See docs/THIRD_PARTY.md.
  */
 
+int draw_init(void)
+{
+    vita2d_init();
+    vita2d_set_clear_color(0xFF000000u); /* C_FIELD; theme.h includes us. */
+    return 1;
+}
+
+void draw_shutdown(void)
+{
+    vita2d_fini();
+}
+
+void draw_begin_frame(void)
+{
+    vita2d_start_drawing();
+    vita2d_clear_screen();
+}
+
+void draw_present(void)
+{
+    vita2d_end_drawing();
+    /* The system IME is a common-dialog overlay. It only advances while the
+     * app supplies the current framebuffer; the SDK's IME sample calls this
+     * every frame. It is harmless when no dialog is active. */
+    (void)vita2d_common_dialog_update();
+    vita2d_swap_buffers();
+}
+
 uint32_t draw_dim(uint32_t c, float f)
 {
     if (f <= 0.0f)
@@ -109,18 +137,3 @@ void draw_set_additive(int on)
     vita2d_set_blend_mode_add(on ? 1 : 0);
 }
 
-void draw_set_clip(int x, int y, int w, int h)
-{
-    if (w <= 0 || h <= 0) {
-        draw_clear_clip();
-        return;
-    }
-
-    vita2d_enable_clipping();
-    vita2d_set_clip_rectangle(x, y, x + w, y + h);
-}
-
-void draw_clear_clip(void)
-{
-    vita2d_disable_clipping();
-}

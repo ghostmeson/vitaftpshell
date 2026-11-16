@@ -28,6 +28,7 @@ typedef struct {
     FtpClientState state;
     FtpStage stage;
     FtpCause cause;
+    NetResult net;
 
     int rows;
     ListingEntry row[MAX_ROWS];
@@ -46,6 +47,12 @@ typedef struct {
     uint64_t bytes;
     uint64_t total;
     int total_known;
+    int exists;
+    int is_dir;
+    int unsupported;
+    uint64_t file_size;
+    int file_size_known;
+    int file_kept;
 } Capture;
 
 static void capture_event(void *ctx, const FtpClientEvent *event)
@@ -56,6 +63,7 @@ static void capture_event(void *ctx, const FtpClientEvent *event)
         cap->state = event->state;
         cap->stage = event->stage;
         cap->cause = event->cause;
+        cap->net = event->net;
         s_states_seen |= 1u << event->state;
         s_data_seen |= 1u << event->data_state;
         break;
@@ -87,6 +95,12 @@ static void capture_event(void *ctx, const FtpClientEvent *event)
             snprintf(cap->detail, sizeof(cap->detail), "%s", event->detail);
         else
             cap->detail[0] = '\0';
+        cap->exists = event->exists;
+        cap->is_dir = event->is_dir;
+        cap->unsupported = event->unsupported;
+        cap->file_size = event->file_size;
+        cap->file_size_known = event->file_size_known;
+        cap->file_kept = event->file_kept;
         break;
     }
 }
@@ -131,7 +145,7 @@ static FtpClient *make_client(Capture *cap)
 static void tick(FtpClient *client)
 {
     observe(client);
-    ftp_client_tick(client);
+    ftp_client_tick(client, 0);
     observe(client);
 }
 
@@ -166,6 +180,17 @@ static void expect_cmd(FakeFtpd *server, const char *expected)
 static void reply(FakeFtpd *server, int code, const char *text)
 {
     fake_ftpd_reply(server, code, text);
+}
+
+/* The client asks SIZE before PASV. Existing tests keep the listing hint by
+ * answering "not implemented"; the preflight test answers 213 instead. */
+static void size_unsupported(FtpClient *client, FakeFtpd *server)
+{
+    char line[256];
+    CHECK(fake_ftpd_next_command(server, line, sizeof(line)) == 1);
+    CHECK(strncmp(line, "SIZE ", 5) == 0);
+    reply(server, 502, "Not implemented.");
+    tick(client);
 }
 
 /*
@@ -464,8 +489,11 @@ static void test_download(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/UX0:/DATA/dl.bin", "ux0:data/dl.bin", 0};
+    FtpClientTransfer transfer = {"/UX0:/DATA/dl.bin", "ux0:data/dl.bin",
+                                  100, 1};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
+    CHECK(cap.total == 100 && cap.total_known == 1);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -494,12 +522,59 @@ static void test_download(void)
     CHECK(!fake_fs_exists("ux0:data/dl.bin.vftp.part"));
 
     fake_fs_add_dir("ux0:data/adir");
-    FtpClientTransfer dir = {"/x", "ux0:data/adir", 0};
-    CHECK(ftp_client_download(client, &dir, NULL) == FTP_CLIENT_OK);
+    FtpClientTransfer dir = {"/x", "ux0:data/adir", 0, 0};
+    CHECK(ftp_client_download(client, &dir, NULL) == FTP_CLIENT_LOCAL_FAILED);
     CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
-    CHECK(cap.done == 3 && cap.ok == 0);
-    CHECK(cap.done_cause == FTP_CAUSE_STORAGE);
+    /* The worker owns the failure terminal; the client emits no done event. */
+    CHECK(cap.done == 2);
+    CHECK(strcmp(ftp_client_last_detail(client), "DESTINATION OPEN FAILED") == 0);
     CHECK(!fake_fs_exists("ux0:data/adir.vftp.part"));
+
+    ftp_client_destroy(client);
+}
+
+/* One tick moves more than one 2 KiB chunk: the pump consumes a per-tick
+ * budget instead of a single receive. */
+static void test_download_budget(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/big.bin", "ux0:data/big.bin",
+                                  6144, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/big.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+
+    static char big[6144];
+    memset(big, 'X', sizeof(big));
+    fake_net_queue_rx(data, big, sizeof(big));
+    fake_net_shutdown(data);
+    tick(client);
+    CHECK(cap.bytes == 6144);
+
+    reply(&server, 226, "Transfer complete.");
+    tick_until_settled(client);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
+
+    static char out[6144];
+    size_t n = fake_fs_read_file("ux0:data/big.bin", out, sizeof(out));
+    CHECK(n == 6144);
+    CHECK(memcmp(out, big, sizeof(big)) == 0);
+    CHECK(!fake_fs_exists("ux0:data/big.bin.vftp.part"));
 
     ftp_client_destroy(client);
 }
@@ -516,7 +591,7 @@ static void test_upload(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/UX0:/DATA/up.bin", "ux0:data/up.bin", 0};
+    FtpClientTransfer transfer = {"/UX0:/DATA/up.bin", "ux0:data/up.bin", 0, 0};
     CHECK(ftp_client_upload(client, &transfer) == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
@@ -542,6 +617,290 @@ static void test_upload(void)
     CHECK(cap.op == FTP_CLIENT_OP_UPLOAD);
     CHECK(cap.total_known == 1 && cap.total == 3);
 
+    /* A listing after an upload must send MLSD/LIST, not the old STOR. */
+    capture_reset_rows(&cap);
+    CHECK(ftp_client_list(client, "/") == FTP_CLIENT_OK);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *list_data = fake_net_last_connected();
+    expect_cmd(&server, "MLSD /");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+    fake_net_queue_rx(list_data, "type=file;size=1; X.TXT\r\n",
+                      strlen("type=file;size=1; X.TXT\r\n"));
+    fake_net_shutdown(list_data);
+    reply(&server, 226, "Transfer complete.");
+    tick_until_settled(client);
+    CHECK(cap.rows == 1 && cap.end == 1 && cap.end_ok == 1);
+
+    ftp_client_destroy(client);
+}
+
+/* The server sends every byte, then goes silent instead of the final 226.
+ * The deadline must end the lane and keep the complete file. */
+static void test_download_final_reply_missing(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/keep.bin", "ux0:data/keep.bin",
+                                  5, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/keep.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+
+    fake_net_queue_rx(data, "hello", 5);
+    fake_net_shutdown(data);
+    tick(client);
+    tick(client);
+    CHECK(ftp_client_data_state(client) == FTP_DATA_DRAINING);
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(ftp_client_state(client) == FTP_CLIENT_LOST);
+    CHECK(cap.done >= 1 && cap.ok == 0);
+    CHECK(cap.file_kept == 1);
+    CHECK(strcmp(cap.detail, "FINAL REPLY MISSING") == 0);
+    char buf[16];
+    size_t n = fake_fs_read_file("ux0:data/keep.bin", buf, sizeof(buf));
+    CHECK(n == 5 && memcmp(buf, "hello", 5) == 0);
+    CHECK(!fake_fs_exists("ux0:data/keep.bin.vftp.part"));
+
+    ftp_client_destroy(client);
+}
+
+/* Fewer bytes than the size the transfer expected: the deadline must not keep
+ * a truncated file. */
+static void test_download_final_reply_short(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/short.bin", "ux0:data/short.bin",
+                                  10, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/short.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+
+    fake_net_queue_rx(data, "hello", 5);
+    fake_net_shutdown(data);
+    tick(client);
+    tick(client);
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(ftp_client_state(client) == FTP_CLIENT_LOST);
+    CHECK(cap.file_kept == 0);
+    CHECK(!fake_fs_exists("ux0:data/short.bin"));
+    CHECK(!fake_fs_exists("ux0:data/short.bin.vftp.part"));
+
+    ftp_client_destroy(client);
+}
+
+/* An upload that loses its final reply must end bounded too. */
+/* No expected size means completeness cannot be established: a silent final
+ * reply must not keep the file. */
+/* A file that grew after the preflight still counts as complete. */
+static void test_download_final_reply_over_delivery(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/grew.bin", "ux0:data/grew.bin",
+                                  5, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/grew.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+
+    fake_net_queue_rx(data, "hello!!", 7);
+    fake_net_shutdown(data);
+    tick(client);
+    tick(client);
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(cap.file_kept == 1);
+    char buf[16];
+    size_t n = fake_fs_read_file("ux0:data/grew.bin", buf, sizeof(buf));
+    CHECK(n == 7);
+
+    ftp_client_destroy(client);
+}
+
+/* Cancel works before PASV has been sent (the SIZE step). */
+static void test_cancel_during_size(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/cancel.bin",
+                                  "ux0:data/cancel.bin", 5, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /UX0:/DATA/cancel.bin");
+    CHECK(ftp_client_cancel(client) == FTP_CLIENT_OK);
+    expect_cmd(&server, "ABOR");
+    reply(&server, 225, "No transfer in progress.");
+    tick_until_settled(client);
+    CHECK(!fake_fs_exists("ux0:data/cancel.bin"));
+
+    ftp_client_destroy(client);
+}
+
+static void test_download_final_reply_unknown_size(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/nosize.bin",
+                                  "ux0:data/nosize.bin", 0, 0};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/nosize.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+    fake_net_queue_rx(data, "hello", 5);
+    fake_net_shutdown(data);
+    tick(client);
+    tick(client);
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(ftp_client_state(client) == FTP_CLIENT_LOST);
+    CHECK(cap.file_kept == 0);
+    CHECK(!fake_fs_exists("ux0:data/nosize.bin"));
+
+    ftp_client_destroy(client);
+}
+
+/* The preflight size wins over a stale listing hint; the kept decision uses
+ * the size this transfer actually moved. */
+static void test_download_size_preflight(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    /* The listing says 100; the file is 5. */
+    FtpClientTransfer transfer = {"/UX0:/DATA/real.bin", "ux0:data/real.bin",
+                                  100, 1};
+    CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /UX0:/DATA/real.bin");
+    reply(&server, 213, "5");
+    tick(client);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "RETR /UX0:/DATA/real.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+
+    fake_net_queue_rx(data, "hello", 5);
+    fake_net_shutdown(data);
+    tick(client);
+    tick(client);
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(cap.file_kept == 1);
+    CHECK(cap.total == 5 && cap.total_known == 1);
+    char buf[16];
+    size_t n = fake_fs_read_file("ux0:data/real.bin", buf, sizeof(buf));
+    CHECK(n == 5 && memcmp(buf, "hello", 5) == 0);
+
+    ftp_client_destroy(client);
+}
+
+static void test_upload_final_reply_missing(void)
+{
+    setup();
+    fake_fs_seed_file("ux0:data/up2.bin", "abc", 3);
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    FtpClientTransfer transfer = {"/UX0:/DATA/up2.bin", "ux0:data/up2.bin", 0, 0};
+    CHECK(ftp_client_upload(client, &transfer) == FTP_CLIENT_OK);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    (void)fake_net_last_connected();
+    expect_cmd(&server, "STOR /UX0:/DATA/up2.bin");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+    tick(client);
+    tick(client);
+    CHECK(ftp_client_data_state(client) == FTP_DATA_DRAINING);
+
+    fake_clock_advance(10001);
+    tick_until_settled(client);
+
+    CHECK(ftp_client_state(client) == FTP_CLIENT_LOST);
+    CHECK(cap.done >= 1 && cap.ok == 0);
+    CHECK(cap.file_kept == 0);
+
     ftp_client_destroy(client);
 }
 
@@ -556,8 +915,9 @@ static void test_download_reset(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -598,8 +958,9 @@ static void test_control_drop(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -638,6 +999,24 @@ static void test_resolve_timeout(void)
     ftp_client_destroy(client);
 }
 
+static void test_connect_refused(void)
+{
+    setup();
+    fake_net_set_connect_result(NET_REFUSED);
+
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+
+    FtpClientLogin login = {"ftp.test", 21, 1, NULL, NULL};
+    CHECK(ftp_client_connect(client, &login) == FTP_CLIENT_OK);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_FAILED);
+    CHECK(cap.stage == FTP_STAGE_CONNECT);
+    CHECK(cap.cause == FTP_CAUSE_NETWORK);
+    CHECK(cap.net == NET_REFUSED);
+    ftp_client_destroy(client);
+}
+
 static void test_connect_timeout(void)
 {
     setup();
@@ -669,7 +1048,7 @@ static void test_login_timeout(void)
     tick(client);
     expect_cmd(&server, "USER anonymous");
 
-    fake_clock_advance(2001);
+    fake_clock_advance(5001);
     tick(client);
     CHECK(ftp_client_state(client) == FTP_CLIENT_STALLED);
     CHECK(ftp_client_stage(client) == FTP_STAGE_LOGIN);
@@ -687,7 +1066,7 @@ static void test_first_listing_timeout(void)
 
     connect_login(client, &server, &cap, 1, NULL, NULL, 1);
     /* The client has sent PASV; do not answer it. */
-    fake_clock_advance(2001);
+    fake_clock_advance(10001);
     tick(client);
     CHECK(ftp_client_state(client) == FTP_CLIENT_STALLED);
     CHECK(ftp_client_stage(client) == FTP_STAGE_FIRST_LISTING);
@@ -706,8 +1085,9 @@ static void test_data_idle(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -715,7 +1095,7 @@ static void test_data_idle(void)
     reply(&server, 150, "Opening data connection.");
     tick(client);
 
-    fake_clock_advance(15001);
+    fake_clock_advance(20001);
     tick(client);
     CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
     CHECK(cap.done == 2 && cap.ok == 0);
@@ -744,8 +1124,9 @@ static void test_cancel_alignment(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -778,7 +1159,7 @@ static void test_cancel_alignment(void)
     ftp_client_destroy(client);
 }
 
-static void test_pasv_foreign(void)
+static void test_pasv_nat(void)
 {
     setup();
     Capture cap;
@@ -791,12 +1172,21 @@ static void test_pasv_foreign(void)
 
     CHECK(ftp_client_list(client, "/") == FTP_CLIENT_OK);
     expect_cmd(&server, "PASV");
+    /* A PASV host different from the control peer is ignored. The client must
+     * use the control peer and the advertised port 5004, not fail. */
     reply(&server, 227, "Entering Passive Mode (10,0,0,1,19,140).");
     tick(client);
 
-    CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
-    CHECK(cap.done == 2 && cap.ok == 0);
-    CHECK(cap.done_cause == FTP_CAUSE_SERVER);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_LISTING);
+
+    /* The data socket must dial the control peer, not the PASV-advertised
+     * 10.0.0.1, and must use the reply port 19*256+140 = 5004 (D63). */
+    NetSocket *data = fake_net_last_connected();
+    uint32_t addr = 0;
+    uint16_t port = 0;
+    fake_net_socket_peer(data, &addr, &port);
+    CHECK(addr == 0xC0A8012Au);
+    CHECK(port == 5004);
 
     ftp_client_destroy(client);
 }
@@ -812,8 +1202,9 @@ static void test_450_disarms(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/a.bin", "ux0:data/a.bin", 0};
+    FtpClientTransfer transfer = {"/a.bin", "ux0:data/a.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -826,8 +1217,9 @@ static void test_450_disarms(void)
     CHECK(cap.done == 2 && cap.ok == 0);
     CHECK(cap.done_cause == FTP_CAUSE_SERVER);
 
-    FtpClientTransfer second = {"/b.bin", "ux0:data/b.bin", 0};
+    FtpClientTransfer second = {"/b.bin", "ux0:data/b.bin", 0, 0};
     CHECK(ftp_client_download(client, &second, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,141).");
     tick(client);
@@ -857,15 +1249,13 @@ static void test_high_risk(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.suprx", "ur0:tai/x.suprx", 0};
+    FtpClientTransfer transfer = {"/x.suprx", "ur0:tai/x.suprx", 0, 0};
     PathRisk risk = PATH_RISK_NORMAL;
-    CHECK(ftp_client_download(client, &transfer, &risk) ==
-          FTP_CLIENT_NEED_RISK);
-    CHECK(risk == PATH_RISK_HIGH);
-    CHECK(!fake_fs_exists("ur0:tai/x.suprx"));
-
-    transfer.risk_approved = 1;
+    /* D87: high-risk paths still report their class, but no longer require a
+     * local approval step. The hard path denials remain. */
     CHECK(ftp_client_download(client, &transfer, &risk) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
+    CHECK(risk == PATH_RISK_HIGH);
     CHECK(ftp_client_state(client) == FTP_CLIENT_TRANSFERRING);
     CHECK(!fake_fs_exists("ur0:tai/x.suprx"));
 
@@ -975,8 +1365,9 @@ static void test_abort_reverse_order(void)
     connect_ok(client, &server, &cap, NULL);
     capture_reset_rows(&cap);
 
-    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0};
+    FtpClientTransfer transfer = {"/x.bin", "ux0:data/x.bin", 0, 0};
     CHECK(ftp_client_download(client, &transfer, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
     tick(client);
@@ -1001,8 +1392,9 @@ static void test_abort_reverse_order(void)
     CHECK(strcmp(ftp_client_cwd_text(client), "/AFTER") == 0);
 
     /* A server that refuses ABOR must not cost the session. */
-    FtpClientTransfer second = {"/y.bin", "ux0:data/y.bin", 0};
+    FtpClientTransfer second = {"/y.bin", "ux0:data/y.bin", 0, 0};
     CHECK(ftp_client_download(client, &second, NULL) == FTP_CLIENT_OK);
+    size_unsupported(client, &server);
     expect_cmd(&server, "PASV");
     reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,141).");
     tick(client);
@@ -1059,6 +1451,211 @@ static void test_browse_mlsd_fallback(void)
     ftp_client_destroy(client);
 }
 
+static void test_idle_control_drop(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    /* No operation is in flight; the server closes the control channel. */
+    fake_net_shutdown(server.control);
+    tick(client);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_LOST);
+
+    ftp_client_destroy(client);
+}
+
+static void test_keepalive(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+    cap.done = 0;
+
+    fake_clock_advance(20001);
+    tick(client);
+    expect_cmd(&server, "NOOP");
+    CHECK(cap.done == 0);
+    CHECK(ftp_client_busy(client) == 1);
+
+    reply(&server, 200, "Still here.");
+    tick(client);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
+    CHECK(ftp_client_busy(client) == 0);
+    CHECK(cap.done == 0);
+
+    ftp_client_destroy(client);
+}
+
+static void test_keepalive_timeout(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    fake_clock_advance(20001);
+    tick(client);
+    expect_cmd(&server, "NOOP");
+    CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
+
+    /* No reply: the keepalive deadline closes the session instead of leaving
+     * a dead server marked CONNECTED forever. */
+    fake_clock_advance(5001);
+    tick(client);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_LOST);
+
+    ftp_client_destroy(client);
+}
+
+static void test_disconnect(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    CHECK(ftp_client_disconnect(client) == FTP_CLIENT_OK);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_IDLE);
+    CHECK(ftp_client_busy(client) == 0);
+    CHECK(fake_net_is_open(server.control) == 0);
+    CHECK(ftp_client_disconnect(client) == FTP_CLIENT_NOT_CONNECTED);
+
+    ftp_client_destroy(client);
+}
+
+static void test_mlst_send_failure(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    /* The control write dies while the worker is asking about the destination.
+     * The call must report the lost session, not accept an op that can never
+     * complete and leave the upload check latched (b37). */
+    fake_net_fail_send_next(NET_ERROR);
+    CHECK(ftp_client_mlst(client, "/X.BIN") == FTP_CLIENT_NOT_CONNECTED);
+    CHECK(ftp_client_state(client) != FTP_CLIENT_READY);
+
+    ftp_client_destroy(client);
+}
+
+/* SIZE is the metadata fallback when MLST is unavailable. */
+static void test_size_stat(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+    cap.done = 0;
+
+    CHECK(ftp_client_size(client, "/X.BIN") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /X.BIN");
+    reply(&server, 213, "42");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.op == FTP_CLIENT_OP_STAT);
+    CHECK(cap.exists == 1 && cap.is_dir == 0 && cap.unsupported == 0);
+    CHECK(cap.file_size == 42 && cap.file_size_known == 1);
+
+    cap.done = 0;
+    CHECK(ftp_client_size(client, "/MISSING") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /MISSING");
+    reply(&server, 550, "Not found.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.exists == 0);
+
+    cap.done = 0;
+    CHECK(ftp_client_size(client, "/ANY") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /ANY");
+    reply(&server, 502, "Not implemented.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.unsupported == 1);
+
+    cap.done = 0;
+    CHECK(ftp_client_size(client, "/ODD") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /ODD");
+    reply(&server, 504, "Not implemented for that parameter.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.unsupported == 1);
+
+    cap.done = 0;
+    CHECK(ftp_client_size(client, "/JUNK") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /JUNK");
+    reply(&server, 213, "not-a-number");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.unsupported == 1 &&
+          cap.exists == 0);
+
+    ftp_client_destroy(client);
+}
+
+static void test_mlst(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+    cap.done = 0;
+
+    CHECK(ftp_client_mlst(client, "/X.BIN") == FTP_CLIENT_OK);
+    expect_cmd(&server, "MLST /X.BIN");
+    fake_ftpd_send_raw(&server,
+                       "250-Listing /X.BIN\r\n"
+                       " type=file;size=42;modify=20240101000000; /X.BIN\r\n"
+                       "250 End\r\n");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.op == FTP_CLIENT_OP_STAT);
+    CHECK(cap.exists == 1 && cap.is_dir == 0 && cap.unsupported == 0);
+    CHECK(cap.file_size == 42 && cap.file_size_known == 1);
+
+    cap.done = 0;
+    CHECK(ftp_client_mlst(client, "/MISSING") == FTP_CLIENT_OK);
+    expect_cmd(&server, "MLST /MISSING");
+    reply(&server, 550, "Not found.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.exists == 0);
+
+    cap.done = 0;
+    CHECK(ftp_client_mlst(client, "/ANY") == FTP_CLIENT_OK);
+    expect_cmd(&server, "MLST /ANY");
+    reply(&server, 502, "Not implemented.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.unsupported == 1);
+
+    ftp_client_destroy(client);
+}
+
 int main(void)
 {
     test_anonymous_connect_real();
@@ -1071,21 +1668,37 @@ int main(void)
     test_mlsd_spaces();
     test_cwd();
     test_download();
+    test_download_final_reply_missing();
+    test_download_final_reply_short();
+    test_upload_final_reply_missing();
+    test_download_final_reply_unknown_size();
+    test_download_size_preflight();
+    test_download_final_reply_over_delivery();
+    test_cancel_during_size();
+    test_download_budget();
     test_upload();
     test_download_reset();
     test_control_drop();
     test_resolve_timeout();
+    test_connect_refused();
     test_connect_timeout();
     test_login_timeout();
     test_first_listing_timeout();
     test_data_idle();
     test_cancel_alignment();
     test_abort_reverse_order();
-    test_pasv_foreign();
+    test_pasv_nat();
     test_450_disarms();
     test_high_risk();
     test_simple_commands();
     test_nlst();
+    test_mlst_send_failure();
+    test_mlst();
+    test_size_stat();
+    test_keepalive();
+    test_idle_control_drop();
+    test_keepalive_timeout();
+    test_disconnect();
 
     for (int s = FTP_CLIENT_IDLE; s <= FTP_CLIENT_FAILED; ++s)
         CHECK((s_states_seen & (1u << s)) != 0);

@@ -2,7 +2,6 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Host tests](https://github.com/ghostmeson/vitaftpshell/actions/workflows/ci.yml/badge.svg)](https://github.com/ghostmeson/vitaftpshell/actions/workflows/ci.yml)
-![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)
 
 A twin-pane FTP workspace for the PS Vita. Browse a saved FTP site and the
 console's own storage side by side, then move files between them without leaving
@@ -19,40 +18,30 @@ hardware screenshot.*
 
 ## Status
 
-**Pre-alpha: the current VPK is a placeholder.** Strategy, requirements, screen
-design, architecture, and the protocol policy are complete. The FTP client and
-server engines, path policy, and host test harness are implemented and tested on
-the host. The on-device UI, platform adapters, and worker runtime are still to
-come, so the app does not transfer files yet and has not run on hardware.
+<!-- status:begin -->
+`building`. vitaFTPShell is one PS Vita app with three roles: a passive FTP
+client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
+volumes, and an anonymous read-write FTP server. The seven screens, the
+app/worker runtime, and the six Vita adapters are implemented, and the host
+suites pass. A console pass of the v1 verification matrix is still pending, so
+the project is `building`, not `verified`.
 
-Implemented and covered by host tests today:
-
-- the passive FTP client state machine: resolve, greeting, anonymous or stored
-  login, FEAT, MLSD with LIST fallback, browse, RETR, STOR, MKD, RNFR/RNTO,
-  DELE, RMD, QUIT, cancel, per-stage deadlines, and the five cause classes;
-- the anonymous passive FTP server state machine: control port plus one, one
-  client slot, the command table, MLST/SIZE/MDTM, MLSD/LIST/NLST, templed STOR,
-  MKD/RMD/DELE/RNFR/RNTO, ABOR, the 450 busy reply, and data peer checking;
-- canonical path, protected-path, denial, and risk policy; MLSD, Unix, and DOS
-  listing parsers; reply and passive-mode parsing; the site book, settings,
-  atomic store, and typed session-log events;
-- the COCKPIT-derived graphics base and the settled seven-surface layout table.
-
-Roadmap and the single next action live in [`PROJECTS.md`](PROJECTS.md). The
-behavior contract is
-[`docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md).
+The live state and the single next action are on [the board](PROJECTS.md); the
+hardware evidence is in [the evidence record](docs/VERIFICATION.md).
+<!-- status:end -->
 
 ## What v1 will do
 
 | Role | Behavior |
 |---|---|
-| **FTP client** | Saved sites with anonymous or login credentials, passive FTP only, remote browsing, download, upload, create, rename, and delete. MLSD first, LIST fallback, Unix and DOS listings. |
-| **File manager** | Browse the mounted `ux0:`, `ur0:`, and `uma0:` volumes, multi-select, recursive folder copy, move, and delete, with protected-path rules and explicit confirmations. |
-| **FTP server** | Anonymous read-write FTP on the mounted volumes while the app is open. OFF at launch, one client at a time, with the ON state and client count visible on every screen. |
-| **Transfer dock** | One active transfer, the rest queued. Progress, size, speed, retry, and cancel without blocking the workspace. |
+| **FTP client** | Saved sites with anonymous or login credentials, passive FTP only, remote browsing, download, upload, create, rename, and delete. MLSD first, LIST fallback, Unix and DOS listings. Remote recursive transfer is a v1 requirement that is planned, not built (R22/R23, D65). |
+| **File manager** | Browse the mounted `ux0:`, `ur0:`, and `uma0:` volumes, multi-select, local recursive folder copy, move, and delete, with protected-path rules and explicit confirmations. |
+| **FTP server** | Anonymous read-write FTP on the mounted volumes while the app is open. OFF at launch, up to four clients with one data transfer at a time, with the ON state and client count visible on every screen. |
+| **Transfer dock** | One network transfer and one local job may run together, each with its own queue. Progress, size, speed, and cancel without blocking the workspace; a failed item is retried by running it again. |
 
 Not in v1: SFTP, FTPS, HTTP, WebDAV, SMB, resume, sync, background transfers,
-multiple simultaneous transfers, multiple server clients, or a credential vault.
+more than one network transfer or more than one local job at a time, or a
+credential vault.
 
 ## Build
 
@@ -70,10 +59,10 @@ export PATH="$VITASDK/bin:$PATH"
 ./build.sh
 ```
 
-`build.sh` emits exactly one `vitaftpshell-v01.00-b<build>.vpk` in `build/`, plus
-the unstripped ELF. `BUILD_NUMBER` is committed and monotonic: a rebuild with
-unchanged packaged inputs reuses the number, and a changed input increments it.
-`build/` is pruned to one artifact so "which build is on the Vita?" has one
+`build.sh` emits exactly one `vitaftpshell-v<version>-b<build>.vpk` in `build/`,
+plus the unstripped ELF. `BUILD_NUMBER` is committed and monotonic: a rebuild
+with unchanged packaged inputs reuses the number, and a changed input increments
+it. `build/` is pruned to one artifact so "which build is on the Vita?" has one
 answer.
 
 ### Host checks
@@ -81,14 +70,17 @@ answer.
 The policy and graphics layers run without VitaSDK:
 
 ```sh
-./tools/test/run.sh        # layering guard + ten host suites
-./tools/preview/run.sh     # renders build/preview/workspace.png at 960x544
+./tools/test/run.sh        # layering guard, docs guard, and host suites
+./tools/preview/run.sh     # renders the settled screen states to build/preview/
 ```
 
-The test runner compiles the real core against fake network, filesystem, input,
-IME, clock, and log ports. The layering guard fails if any file under `src/`
-outside the seven documented adapter files includes a `psp2/` or `vita2d.h`
-header.
+The test runner compiles the real core, screens, and runtime against fake
+network, filesystem, input, IME, clock, and log ports. The render suites assert
+the recorded draw calls and strings at the settled geometry; the integration
+suite drives the real reducer and worker through connect, list, mark, download,
+cancel, a failed site save, shutdown with an active transfer, and quit with the
+server on. The layering guard fails if any file under `src/` outside the seven
+documented adapter files includes a `psp2/` or `vita2d.h` header.
 
 ### Install
 
@@ -107,23 +99,20 @@ Installing requires **Enable Unsafe Homebrew**. The server and the local file
 manager need unrestricted access to `ur0:` and `uma0:`, which the safe authid
 refuses (D32).
 
-> The current VPK only launches and exits. See [Status](#status).
-
 ## Safety model
 
 These are product rules, enforced in the policy layer and the screens as they
 land:
 
-- The server is **OFF at launch**. Starting it is an explicit action, and its ON
-  state and client count stay visible. The warning states that anonymous clients
-  can read and write the exposed volumes and that the app data folder is
-  excluded.
-- The server denies all access to `ur0:tai/boot_config.txt` and to the app's own
-  data folder, and denies every write, create, rename, and delete under
-  `ur0:tai` and `ux0:tai`.
-- The local manager may write inside `ur0:tai` and `ux0:tai` only behind a
-  high-risk confirmation. Nothing in the app writes, renames, or deletes
-  `boot_config.txt`.
+- The server is **OFF at launch**. Starting it is an explicit action, and its
+  ON state, `ACCESS READ-WRITE` readout, and client count stay visible. The
+  SERVER warning panel is removed (D88); this README and the project docs still
+  state the anonymous exposure and the `ur0:tai/boot_config.txt` denial.
+- The server denies all access to `ur0:tai/boot_config.txt`. It may read and
+  write the app data folder and the `tai` folders (D87).
+- The local manager may write inside `ur0:tai` and `ux0:tai` without the
+  retired high-risk prompt. Nothing in the app writes, renames, or deletes
+  `ur0:tai/boot_config.txt`.
 - Volume roots, `ur0:data`, `ux0:data`, and the `tai` folders cannot be renamed,
   moved, or deleted. Every check uses the canonical path, and a rename checks
   both operands.
@@ -131,7 +120,7 @@ land:
   nothing.
 - Saved passwords are stored unencrypted on the console and are never written to
   the session log.
-- One transfer is active at a time; a server-side transfer uses the same slot.
+- One network transfer and one local job may run together when their paths do not overlap; a collision asks WAIT/SKIP/CANCEL (D72).
 - No kernel plugin, taiHEN payload, `*KERNEL` entry, or boot-time component.
 - Downloads and uploads write a `.vftp.part` file, sync, and rename into place;
   a failed transfer never leaves a partial file looking complete.
@@ -151,8 +140,8 @@ the host without a Vita header.
 | Runtime | `src/app/` | Frame loop, worker thread, rings, and snapshot handoff (U13) |
 | Composition | `src/main.c` | Constructs adapters and starts the runtime |
 
-One worker thread will own every long operation; the main thread owns only the
-UI. One writer owns each piece of shared state. See
+One worker thread owns every long operation; the main thread owns only the UI.
+One writer owns each piece of shared state. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the ports, the data phase, the
 threading handoff, and the path/denial table.
 
@@ -161,9 +150,11 @@ threading handoff, and the path/denial table.
 ```text
 src/core/        portable policy: protocol engines, parsers, path rules, store
 src/gfx/         theme, font, draw, and the settled layout table
-src/platform/    plain-C port contracts (adapters land in U12)
-src/main.c       composition root; a build-shape stub until U13
-tools/test/      layering guard and host suites
+src/ui/          the seven screens, the dock, legends, and the renderer
+src/app/         frame loop, the one worker, and the handoff consumer
+src/platform/    plain-C port contracts and the six psp2_* adapters
+src/main.c       composition root; constructs adapters and starts the app
+tools/test/      layering guard, docs guard, host suites, and the app/worker integration test
 tools/fake/      controllable NetPort, FsPort, input, IME, clock, log, and FTP peers
 tools/preview/   software vita2d shim and the 960x544 preview
 docs/            architecture, design, decisions, plan, third-party notices
@@ -176,7 +167,7 @@ sce_sys/         placeholder LiveArea art
 |---|---|
 | [`STRATEGY.md`](STRATEGY.md) | Why the product exists, who it serves, boundaries, and metrics |
 | [`docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | Requirements, key decisions, implementation units, verification contract |
-| [`PROJECTS.md`](PROJECTS.md) | Current phase, last job, next action, and the decision log |
+| [`PROJECTS.md`](PROJECTS.md) | The board: current phase, last job, next action, and the job log |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Layers, ports, threading, handoff, and module rules |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | The settled layout, states, and input |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Numbered decisions with context and consequences |
@@ -186,9 +177,9 @@ sce_sys/         placeholder LiveArea art
 
 ## Contributing
 
-vitaFTPShell is pre-alpha, and the screen layout and protocol behavior are
-settled. Read [`AGENTS.md`](AGENTS.md) before changing code, open an issue for a
-large change, and run the host checks before sending a pull request:
+vitaFTPShell's screen layout and protocol behavior are settled. Read
+[`AGENTS.md`](AGENTS.md) before changing code, open an issue for a large change,
+and run the host checks before sending a pull request:
 
 ```sh
 ./tools/test/run.sh

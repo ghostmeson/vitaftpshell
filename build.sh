@@ -25,6 +25,9 @@ if ! command -v arm-vita-eabi-gcc >/dev/null 2>&1; then
   exit 1
 fi
 
+# Install-time guard: the Vita promoter rejects 24-bit truecolor LiveArea art.
+"$ROOT/tools/check_assets.sh"
+
 # A build number identifies a *distinct* build, not a compiler invocation.
 #
 # Rebuilding unchanged sources -- which happens constantly while checking for
@@ -58,6 +61,10 @@ VERSION=$(sed -n 's/^set(VITA_VERSION[[:space:]]*"\([^"]*\)").*/\1/p' "$ROOT/CMa
 cmake -S "$ROOT" -B "$ROOT/build" -DCMAKE_BUILD_TYPE=Release \
   -DVITAFTPSHELL_BUILD="$BUILD"
 cmake --build "$ROOT/build" --parallel
+
+# A stack overflow in the worker thread costs a console run and a core dump to
+# find. The host cannot measure the target stack, so check the linked ELF.
+python3 "$ROOT/tools/check_worker_stack.py" "$ROOT/build/vitaftpshell"
 
 EXPECTED="$ROOT/build/vitaftpshell-v${VERSION}-b${BUILD}.vpk"
 

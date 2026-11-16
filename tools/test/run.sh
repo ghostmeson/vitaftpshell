@@ -7,9 +7,8 @@ set -euo pipefail
 #
 #   tools/test/run.sh
 #
-# Phase 1 runs the layering guard. Later units add host tests under
-# tools/test/test_*.c; the loop below compiles each against the fakes and the
-# policy core.
+# The run starts with the layering guard, then compiles each tools/test/test_*.c
+# against the fakes and the real core, screens, and runtime.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="$ROOT/build/test"
@@ -63,6 +62,26 @@ fi
 
 echo "layering guard: OK"
 
+# The stack gate's own parser: a missing or malformed depth must fail, not pass
+# vacuously. This needs no Vita toolchain.
+python3 "$ROOT/tools/check_worker_stack.py" --self-test
+
+# --- Asset guard ------------------------------------------------------------
+# The installer rejects 24-bit truecolor LiveArea art with 0x8010113D; every
+# sce_sys PNG must be indexed 8-bit (color type 3, bit depth 8).
+"$ROOT/tools/check_assets.sh"
+
+# --- Docs guard -------------------------------------------------------------
+# The docs gate owns what the layering and asset guards cannot see: broken
+# links, unindexed plans and designs, dead R/U/KTD/D references, build tokens in
+# summaries, a divergent status block, and a retired phrase returning to a live
+# document. Its baseline may only shrink, so today's drift is measured while
+# new drift fails here (DR13).
+# The gate ships its own fixtures; run them before the real tree so a broken
+# check fails here instead of passing silently.
+python3 "$ROOT/tools/check_docs.py" --self-test
+python3 "$ROOT/tools/check_docs.py" --root "$ROOT"
+
 # --- Host tests -------------------------------------------------------------
 mkdir -p "$OUT"
 shopt -s nullglob
@@ -80,7 +99,30 @@ for test_src in "${tests[@]}"; do
   name="$(basename "$test_src" .c)"
 
   # The graphics test links the renderer against the software vita2d shim, not
-  # the policy core. It is the one test with its own link line.
+  # the policy core. The render suites link the real ui and core as well.
+  if [[ "$name" == "test_integration" || "$name" == "test_app_thread" ||
+        "$name" == "test_app_thread_xfer" ]]; then
+    "$CC" -std=c99 -O1 -g -Wall -Wextra -pthread \
+      -I"$ROOT/src" -I"$ROOT/tools/fake" -I"$ROOT/tools/preview" \
+      "$test_src" "$ROOT"/tools/fake/*.c "$ROOT"/src/core/*.c \
+      "$ROOT"/src/core/ftp/*.c "$ROOT"/src/gfx/*.c "$ROOT"/src/ui/*.c \
+      "$ROOT"/src/app/*.c "$ROOT/tools/preview/vita2d_soft.c" \
+      -lz -lm -o "$OUT/$name"
+    "$OUT/$name"
+    continue
+  fi
+
+  if [[ "$name" == "test_render_workspace" || "$name" == "test_render_screens" ]]; then
+    "$CC" -std=c99 -O1 -g -Wall -Wextra \
+      -I"$ROOT/src" -I"$ROOT/tools/preview" -I"$ROOT/tools/test" \
+      "$test_src" "$ROOT"/src/gfx/*.c "$ROOT"/src/ui/*.c \
+      "$ROOT"/src/core/*.c "$ROOT"/src/core/ftp/*.c \
+      "$ROOT/tools/preview/vita2d_soft.c" \
+      -lz -lm -o "$OUT/$name"
+    "$OUT/$name"
+    continue
+  fi
+
   if [[ "$name" == "test_gfx" ]]; then
     "$CC" -std=c99 -O1 -g -Wall -Wextra \
       -I"$ROOT/src" -I"$ROOT/tools/preview" \
@@ -91,7 +133,7 @@ for test_src in "${tests[@]}"; do
   fi
 
   # Bash 3.2 treats an empty array as unbound under `set -u`.
-  "$CC" -std=c99 -O1 -g -Wall -Wextra \
+  "$CC" -std=c99 -O1 -g -Wall -Wextra -pthread \
     -I"$ROOT/src" -I"$ROOT/tools/fake" \
     "$test_src" ${fake_sources[@]+"${fake_sources[@]}"} \
     ${core_sources[@]+"${core_sources[@]}"} \

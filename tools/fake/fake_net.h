@@ -17,6 +17,10 @@
  *
  * A test seeds the control peer and link state, then queues bytes on the socket
  * the core opened. Every call is non-blocking, exactly like the adapter.
+ *
+ * Every callback and accessor takes one host mutex around the socket and
+ * listener state, so the app's worker and a test's scripted peer can share the
+ * singleton. The fakes are host-only; pthreads stay out of the policy layer.
  */
 
 void fake_net_reset(void);
@@ -27,10 +31,18 @@ void fake_net_set_resolve(uint32_t addr, int fail);
 void fake_net_set_connect_result(NetResult result);
 void fake_net_fail_send_next(NetResult result);
 unsigned fake_net_overflow_count(void);
+/* The count of the most recent wait set, so a test can prove the server stays
+ * under NET_WAIT_MAX. An over-cap set is rejected like the adapter rejects it. */
+unsigned fake_net_last_wait_count(void);
 void fake_net_set_link(int up, int known, uint32_t addr, uint16_t port);
 void fake_net_fail_next(NetResult result);
+/* Fail listen() on one named port until cleared, so a slot's data-port bind can
+ * fail while the control listener still binds (R4's 425 case). */
+void fake_net_fail_listen_port(uint16_t port, int fail);
 
 NetSocket *fake_net_last_connected(void);
+/* The address a socket actually dialed; 0 when it never connected. */
+void fake_net_socket_peer(NetSocket *socket, uint32_t *addr, uint16_t *port);
 NetSocket *fake_net_last_listener(void);
 /* Listen/accept order, for a server test that binds two ports. */
 unsigned fake_net_listener_count(void);
@@ -47,6 +59,10 @@ void fake_net_reset_peer(NetSocket *socket);
 size_t fake_net_tx_len(NetSocket *socket);
 size_t fake_net_read_tx(NetSocket *socket, void *buf, size_t cap);
 int fake_net_is_open(NetSocket *socket);
+/* Keep a send from making progress without closing the socket; the server's
+ * reply buffer can then be filled to exercise the backlog drop path. */
+void fake_net_block_sends(NetSocket *socket, int blocked);
+
 void fake_net_set_ready(NetSocket *socket, unsigned flags);
 
 /* Queue one peer for the listener; the next accept returns a new socket. */

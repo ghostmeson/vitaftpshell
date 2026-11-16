@@ -2,9 +2,9 @@
 
 **Status:** all screens are settled: WORKSPACE, SITES, SITE EDITOR, SERVER,
 ACTIONS, CONFIRM, and TEXT ENTRY. The design phase is complete and the
-architecture plan is written. Two amendments landed after the close, both
-user-directed: the risk mark and the high-risk confirmation (D30, D31), and the
-2000-row cap's `FIRST 2000` notice. The fixed constraints below bind every screen.
+architecture plan is written. The risk mark landed after the close (D31); the
+high-risk confirmation was retired by D87, and the 2000-row cap's `FIRST 2000`
+notice remains. The fixed constraints below bind every screen.
 
 ## Visual authority
 
@@ -19,8 +19,9 @@ settled value is a design change and needs a numbered decision.
 - **Screen:** 960×544, no scaling. The Vita's display is the only target.
 - **Field:** true black `C_FIELD`. Panels use `C_PANEL`.
 - **Palette:** `C_FIELD`, `C_PANEL`, `C_HAIR`, `C_DIM`, `C_WHITE`, `C_YELLOW`,
-  `C_CYAN`, `C_GREEN`, `C_GREEN_DIM`, `C_RED`. Yellow is the alert channel.
-  Red is not an alert.
+  `C_CYAN`, `C_GREEN`, `C_GREEN_DIM`, `C_RED`. Yellow marks network activity,
+  risk, warnings, and waiting local work; cyan marks the cursor row and a
+  running local job; red marks a failure or a refusal.
 - **Type:** the hand-built 5×7 bitmap face. Uppercase, ASCII labels, `..` for
   truncation. Sizes come from the COCKPIT ladder; do not invent a size between
   steps. The face has no `?` or `!`; a UI title is a statement (`DELETE 3 ITEMS`,
@@ -30,8 +31,8 @@ settled value is a design change and needs a numbered decision.
 - **Panel language:** satellite panels get one chamfer; the hero treatment is
   reserved for the workspace's primary region. Brackets mark the hero only.
 - **Restraint:** no icon that encodes nothing, no second alert colour, no glow
-  except the wordmark and hazard band, no animation beyond progress, scrolling,
-  and a running-state cue.
+  except the wordmark, the hazard band, and the active pane, no animation beyond
+  progress, scrolling, and a running-state cue.
 - **Numbers:** a metric or size the platform cannot report renders `--`. A readout
   is never a guess.
 
@@ -55,13 +56,25 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
 
 ### Pane
 
+- **Root:** the local pane opens at `ALL DRIVES`, a virtual root that lists the
+  mounted `ux0:`, `ur0:`, and `uma0:` volumes as `DRIVE` rows. Entering a volume
+  lists its root; Circle at a volume root returns to `ALL DRIVES`. Neither the
+  virtual root nor a volume root carries a `..` row. Copy, move, rename, and
+  delete are unavailable at the virtual root; new folder is unavailable there
+  too. A volume root is protected against rename and delete, but new folder is
+  allowed inside it.
 - **Band:** title at `y+8` (px 2, tracked 2); path at `y+26` (px 1.5); a hairline
   at `y+43`; rows from `y+48`.
 - **Row:** 30 px pitch; ten visible. Name at `x+40` (px 2). Type or size
-  right-aligned at `x+w-14` (px 1.5): `DIR`, `UP`, a size, or `--`. The mark
-  square is 6×6 at `x+19`; the risk diamond is 6×6 at `x+27`; the cursor bar is
-  2 px at `x+8`; the scrollbar is 2 px at `x+w-6`. The name column starts at
-  `x+40` on every row so names stay aligned when a risk mark appears.
+  right-aligned at `x+w-14` (px 1.5): `DIR`, `UP`, `ASIDE`, a size, or `--`. A
+  kept `.vftp.old` copy draws `ASIDE` in yellow instead of a size, so the debris
+  is reachable and never mistaken for the user's file (D81). The mark
+  square is 6×6 at `x+19`; the risk diamond is 6×6 at `x+27`; the scrollbar is
+  2 px at `x+w-6`. The name column starts at `x+40` on every row so names stay
+  aligned when a risk mark appears. The active cursor row is a cyan slab from
+  `x+1` to `x+w-1`, with near-black name and value text. On the slab the mark
+  square and risk diamond stay yellow behind a 1 px dark keyline. The inactive
+  cursor keeps a 2 px `C_HAIR` bar at `x+8` and a 2.5 % wash.
 - **Risk mark:** a path the shared risk table classifies high draws a 6×6 yellow
   diamond at `x+27` (D31). It marks the `tai` folders and their contents, volume
   roots, the `ur0:data` and `ux0:data` folders themselves, and the files that
@@ -69,17 +82,23 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
 - **Truncated listing:** a directory longer than the 2000-row cap shows
   `FIRST 2000` in yellow on the band, left of the mark count. The rows shown are
   the first 2000 in the source's order.
-- **Values:** a known size is white; `--`, `DIR`, and `UP` are dim. A size the
-  source does not report is never shown as zero.
-- **Active pane:** a 2 px yellow left edge and a yellow title. The inactive pane
-  keeps a dim title, a `C_CYAN_DIM` path, a `C_HAIR` cursor bar, and a 2.5 %
-  wash. The active cursor is a 2 px white bar over a 6 % wash.
+- **Values:** a known size is white; `--`, `DIR`, and `UP` are dim. On the
+  active cursor slab the name and value are near-black. A size the source does
+  not report is never shown as zero.
+- **Active pane:** a full yellow outline that follows the pane chamfer, plus a
+  static additive bloom just outside it; the title is yellow. The bloom is
+  suppressed on a lost session. The inactive pane keeps a dim title, a
+  `C_CYAN_DIM` path, a `C_HAIR` cursor bar, and a 2.5 % wash.
 - **Marks:** pane-scoped. The band shows the count in yellow and the total known
   size in white. Marks survive directory changes, L/R, and a completed batch
   (D18); they clear when the pane's connection or volume root changes, or when
   the user unmarks each row.
 - **Identity:** the remote band shows the site and path; the local band shows
   the path and free space. The site identity also stays in the header (D19).
+- **Action failure:** a refused or failed action replaces the path with the
+  error in red, fitted with `..`; it clears on the next workspace key or a
+  successful listing. A failed listing keeps its centered `LISTING FAILED`; a
+  lost session keeps its centered detail (D68).
 - **Truncation:** names and paths end in `..`. A path too deep for the band is
   shown in full in ACTIONS, which is still to be designed.
 
@@ -104,48 +123,91 @@ allowed outside the hazard band.
 - **Idle:** `IDLE` dim; the active pane and path; the mark count and total on the
   right; the action hint (`X TO DOWNLOAD n ITEMS`) on line three.
 - **Active:** `DOWNLOAD` or `UPLOAD` yellow; filename; `n OF m`; a yellow
-  continuous bar; transferred and total bytes, percentage, and rate. When the
-  total is unknown, the total and percentage render `--`.
-- **Done:** `DONE` green; filename; `n OF m`; a full yellow bar; size and elapsed
-  time; average rate.
-- **Failed:** `FAILED` yellow; filename; `n OF m`; the bar stops at the failure
-  point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure ends
-  with `X TO RETRY`; a control failure leaves the reconnect to the pane.
+  continuous bar; transferred and total bytes, percentage, and rate. A download
+  total comes from the listing row and is visible before the first byte. When
+  the total is unknown, the total and percentage render `--`.
+- **Done:** the past-tense operation word — `COPIED`, `MOVED`, `DELETED`,
+  `RENAMED`, `FOLDER CREATED`, `UPLOADED`, `DOWNLOADED` — green; filename; a
+  full yellow bar; size and elapsed time; average rate. A batch names its item
+  count (`3 ITEMS`) instead of `n OF m`, shows `n SKIPPED` when some were
+  skipped, and keeps `n OF m ITEMS` when partial. An all-skipped set is
+  `SKIPPED` in dim; a cancelled batch is `CANCELLED` in white. A partial set
+  keeps the operation word in yellow and puts the reason on line three; a set
+  where nothing succeeded reads `FAILED` in red, never the operation word in
+  red. A single item omits the count. A download that lost its final reply
+  after every byte arrived keeps the operation word in yellow and puts
+  `FINAL REPLY MISSING` on line three; it is not `NO PARTIAL KEPT` (D89). A
+  successful rename whose aside cleanup failed keeps the green operation word
+  and puts `ASIDE CLEANUP FAILED - OLD COPY KEPT AS ...` on line three in
+  yellow; the rename did happen, so the dock never reads `FAILED`.
+- **Failed:** `FAILED` red; filename; `n OF m`; the bar stops at the failure
+  point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure leaves
+  the item failed and is retried by running it again; a control failure leaves
+  the reconnect to the pane.
 - **No session:** `IDLE` dim; `REMOTE`; `NO MARKS`; `NO SELECTION`.
+- **Status:** a status message replaces the idle hint on line three until the
+  next key: red for a failure or refusal, yellow for a warning. The rest of the
+  idle dock does not change.
 - **Focused dock:** only focusable when a transfer is active or queued. Down from
   the last row enters it; the 1 px outline turns white; the legend becomes
   `[X] CANCEL  [O] TO LIST`; Cross opens the cancel CONFIRM; Circle returns to
   the last row. The dock’s state colours do not change.
+- **Two lanes:** one local job may run beside one network transfer. The
+  network lane keeps the word, bar, bytes, and rate; the local lane becomes a
+  compact badge on line three, right-aligned, with the rate moved left. Badge
+  colours: cyan running, yellow waiting on a held path, white `CANCELLING`
+  while the cancel is in flight and `LOCAL CANCELLED` once it lands, red
+  `LOCAL FAILED`, dim `LOCAL DONE` on a clean terminal. When the local lane is alone it takes the
+  full dock with its own word, bar, bytes, and terminal, and that terminal
+  persists until the next local item. A waiting local lane alone takes the full
+  dock with the word `WAITING` in yellow, the subject `LOCAL`, and no bar; a
+  waiting network lane shows the same panel with the subject `NETWORK`. The
+  badge is drawn over every screen that draws the dock. A focused dock with both lanes asks `KEEP`, `CANCEL NETWORK`,
+  `CANCEL LOCAL` (KEEP focused first); a single lane keeps the two-choice
+  cancel. The single-lane cancel says the transferred file is removed and that
+  KEEP leaves it running; the two-lane cancel says cancelled transfers remove
+  their files. An explicit cancel discards a download even when every byte
+  arrived, so the confirm never calls the file partial (D89). A server-mode
+  transfer is not cancelled here; it ends through the server-stop confirm, so
+  a server transfer plus a local job offers only KEEP and CANCEL LOCAL.
 - The terminal state stays until the next transfer starts (R67). The dock is
   never modal and never covers a row.
 
 ### Pane states
 
+- **Connecting:** the remote pane shows `CONNECTING` in yellow and `PLEASE
+  WAIT` in micro while the worker resolves and connects. The SITES card says
+  `CONNECTING...` in cyan. A success replaces it with the remote listing; a
+  failure shows the existing not-connected/login-failed state.
 - **Reading:** `READING` white px 2, centred in the list area. The band keeps the
-  path being read.
+  path being read. A command that fails before a listing begins (busy client,
+  refused CWD, not connected) clears `READING` and returns the pane to the
+  previous folder with the reason in the status/dock.
 - **Empty:** `EMPTY FOLDER` dim px 2, centred.
 - **Session lost:** `SESSION LOST` yellow px 2; the mapped reason in micro dim;
   `X RECONNECT  O DISMISS` in micro with the keys white and the words dim. The
-  block is centred; the band keeps the last path dim; marks clear; the dock keeps
-  the failed transfer.
+  block is centred; the band keeps the last path dim, the site identity clears,
+  marks clear, the header reads `NOT CONNECTED`, and the dock keeps the failed
+  transfer.
 - **Data-channel failure with a healthy control channel:** the rows stay; the
-  dock shows FAILED and the retry; the session stays connected.
+  dock shows FAILED and says the item is retried by running it again; the
+  session stays connected.
 
 ### Input
 
 - L/R switches the active pane and preserves both path and selection.
 - Cross opens a directory, or transfers the selected file or marked set.
 - Circle goes to the parent; at a volume root or `/` it says so.
-- Square marks; Triangle opens SITES; Start opens SERVER; Select opens ACTIONS.
+- Square marks; Triangle opens ACTIONS; Start opens SERVER; Select opens SITES.
 - Down from the last row enters the dock only when a transfer is active or
   queued.
 - On the session-lost state, Cross reconnects and Circle dismisses.
 
 ### Legend
 
-- Standard: `[X] OPEN/SEND  [O] UP  [□] MARK  [△] SITES  L/R PANE  START SERVER
-  SELECT ACTIONS`.
-- Reconnect: `[X] RECONNECT  [O] DISMISS  L/R PANE  START SERVER  SELECT ACTIONS`.
+- Standard: `[X] OPEN/SEND  [O] UP  [□] MARK  [△] ACTIONS  L/R PANE  START SERVER
+  SELECT SITES`.
+- Reconnect: `[X] RECONNECT  [O] DISMISS  L/R PANE  START SERVER  SELECT SITES`.
 
 ## SITES
 
@@ -172,7 +234,7 @@ five states are in
   130; the value right-aligned at 928. Values are px 2 and white.
 - Footer at 160: a login site says `PASSWORDS ARE STORED UNENCRYPTED`; an
   anonymous site says `NO PASSWORD STORED`; a failed login says
-  `LOGIN FAILED  -  <reply>` in yellow. `SQUARE TO EDIT` is right-aligned on the
+  `LOGIN FAILED  -  <reply>` in red. `SQUARE TO EDIT` is right-aligned on the
   same line.
 - The card is a preview; editing happens on SITE EDITOR.
 
@@ -183,8 +245,8 @@ five states are in
 - A hairline at 241; six 30 px rows from 246.
 - Each row: name at `x+32` (px 2, white), host:port at `x+300` (micro,
   `C_CYAN_DIM`), `ANON` (dim) or `LOGIN` (cyan) right-aligned at `x+w-14`. The
-  selected row gets a 2 px white bar and a 6 % wash. A scrollbar appears only
-  when the book exceeds six rows.
+  selected row is a cyan slab with near-black name, host, and badge. A
+  scrollbar appears only when the book exceeds six rows.
 - Long names and hosts end in `..`; the editor holds the full values.
 
 ### States
@@ -194,6 +256,9 @@ five states are in
 - **Empty:** the card is not drawn; the table becomes a full-height panel
   (18, 76, 924, 352) with `ALL SITES`, `0 SAVED`, and a centred
   `NO SITES` + `TRIANGLE TO ADD A SITE`.
+- **Connecting:** the card footer says `CONNECTING...` in cyan while the
+  worker resolves and connects; the selected row stays. A success shows the
+  remote listing; a failure replaces the footer with the login-failed reply.
 - **Login failed:** the card footer carries the server reply in yellow; the site
   stays selected and editable; the table is untouched; the header stays
   `NOT CONNECTED`.
@@ -285,8 +350,7 @@ Direction A: the console layout (D25). The six states are in
 |---|---|---|---|---|
 | Header | 0 | 0 | 960 | 64 |
 | Status panel | 18 | 76 | 552 | 352 |
-| Warning panel | 582 | 76 | 360 | 200 |
-| Client panel | 582 | 288 | 360 | 140 |
+| Client panel | 582 | 76 | 360 | 352 |
 | Dock | 18 | 440 | 924 | 64 |
 | Control legend | 18 | 510 | 924 | 16 |
 
@@ -303,20 +367,13 @@ Direction A: the console layout (D25). The six states are in
 - The slab is 32, 340, 488 × 40: `START SERVER` yellow when OFF; `STOP SERVER`
   and `CANCEL` dark. A 2 px white outline offset 4 marks focus.
 
-### Warning
-
-A 582, 76, 360 × 200 panel with a yellow accent and `WARNING` at 596, 84. Eight
-micro lines from 596, 108 on a 16 px stride: the anonymous read-write risk in
-yellow, the excluded app folder and `tai` denials in dim, then the launch/stop
-lifecycle in dim. One of those lines says that an upload replaces a file of the
-same name (D41).
-
 ### Client
 
-A 582, 288, 360 × 140 panel. `CLIENT` at 596, 296; `CONNECTED` green at the
-right when a client is on. With no client, `NO CLIENT` and `ONE CLIENT AT A
-TIME`. With a client: the IP at 320, the operation at 342 and its path at 345.5,
-the bytes or `NO TRANSFER` at 362, and `ONE CLIENT AT A TIME` at 382.
+A 582, 76, 360 × 352 panel. `CLIENT` at 596, 84; `CONNECTED` green at the
+right when a client is on. With no client, `NO CLIENT` at 108 and
+`UP TO 4 CLIENTS` at 130. With a client: the IP at 108, the operation at 130 and
+its path at 133.5, the bytes or `NO TRANSFER` at 150, and `UP TO 4 CLIENTS` at
+170.
 
 ### Dock and legend
 
@@ -330,8 +387,8 @@ the bytes or `NO TRANSFER` at 362, and `ONE CLIENT AT A TIME` at 382.
 
 ### States
 
-- **OFF at launch:** the warning is visible before the first start; the address
-  is dim; the start slab is focused; the header says `SERVER OFF`.
+- **OFF at launch:** the client panel shows `NO CLIENT`; the address is dim;
+  the start slab is focused; the header says `SERVER OFF`.
 - **Starting:** `STARTING` yellow; a cancel slab; the address dim; the header
   says `SERVER STARTING`.
 - **ON, no client / browsing / transferring:** the stop slab is focused; the
@@ -340,21 +397,22 @@ the bytes or `NO TRANSFER` at 362, and `ONE CLIENT AT A TIME` at 382.
   start slab stays available; the header says `SERVER OFF`.
 - **No network:** `NO NETWORK - CONNECT TO WI-FI` uses the same line; the
   address reads `--`; the start slab keeps focus.
-- **Second client:** the PC receives a busy reply; the Vita still shows one
-  client and the client panel keeps the active one.
+- **Client limit:** the first four clients connect; a fifth receives a busy
+  reply. The panel names the most recent peer.
 - **Stop during a write:** CONFIRM names the in-flight write before the session
   closes.
 - **Upload overwrite:** a file received in server mode replaces an existing file
-  of the same name without a console prompt (D41); the warning panel says so.
+  of the same name without a console prompt (D41).
 
 The header repeats the server state on every screen: `SERVER OFF`,
 `SERVER STARTING`, or `SERVER ON n CLIENT(S)`.
 
 ## ACTIONS
 
-Direction A: the action ledger with the target panel (D26), with local copy/move
-using the marks as the source and the current folder as the destination (D27).
-The four states are in
+Direction A: the action ledger with the target panel (D26). Local COPY/MOVE
+freeze the marks on a clipboard; PASTE runs them into the folder the user
+navigated to (D60). Remote row actions run over the FTP session; the remote
+ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
 [`design/2026-11-08-actions-a-states.html`](design/2026-11-08-actions-a-states.html).
 
 ### Geometry
@@ -370,39 +428,75 @@ The four states are in
 
 - `LOCAL ACTIONS` or `REMOTE ACTIONS` at 32, 84 (px 2, tracked 2); the path at
   32, 102 (micro, cyan); the band state right-aligned at 556: `n ITEM(S)`,
-  `n MARKED`, or `VOLUME ROOT`.
+  `n MARKED`, `COPY n`, `MOVE n`, `NO SELECTION`, `VOLUME ROOT`, or
+  `PROTECTED PATH`.
 - A hairline at 119; rows from 124 at 44 px, six maximum.
 - Each row: label at 50 (px 2), description at 50 (micro, `y+23`). Disabled rows
-  are dim and carry the reason (`MARK TO COPY`, `PROTECTED PATH`, `VOLUME ROOT`).
+  are dim and carry the reason (`NO SELECTION`, `PROTECTED PATH`, `VOLUME ROOT`).
   A destructive row’s description is yellow (`CANNOT BE UNDONE`). The selected
-  row gets a 2 px white bar and a 6 % wash.
+  row is a cyan slab from `x+1` to `x+w-1`; its label, description, and disabled
+  reason are near-black.
 
 ### Target panel
 
 - `TARGET` at 596, 84; the pane at 596, 108; the path at 596, 126.
 - Multi: the count at 596, 148 (px 5), `MARKED` and the total at 169. Single: the
   name at 596, 148 (px 3) and the size at 178 (px 2). Protected: the root at 148
-  (px 3) and `VOLUME ROOT` at 178 (px 2, yellow).
+  (px 3) and `VOLUME ROOT` at 178 (px 2, yellow). No selection: `--` at 148 and
+  `NO SELECTION` at 178 (px 2, dim). PASTE: the clipboard count at 148 (px 5)
+  and `CLIPBOARD` at 169 (micro).
 - A hairline at 210; `DESTINATION` at 224 with the value right-aligned at 928.
+  COPY and MOVE show `CLIPBOARD`; PASTE and the other actions show the current
+  folder (or the remote pane for upload). REFRESH shows `--` at 148 and `FOLDER`
+  at 178; DISCONNECT shows `--` at 148 and `SESSION` at 178.
 - The selected action at 300 and its consequence at 320 (micro); the note at
   400 (micro).
 - The target is the single source of truth for where an action goes.
 
 ### States
 
-- **Local single, no marks:** copy and move are dim (`MARK TO COPY`,
-  `MARK TO MOVE`); upload, new folder, rename, and delete use the cursor; the
-  upload destination is the remote pane.
-- **Local multi:** copy and move go `TO THIS FOLDER`; rename is dim (`ONE ITEM
-  ONLY`); delete is flagged; the marks stay after the operation (D18).
-- **Remote single:** download to the local pane; rename, delete, new folder.
+- **No selection:** the cursor is on `..` or the folder has no rows. Copy, move,
+  upload, rename, and delete are dim with `NO SELECTION`; the target panel says
+  `NO SELECTION`. New folder is the only live action and creates in the current
+  folder. Marks count as a selection for copy, move, and delete.
+- **Local single, no marks:** copy and move use the cursor row; upload, new
+  folder, rename, and delete use the cursor; the upload destination is the
+  remote pane.
+- **Local multi:** copy and move put the marks on the clipboard (`TO
+  CLIPBOARD`); rename is dim (`ONE ITEM ONLY`); delete is flagged; the marks
+  stay after the operation (D18).
+- **Clipboard armed:** PASTE and CLEAR replace COPY and MOVE in the first two
+  rows. The target reads `n CLIPBOARD`; the destination is the current folder.
+  PASTE executes one COPY or MOVE per clipboard path into that folder. A
+  same-folder MOVE is dim (`ALREADY HERE`); a same-folder COPY is allowed and
+  uses a free copy name. CLEAR discards the clipboard.
+- **Remote single:** download to the local pane; rename, delete, new folder;
+  refresh; disconnect. Row actions are dim while the pane is disconnected or
+  reading. DISCONNECT stays live while reading and closes the session; it is the
+  escape from a listing that is taking too long. While `READING` the ledger's row
+  actions read `READING`, and a disconnected pane reads `NOT CONNECTED`.
+- **Remote folder:** DOWNLOAD is dim (`FOLDER NOT SUPPORTED`). R22/R23 recursion
+  is not implemented yet; a marked set containing a folder refuses the whole
+  transfer with the same reason. The worker repeats the refusal.
+- **Unsafe remote name:** the row keeps the yellow risk diamond; DOWNLOAD,
+  RENAME, and DELETE are dim (`UNSAFE NAME`), and Square refuses marking. Cross
+  refuses an unsafe **file** without building a local path, but an unsafe
+  **directory** still opens: the Vita server's own volume roots are `UX0:`,
+  `UR0:`, and `UMA0:`, and navigation builds no local path (D67). A name is
+  unsafe when it is empty, `.`/`..`, or contains `/`, `\`, or `:`.
 - **Protected root:** copy, move, rename, and delete are dim with their reasons;
   new folder is the only action.
 
 ### Dock and legend
 
 - Dock: `READY`, the selected action and its target, the size or destination on
-  the right, and `X TO RUN`.
+  the right, and `X TO RUN`. A disabled action's reason replaces `X TO RUN` in
+  yellow until the next key.
+- Running an action returns to WORKSPACE so the transfer dock shows its progress
+  and result. A confirmation also returns to WORKSPACE after its run.
+- The workspace idle dock shows `COPY n - TRIANGLE TO PASTE` or `MOVE n -
+  TRIANGLE TO PASTE` while a clipboard is armed. A local delete runs as
+  `DELETE`, not `MOVE`.
 - Legend: `[X] RUN  [O] CLOSE  UP/DOWN ACTION`.
 
 ## CONFIRM
@@ -442,20 +536,20 @@ five-row viewport; a longer set scrolls (D29). The six states are in
 
 ### States
 
-- **Delete:** three or many items; the item viewport, the count and known size,
-  `THIS CANNOT BE UNDONE.`, CANCEL / DELETE.
+- **Delete:** three or many items; the item list shows the **full path** of every
+  source, including marks from another folder; the count and known size,
+  `THIS CANNOT BE UNDONE.`, CANCEL / DELETE. The retired high-risk warning no
+  longer changes this panel (D87); `boot_config.txt` is refused before the panel
+  opens.
 - **Batch conflict:** `2 DESTINATIONS EXIST`; the batch count; CANCEL / SKIP
-  EXISTING / OVERWRITE ALL; the replace warning.
+  EXISTING / OVERWRITE ALL; the replace warning. A download checks the local
+  destination; an upload checks the remote destination with MLST when the server
+  advertises it. CANCEL ends the batch.
 - **Cancel a transfer:** the item, the progress, the partial removed; KEEP
   DOWNLOADING / CANCEL.
 - **Stop the server during a write:** the client’s write and the partial removed;
   KEEP RUNNING / STOP SERVER.
 - **Discard editor changes:** the site, the lost changes; KEEP EDITING / DISCARD.
-- **High-risk write:** `WRITE INSIDE <PATH>`; the path; `A BAD EDIT CAN STOP THE
-  CONSOLE BOOTING.` and `THERE IS NO UNDO.`; CANCEL / CONTINUE. Used for a write,
-  create, rename, or delete inside `ur0:tai`, `ux0:tai`, or any other high-risk
-  path (D30, D31). `boot_config.txt` never reaches this panel; it is denied.
-
 ## TEXT ENTRY
 
 The system IME is a Vita surface. The app supplies a contract and never draws the
@@ -480,8 +574,9 @@ keyboard. The three states are in
 | New folder | `NEW FOLDER NAME` | No | 255 |
 | Rename | `RENAME` | No | 255 |
 
-The port is validated by the app at 1024–65534, so the data port at control plus one
-stays valid (D39). Names and hosts follow the field rules; an empty password is
+The port is validated by the app at 1024–65531, so no session slot's data port
+exceeds 65535 when the server derives it from the control port and the slot
+index (D92). Names and hosts follow the field rules; an empty password is
 allowed (D24).
 
 ### States
@@ -504,11 +599,22 @@ look and how focus moves.
 | WORKSPACE | Two live panes, transfer dock, header | local only, connected, disconnected, transferring, empty folder, error |
 | SITES | Saved site list | empty, populated, selected, deleting |
 | SITE EDITOR | Name, host, port, user, password, anonymous | new, edit, invalid field, password warning |
-| SERVER | Start/stop, port, IP, client count, warning | OFF, starting, ON, client connected, stop, error |
+| SERVER | Start/stop, port, IP, client count, access | OFF, starting, ON, client connected, stop, error |
 | ACTIONS | Context actions for the active pane | local, remote, multi-select, read-only |
 | CONFIRM | Destructive confirmation or batch conflict | delete, overwrite all, skip existing, cancel |
 | TEXT INPUT | System IME for paths, names, and fields | open, cancelled, unavailable |
 | ERROR / RECONNECT | Inline failure and reconnect | network lost, login failed, transfer failed, server failed |
+
+## Launcher icon
+
+The home-screen icon is not a screen. It is a 128×128 true-black tile with one
+centred mark: a yellow arrow pointing right above a cyan arrow pointing left.
+The pair states the two live lanes and the transfer between them in the
+product's own palette. There is no frame, panel, glow, or text: the bubble
+launcher cuts its corners, so anything at the edge breaks the silhouette. The
+mark lives inside a centred 70×60 box. Full geometry and the mask check are in
+[`design/2026-11-15-launcher-icon.md`](design/2026-11-15-launcher-icon.md); the
+decision is D84.
 
 ## Design phase complete
 
@@ -519,9 +625,10 @@ server foundation, and the local `tai` policy.
 
 Two amendments landed after the close, both user-directed:
 
-- **Risk marks and the high-risk confirmation (D30, D31).** The local manager may
-  write inside `ur0:tai` and `ux0:tai`, so a high-risk row draws a yellow diamond
-  and the action confirms with a boot warning. `boot_config.txt` stays denied.
+- **Risk marks (D31, amended by D87).** The local manager and the server may
+  write inside `ur0:tai` and `ux0:tai`; a high-risk row still draws its yellow
+  diamond. The extra high-risk confirmation was retired by D87.
+  `ur0:tai/boot_config.txt` stays denied.
 - **`FIRST 2000` (KTD7).** A directory longer than the cap says so on the band
   instead of pretending the list is complete.
 

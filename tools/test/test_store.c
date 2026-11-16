@@ -233,6 +233,18 @@ static void test_settings(void)
     CHECK(store_load_settings(fs, STORE_DIR, &loaded) == STORE_OK);
     CHECK(strcmp(loaded.last_local, deep.last_local) == 0);
 
+    /* R6: a stored port is clamped into what four data ports can follow, so an
+     * older file can neither exceed 65535 on a data port nor land below 1024. */
+    const char *high = "vitaFTPShell-settings 1\nserver_port=65534\n";
+    fake_fs_seed_file("ux0:data/vitaFTPShell/settings.cfg", high, strlen(high));
+    CHECK(store_load_settings(fs, STORE_DIR, &loaded) == STORE_OK);
+    CHECK(loaded.server_port == 65531);
+
+    const char *low = "vitaFTPShell-settings 1\nserver_port=80\n";
+    fake_fs_seed_file("ux0:data/vitaFTPShell/settings.cfg", low, strlen(low));
+    CHECK(store_load_settings(fs, STORE_DIR, &loaded) == STORE_OK);
+    CHECK(loaded.server_port == 1024);
+
     /* An overlong line is a partial load, not a silent success. */
     char long_file[8192];
     const char *header = "vitaFTPShell-settings 1\n";

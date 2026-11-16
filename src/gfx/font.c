@@ -80,6 +80,13 @@ static const Glyph GLYPHS[] = {
     {'|', {0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}},
 };
 
+static FontTraceFn s_trace;
+
+void font_set_trace(FontTraceFn fn)
+{
+    s_trace = fn;
+}
+
 static const uint8_t *lookup(char ch)
 {
     if (ch >= 'a' && ch <= 'z')
@@ -144,6 +151,9 @@ void font_text_tracked(const char *s, float x, float y, float px, uint32_t c,
     if (s == NULL || px <= 0.0f)
         return;
 
+    if (s_trace != NULL)
+        s_trace(s, x, y, px, c);
+
     float cx = x;
     for (const char *p = s; *p != '\0'; ++p) {
         const uint8_t *rows = lookup(*p);
@@ -179,28 +189,6 @@ void font_text_right(const char *s, float x_right, float y, float px,
                      uint32_t c)
 {
     font_text(s, x_right - font_width(s, px), y, px, c);
-}
-
-int font_rects(const char *s, float x, float y, float px, Rect *out, int max)
-{
-    if (s == NULL || px <= 0.0f || out == NULL || max <= 0)
-        return 0;
-
-    int n = 0;
-    float cx = x;
-
-    for (const char *p = s; *p != '\0'; ++p) {
-        const uint8_t *rows = lookup(*p);
-        if (rows != NULL)
-            n = emit_glyph(rows, cx, y, px, out, max, n);
-
-        if (n >= max)
-            return max;
-
-        cx += (float)FONT_ADVANCE * px;
-    }
-
-    return n;
 }
 
 void font_fit(const char *s, float px, float max_w, char *out, size_t out_n)

@@ -48,6 +48,7 @@ typedef enum {
     FTP_CLIENT_OP_RENAME,
     FTP_CLIENT_OP_DELETE,
     FTP_CLIENT_OP_RMDIR,
+    FTP_CLIENT_OP_STAT,
     FTP_CLIENT_OP_QUIT
 } FtpClientOperation;
 
@@ -64,6 +65,10 @@ typedef enum {
  * Event fields are valid for the duration of the callback. `detail` is the
  * server reply text for a server-class failure, or a short mapped reason; it is
  * for the card footer, never for the session log.
+ *
+ * OPERATION_DONE is emitted before the operation slot is released, so a caller
+ * must not start the next operation from inside the callback; defer it to the
+ * next tick.
  */
 typedef struct {
     FtpClientEventKind kind;
@@ -71,6 +76,8 @@ typedef struct {
     FtpDataState data_state;
     FtpStage stage;
     FtpCause cause;
+    NetResult net; /* raw network result for resolve/connect failures */
+    NetAddress peer; /* resolved address, valid from CONNECTING onward */
     FtpClientOperation operation;
     int ok;
     const char *path;
@@ -79,6 +86,16 @@ typedef struct {
     uint64_t bytes;
     uint64_t total;
     int total_known;
+    /* FTP_CLIENT_OP_STAT: MLST result. `ok` is 1 for a successful query,
+     * including "does not exist" and "unsupported". */
+    int exists;
+    int is_dir;
+    int unsupported;
+    uint64_t file_size;
+    int file_size_known;
+    /* The transfer ended without its final reply but the file is complete and
+     * stays at its destination. Only a download can set this. */
+    int file_kept;
 } FtpClientEvent;
 
 typedef void (*FtpClientEventFn)(void *ctx, const FtpClientEvent *event);
@@ -94,8 +111,9 @@ typedef struct {
 typedef struct {
     const char *remote_path;
     const char *local_path;
-    /* The caller has shown the high-risk confirmation for this destination. */
-    int risk_approved;
+    /* A listing size hint for downloads; 0 means unknown. */
+    uint64_t total;
+    int total_known;
 } FtpClientTransfer;
 
 typedef enum {
@@ -103,8 +121,11 @@ typedef enum {
     FTP_CLIENT_BUSY,
     FTP_CLIENT_INVALID,
     FTP_CLIENT_NOT_CONNECTED,
-    FTP_CLIENT_NEED_RISK,
-    FTP_CLIENT_DENIED
+    FTP_CLIENT_DENIED,
+    /* The transfer was accepted but its local file could not be opened. The
+     * client is back in READY and reported no operation-done event; the worker
+     * owns the failure terminal. */
+    FTP_CLIENT_LOCAL_FAILED
 } FtpClientResult;
 
 typedef struct FtpClient FtpClient;
@@ -112,13 +133,14 @@ typedef struct FtpClient FtpClient;
 FtpClient *ftp_client_create(NetPort *net, FsPort *fs, ClockPort *clock,
                              FtpClientEventFn emit, void *emit_ctx);
 void ftp_client_destroy(FtpClient *client);
+/* The detail of the last failure, valid until the next operation. */
+const char *ftp_client_last_detail(const FtpClient *client);
 
 FtpClientResult ftp_client_connect(FtpClient *client,
                                    const FtpClientLogin *login);
 FtpClientResult ftp_client_list(FtpClient *client, const char *path);
 FtpClientResult ftp_client_nlst(FtpClient *client, const char *path);
 FtpClientResult ftp_client_cwd(FtpClient *client, const char *path);
-/* A denied destination returns DENIED; an unapproved high-risk one NEED_RISK. */
 FtpClientResult ftp_client_download(FtpClient *client,
                                     const FtpClientTransfer *transfer,
                                     PathRisk *out_risk);
@@ -129,11 +151,21 @@ FtpClientResult ftp_client_rename(FtpClient *client, const char *from,
                                   const char *to);
 FtpClientResult ftp_client_delete(FtpClient *client, const char *path);
 FtpClientResult ftp_client_rmdir(FtpClient *client, const char *path);
+/* MLST: a successful query reports exists/type/size; 500/501/502/504 reports
+ * unsupported. The op result is OK in both cases; check the event. */
+FtpClientResult ftp_client_mlst(FtpClient *client, const char *path);
+/* SIZE: a 213 reports exists and the size, 550 reports missing, and
+ * 500/501/502/504 reports unsupported. Used when MLST is unavailable. */
+FtpClientResult ftp_client_size(FtpClient *client, const char *path);
 FtpClientResult ftp_client_quit(FtpClient *client);
+/* Close the session immediately, without a QUIT round trip or a session-lost
+ * event. The machine returns to IDLE. */
+FtpClientResult ftp_client_disconnect(FtpClient *client);
 /* Cancels the listing or transfer in flight; the session survives. */
 FtpClientResult ftp_client_cancel(FtpClient *client);
 
-void ftp_client_tick(FtpClient *client);
+/* `wait_ms` bounds the socket wait; pass 0 while a local job needs the slice. */
+void ftp_client_tick(FtpClient *client, unsigned wait_ms);
 
 FtpClientState ftp_client_state(const FtpClient *client);
 FtpDataState ftp_client_data_state(const FtpClient *client);

@@ -12,48 +12,6 @@ static char lower_ascii(char c)
     return c;
 }
 
-const char *ftp_cause_name(FtpCause cause)
-{
-    switch (cause) {
-    case FTP_CAUSE_SERVER:
-        return "server";
-    case FTP_CAUSE_NETWORK:
-        return "network";
-    case FTP_CAUSE_STORAGE:
-        return "storage";
-    case FTP_CAUSE_USER:
-        return "user";
-    case FTP_CAUSE_APP:
-    default:
-        return "app";
-    }
-}
-
-const char *ftp_stage_name(FtpStage stage)
-{
-    switch (stage) {
-    case FTP_STAGE_RESOLVE:
-        return "resolve";
-    case FTP_STAGE_CONNECT:
-        return "connect";
-    case FTP_STAGE_GREETING:
-        return "greeting";
-    case FTP_STAGE_LOGIN:
-        return "login";
-    case FTP_STAGE_FIRST_LISTING:
-        return "first_listing";
-    case FTP_STAGE_COMMAND:
-        return "command";
-    case FTP_STAGE_DATA:
-        return "data";
-    case FTP_STAGE_TRANSFER:
-        return "transfer";
-    case FTP_STAGE_NONE:
-    default:
-        return "none";
-    }
-}
-
 void ftp_line_init(FtpLineReader *reader)
 {
     if (reader == NULL)
@@ -192,13 +150,6 @@ int ftp_text_contains(const char *text, const char *needle)
     return 0;
 }
 
-static int build_sidecar(char *out, size_t cap, const char *base,
-                         const char *suffix)
-{
-    int n = snprintf(out, cap, "%s%s", base, suffix);
-    return n > 0 && (size_t)n < cap;
-}
-
 static void recover(FsPort *fs, const char *target, const char *aside)
 {
     FsEntry entry;
@@ -226,10 +177,10 @@ FsResult ftp_temp_open(FsPort *fs, const char *target, FtpTempWrite *out)
         existing.type == FS_ENTRY_DIR)
         return FS_INVALID;
 
-    if (!build_sidecar(out->temp.text, sizeof(out->temp.text),
-                       out->target.text, ".vftp.part") ||
-        !build_sidecar(out->aside.text, sizeof(out->aside.text),
-                       out->target.text, ".vftp.old"))
+    if (!path_sidecar_path(out->temp.text, sizeof(out->temp.text),
+                           out->target.text, PATH_SIDECAR_TEMP) ||
+        !path_sidecar_path(out->aside.text, sizeof(out->aside.text),
+                           out->target.text, PATH_SIDECAR_ASIDE))
         return FS_INVALID;
 
     recover(fs, out->target.text, out->aside.text);
@@ -246,49 +197,89 @@ FsResult ftp_temp_open(FsPort *fs, const char *target, FtpTempWrite *out)
     return FS_OK;
 }
 
-FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp)
+/* The rename is the commit; syncing the committed file afterwards is a
+ * durability hint whose failure cannot be repaired without destroying a file
+ * the user already sees. Directory sync is a separate, deferred gap (D48).
+ * Returns 0 when the hint was refused, so the caller can record it. */
+static int sync_destination(FsPort *fs, const char *target)
 {
+    FsFile *file = NULL;
+    if (fs->open(fs->ctx, target, FS_OPEN_READ, &file) != FS_OK)
+        return 0;
+    int synced = fs->sync(fs->ctx, file) == FS_OK;
+    (void)fs->close(fs->ctx, file);
+    return synced;
+}
+
+FsResult ftp_temp_finish(FsPort *fs, FtpTempWrite *temp, FtpCommitStep *step)
+{
+    if (step != NULL)
+        *step = FTP_COMMIT_OK;
     if (fs == NULL || temp == NULL || !temp->open || temp->file == NULL)
         return FS_INVALID;
 
-    FsResult r = fs->sync(fs->ctx, temp->file);
+    /* A refused sync-by-fd is recorded, not fatal: close() still flushes the
+     * data, and removing a fully written file because a durability hint was
+     * refused reports a failure the user cannot act on (D76). */
+    if (fs->sync(fs->ctx, temp->file) != FS_OK)
+        temp->sync_failed = 1;
     FsResult closed = fs->close(fs->ctx, temp->file);
     temp->file = NULL;
     temp->open = 0;
 
-    if (r != FS_OK || closed != FS_OK) {
+    if (closed != FS_OK) {
         fs->remove(fs->ctx, temp->temp.text);
-        return r != FS_OK ? r : closed;
+        if (step != NULL)
+            *step = FTP_COMMIT_CLOSE;
+        return closed;
     }
 
     if (fs->rename_replaces(fs->ctx)) {
-        r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
-        if (r != FS_OK)
+        FsResult r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
+        if (r != FS_OK) {
             fs->remove(fs->ctx, temp->temp.text);
-        return r;
+            if (step != NULL)
+                *step = FTP_COMMIT_RENAME;
+            return r;
+        }
+        if (!sync_destination(fs, temp->target.text))
+            temp->sync_failed = 1;
+        return FS_OK;
     }
 
     FsEntry entry;
     int target_exists = fs->stat(fs->ctx, temp->target.text, &entry) == FS_OK;
     if (!target_exists) {
-        r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
-        if (r != FS_OK)
+        FsResult r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
+        if (r != FS_OK) {
             fs->remove(fs->ctx, temp->temp.text);
-        return r;
+            if (step != NULL)
+                *step = FTP_COMMIT_RENAME;
+            return r;
+        }
+        if (!sync_destination(fs, temp->target.text))
+            temp->sync_failed = 1;
+        return FS_OK;
     }
 
     if (fs->rename(fs->ctx, temp->target.text, temp->aside.text) != FS_OK) {
         fs->remove(fs->ctx, temp->temp.text);
+        if (step != NULL)
+            *step = FTP_COMMIT_RENAME;
         return FS_IO;
     }
 
-    r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
+    FsResult r = fs->rename(fs->ctx, temp->temp.text, temp->target.text);
     if (r != FS_OK) {
         fs->rename(fs->ctx, temp->aside.text, temp->target.text);
         fs->remove(fs->ctx, temp->temp.text);
+        if (step != NULL)
+            *step = FTP_COMMIT_RENAME;
         return r;
     }
 
+    if (!sync_destination(fs, temp->target.text))
+        temp->sync_failed = 1;
     fs->remove(fs->ctx, temp->aside.text);
     return FS_OK;
 }

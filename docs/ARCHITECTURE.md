@@ -1,11 +1,13 @@
 # Architecture
 
-**Status:** settled by the v1 plan. Phases 1, 2, and 3 have built the project
-shape, the shared foundation, and the protocol engines: the build and packaging,
-the six port contracts and host fakes, the gfx base and layout table, the
-reply/listing/path/format policy, the site/settings/store/log policy, and the
-passive FTP client and server. The screens, adapters, and runtime remain
-contracts until their units land. The plan
+**Status:** settled by the v1 plan. Phases 1-5 have built the project shape, the
+shared foundation, the protocol engines, the operations and state layer, the
+screens, the adapters, and the runtime: the build and packaging, the six port
+contracts and host fakes, the gfx base and layout table, the reply/listing/path/
+format policy, the site/settings/store/log policy, the passive FTP client and
+server, the transfer queue, the local planner and executor, the input reducer
+and UI state, the handoff, the seven screen surfaces, the six Vita adapters, and
+the app/worker composition. The first console launch is U14. The plan
 [`plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md)
 owns sequencing and the unit-level detail; this document owns the shape.
 
@@ -54,7 +56,8 @@ handle crosses inward.
 - **`InputPort`** — the pressed-edge set and the stick position.
 - **`TextInputPort`** — open the system IME with a title, initial text, password
   flag, and maximum length; report open, cancelled, unavailable, or a UTF-8
-  result.
+  result. `last_error` carries the raw platform code from a failed begin or
+  poll; policy never interprets it and the app writes it to the session log.
 - **`ClockPort`** — monotonic milliseconds and a sleep.
 - **`LogPort`** — append one bounded record.
 
@@ -70,10 +73,12 @@ VitaShell or libftpvita is vendored (D40).
 - **Client:** resolve, connect, read the greeting, log in (anonymous or
   user/password), set binary mode, read the working directory, list, browse,
   download, upload, create, rename, delete, and quit. Passive only.
-- **Server:** listen on the control port and the data port, accept one client, log
-  in anonymously, list, change directory, download, upload, create, rename,
-  delete, and quit. Passive only. Every path resolves through the shared table and
-  is re-checked after normalization.
+- **Server:** bind only the control port at start, and give each session slot
+  its own passive data port on that slot's first PASV (D92). Accept up to four
+  control sessions with one data transfer at a time, log in anonymously, list,
+  change directory, download, upload, create, rename, delete, and quit. Passive
+  only. Every path resolves through the shared table and is re-checked after
+  normalization.
 - **Shared:** reply parsing, multiline replies, PASV parsing, path joining and
   parent rules, the risk table, the denial table, the conflict gate, and the
   temp-and-rename write.
@@ -96,9 +101,16 @@ arena.
   and `OPERATION_DONE`. The machine is `IDLE`, `RESOLVING`, `CONNECTING`,
   `GREETING`, `LOGGING_IN`, `READY`, `LISTING`, `TRANSFERRING`, `STALLED`,
   `LOST`, or `FAILED`; the data side is `NONE`, `ARMED`, `ACCEPTED`, `ACTIVE`,
-  or `DRAINING`. The connect budget is 10 s with caps of 3 s resolve, 3 s
-  connect, 2 s greeting/login, and 2 s first listing; a control command has 5 s;
-  a data operation has a 15 s idle deadline. A data-only failure sends `ABOR`,
+  or `DRAINING`. The connect budget is 35 s with caps of 3 s resolve, 12 s
+  connect, 5 s greeting/login, and 10 s first listing; a control command has
+  10 s; a data operation has a 20 s idle deadline. `OPERATION_DONE` fires before
+  the operation slot is released, so the caller defers the next command to the
+  following tick. A `READY` client sends `NOOP` after 20 s of inactivity and
+  declares the session `LOST` after 5 s without a reply, which catches a
+  half-open control channel. `ftp_client_mlst` is a command op that reports
+  existence, type, and size (or `unsupported`); the worker uses it to preflight
+  an upload destination before a STOR. `ftp_client_disconnect` closes both
+  sockets immediately without a QUIT round trip. A data-only failure sends `ABOR`,
   records `cls=network` or `storage`, and keeps the control session; a control
   drop records `LOST`. The client tolerates either ABOR reply order with a
   250 ms drain grace, during which a new command is refused rather than allowed
@@ -106,14 +118,115 @@ arena.
 - **Server:** `FtpServer` reports `STATE`, `CLIENT`, `PROGRESS`,
   `TRANSFER_DONE`, and `ERROR`. The machine is `OFF`, `BINDING`, `ON`,
   `SESSION`, `REFUSING`, or `STOPPING`; the data side uses the same five
-  sub-states. It binds control and control+1 on the LAN address, accepts one
-  client, refuses a second with 450, drains the data backlog at every PASV,
-  accepts a data peer only when its address equals the control peer's, and
-  disarms on every non-data command and every refusal. A transfer holds the one
-  slot; a data or mutating command during it answers 450. `STOR` writes a temp
-  and renames on close; a reset or timeout aborts the temp and leaves the
-  previous destination byte-identical. Network loss closes both listeners and
-  returns `OFF`.
+  sub-states. It binds the control port on the LAN address at start and binds
+  each session slot's data port on that slot's first PASV, holding it until
+  stop; a data connection is attributed by the port it arrives on (D92). It
+  accepts up to four clients with one data transfer at a time (D86), answers
+  450 to a fifth, drains the data backlog at every PASV, accepts a data peer
+  only when its address equals the control peer's, and disarms on every
+  non-data command and every refusal. A control-port bind failure at start
+  leaves the server `OFF`; a slot's data-port bind failure answers 425 and
+  leaves it `ON`. A transfer holds the one slot; a data or mutating command
+  during it answers 450. `STOR` writes a temp and renames on close; a reset or
+  timeout aborts the temp and leaves the previous destination byte-identical.
+  Network loss closes the control listener and every slot listener it has bound, and returns `OFF`.
+
+**Operations and state (U8/U16/U17/U9/U15).**
+
+- `src/core/xfer.c` is the network transfer queue: an ordered queue of
+  descriptors, one active item, one busy fact, the R41 decision recorded once
+  per batch, and a latched terminal outcome. It never touches a file or a peer.
+  A local job runs beside it when canonical paths do not overlap; `reserve.c`
+  owns the cross-lane exclusion (D72).
+- `src/core/fsop_plan.c` is pure planning. It takes the action, the sources, the
+  destination, and the directory facts, and returns ordered steps, a rollback
+  list, the conflict gate, and per-step risk. It never calls `FsPort`; a
+  volume-root source, a copy into itself, or a protected delete is refused
+  before any step exists.
+- `src/core/fsop_run.c` walks the plan through `FsPort` with the templed write.
+  A copy rollback removes only a destination the plan created; an overwritten
+  destination that reached commit is left new. A cross-volume move is atomic per
+  file: the source is deleted only after the rename, and a batch that fails
+  after some moves leaves the completed moves and reports `n OF m MOVED` rather
+  than deleting the only copy (D45).
+- `src/core/input.c` turns edges and the stick into semantic events with repeat.
+  `src/core/uistate.c` is the only writer of `UiState`; `src/core/uiact.c` is the
+  command vocabulary. The reducer emits values, never calls the engine.
+- The worker owns one remote action queue for NEW FOLDER, RENAME, DELETE, and
+  RMDIR. It starts one FTP command, waits for `OPERATION_DONE`, then pumps the
+  next; a successful command sets `refresh_remote`, and the listing starts on
+  the following step after the client has released its slot. This is the U9
+  remote-action path from D64, not the local `fsop` planner. REFRESH uses the
+  existing `UI_CMD_REFRESH`; a listing name with a separator or dot segment is
+  marked unsafe and never reaches a transfer, though a directory row still
+  opens because navigation builds no local path (D67); a folder source is
+  refused with `FOLDER NOT SUPPORTED` until R22/R23 are implemented (D65). One
+  `reset_remote_session` owns every teardown (DISCONNECT, CONNECT, and
+  LOST/FAILED/STALLED): it drops the queue, the batch counters, the conflict
+  answer, the remote actions, and the upload preflight together (D66).
+  `pump_queue` iterates over released items instead of recursing, so a full skip
+  batch cannot exhaust the worker stack.
+- `src/core/handoff.c` carries commands and events across fixed rings. A server
+  stop and a cancel have dedicated slots and are never lost to a full command
+  ring; progress is a coalesced seqlock latch, so a terminal state cannot be
+  overwritten; each pane has three listing generations; the site book uses a
+  16 KiB bulk lane (D49); the server state and a worker confirmation are
+  latched; the query result is a fixed record.
+
+## Screens and runtime (U10-U13)
+
+- `src/ui/` is a pure presentation layer. `render.c` dispatches the current
+  screen, draws the shared header, and never includes a platform header.
+  `workspace.c` and `dock.c` own the two panes and the five dock states; the
+  other five files own SITES, SITE EDITOR, ACTIONS, SERVER, CONFIRM, and the
+  text-entry notice. `parts.c` holds the shared frame, keycap, wash, and slab
+  primitives.
+- `font_set_trace` is a host-only trace hook: the render suites assert the
+  string, position, and colour, because glyph rectangles alone cannot name a
+  label. The app leaves the hook NULL.
+- `src/app/app.c` owns the frame loop and `UiState`; `src/app/worker.c` owns the
+  client, server, queue, local executor, site book, settings, and log. The app
+  polls input, decodes repeat, feeds the reducer, pushes commands, drains
+  events, acquires one listing generation per pane per frame, draws, and
+  releases. It never opens a socket or touches a file.
+- In the product the worker runs on a POSIX thread. The host integration test
+  passes `worker_thread = 0` and calls `worker_step` inline through `app_tick`;
+  the same worker code runs either way (D49).
+- The worker runs both lanes; the reservation table is the only cross-lane
+  exclusion. A server data or mutating command answers 450 only on a held path
+  (D72, D85); the server is not globally busy because the app's network lane is
+  active. A local action starts while the network lane runs; the reservation
+  table sends a collision to the WAIT/SKIP/CANCEL prompt, and a plan whose facts
+  overflow the scan cap is refused rather than planned as a subset.
+- A local action command carries a batch id, item index, total, and last flag.
+  The worker collects the set, probes each destination once, asks one conflict
+  question naming every existing path, then runs one plan per item. The
+  preflighted items are advanced one per `worker_step` from the step frame, not
+  from inside `handle_action`, so a batch cannot nest worker frames. It records
+  done, skipped, failed, and cancelled counts — including an item refused before
+  its plan ran — and emits one terminal event before it clears the batch; the
+  pane refreshes once at that terminal. A lost command is flushed after a
+  bounded idle window and reported as incomplete (D71, D77).
+- A confirm cancel for a local batch emits `UI_CMD_CANCEL_TRANSFER` on the
+  dedicated handoff slot. The executor polls a peek of that slot at every chunk
+  and step, removes the temporary file, rolls back, and reports
+  `CANCELLED n OF m`; the popped command is consumed once so it cannot reach the
+  next job (D75).
+- Canonical-path reservations replace the earlier exclusive slot,
+  one local job beside one network transfer, and the WAIT/SKIP/CANCEL collision
+  confirm (D72, D73). It also enforces the worker stack budget: large
+  per-operation arrays live in the heap-owned `Worker`, the worker stack is
+  192 KiB, and `tools/check_worker_stack.py` reads the linked ELF during
+  `build.sh` and fails a frame that would exhaust it (D77).
+- The app treats a failed site save as `SAVE UNAVAILABLE`, keeps the book in
+  memory, and sends the save result and the bulk view on separate events. The
+  editor receives a full site (including the password) through the edit-site
+  event, never through the site list.
+- A local write still checks the destination and every marked source against the
+  hard denials and protected paths. The path risk is carried for the yellow row
+  mark and the action target; no high-risk confirmation opens (D87).
+- The server transfer start is its own event and its own start timestamp; a
+  server upload with an unknown total still shows direction, name, and progress.
 
 ## Threading and handoff
 
@@ -124,27 +237,66 @@ Two threads (D38).
 | Main | `UiState`, input, drawing | Open a socket, touch a file, wait on the worker |
 | Worker | Client session, server state and slot, transfer queue, local batch, all file and network I/O | Draw, read UI state |
 
+The worker is created with a 192 KiB stack (D77; D57 recorded the earlier
+128 KiB). `fsop_run` keeps its 8 KiB
+copy buffer in a separate `noinline` function so a rename does not reserve it;
+a local-action frame is budgeted against that stack.
+
 Handoff (`src/core/handoff.c`, policy with no platform call, so it is host-tested
 on its own):
 
-- **Commands** cross a fixed-capacity ring of plain records: connect, disconnect,
-  list, cwd, mkdir, rename, delete, copy, move, upload, download, cancel, retry,
-  server start, server stop, set port, save sites, save settings. No record holds
-  a pointer into either thread's state.
-- **Events** cross a second fixed ring: session state, listing published, transfer
-  progress, transfer terminal state, server state, operation progress, save
-  result. Indices are release/acquire. Progress coalesces to the newest value;
-  a terminal transfer state, a cancel acknowledgement, and a server state change
-  are latched flags, so none can be dropped by a full ring.
+- **Commands** cross a fixed-capacity ring of plain records: open, parent,
+  transfer, refresh, site connect/edit/new/delete/save, run action, confirm, IME,
+  server start/stop/port, reconnect, dismiss, cancel, clear queue. No record
+  holds a pointer into either thread's state. A server stop and a cancel use
+  dedicated slots, so a full ring cannot drop them.
+- **Events** cross a second fixed ring: session state, listing published,
+  transfer terminal state, server state, operation progress, save result.
+  Indices are release/acquire. Progress is a seqlock latch: the newest sample
+  wins, a torn record is retried, and an older sample is dropped when a newer
+  terminal event is delivered. The server state is latched separately and stays
+  readable after the ring drains.
 - **Listings** do not cross the rings. Each pane has three generations; the
-  worker fills one the UI has released and publishes it with a release store. The
-  UI copies the index once at a frame boundary. The worker never fills the two
-  most recently published generations, so a draw cannot see rows change under it.
-- **The site book** is larger than one record and crosses on a bulk lane carrying
-  a generation number, so a stale read is detectable.
+  worker reserves a slot the reader does not hold, fills it, and publishes it
+  with a release store. The UI keeps one generation until it releases it at a
+  frame boundary, so a draw cannot see rows change under it. The app applies a
+  published generation while draining that pane's listing-end event: the begin
+  event has already reset the pane and the end event has not cleared `READING`,
+  so rows and events cannot cross in the wrong order (D55).
+- **The site book** is larger than one record and crosses on a 16 KiB bulk lane
+  carrying a generation number, so a stale read is detectable. The payload is a
+  view without passwords (D49).
 
 Nothing is read by one thread while the other writes it. A second writer is a
 defect, not a shortcut.
+
+### Adapter claims (U12)
+
+Every unverified Vita behaviour is a `[C]` comment in the adapter that owns it:
+
+- `psp2_net.c`: `sceNetCtlInit` may already be up; `fcntl(O_NONBLOCK)` maps to
+  the net non-blocking option; `select` over sceNet sockets; the resolver
+  timeout unit and retry count; `SceNetCtlInfo.ip_address` is a dotted quad.
+  `inet_pton` yields network order and `NetAddress.addr` is host order, so
+  `net_link` converts with `ntohl` (D59). The 4 MiB pool and 128 backlog match
+  the working ftpvitalib shape.
+- `psp2_fs.c`: the `0x3001` devctl free-space call is proven only on `ux0:`;
+  `ur0:`/`uma0:` report unknown and the worker caches the value per volume
+  (D59); `mtime` is reported unknown; `sceIoRename` replace-on-existing is
+  unverified, so `rename_replaces()` returns 0 and the aside fallback is always
+  used (D48).
+- `psp2_input.c`: the plain peek reports shoulders as L1/R1; the wide analog
+  mode reports 0..255 centred at 128.
+- `psp2_ime.c`: the adapter follows the SDK IME sample — `sceAppUtilInit`, then
+  the common-dialog config with concrete language/CROSS values, then the
+  dialog; `draw.c` supplies the common-dialog update every frame and the
+  adapter allows a short NONE window. The sequence and the grace are `[C]` until
+  hardware proves them; password masking is still unverified. The raw failure
+  code is reported through `TextInputPort.last_error` (D56).
+- `psp2_log.c`: an append handle plus `SCE_SEEK_END` reports the existing size;
+  if it fails, writes are refused rather than bypassing the cap.
+
+These are hardware items for U14; none may move into policy.
 
 ## Data phase
 
@@ -188,17 +340,17 @@ One module owns this and all three roles call it.
   denial and risk tables, while the original bytes go to the filesystem,
   because the exposed volumes are case-insensitive and a case variant must not
   slip past a denial.
-- **Denied:** `ur0:tai/boot_config.txt` for every role, and every write, create,
-  rename, or delete under `ur0:tai`, `ux0:tai`, and the app's own data folder for
-  the server. The server also denies reads of `boot_config.txt` and its own data
-  folder; the `tai` folders stay readable. A rename checks both operands.
+- **Denied:** `ur0:tai/boot_config.txt` for every role. The server may read,
+  write, create, rename, and delete in the app data folder and the `tai`
+  folders; only the system-path denials and `boot_config.txt` remain (D87). A
+  rename checks both operands.
 - **Protected:** volume roots, `ur0:data`, `ux0:data`, and the `tai` directories
   cannot be renamed, moved, or deleted, by any role.
-- **High risk for the local manager:** the `tai` folders and their contents,
+- **Risk mark for the local manager:** the `tai` folders and their contents,
   volume roots, `ur0:data` and `ux0:data` themselves, and the files that control
-  loading (`config.txt`, `plugins.txt`, `*.skprx`, `*.suprx`). Risk belongs to a
-  write step, source and destination, so a download or a copy into a `tai` folder
-  carries it. A high-risk action confirms first (D30, D31).
+  loading (`config.txt`, `plugins.txt`, `*.skprx`, `*.suprx`) stay classified
+  high-risk and carry the yellow row mark. The high-risk confirmation is
+  retired; protected paths and `boot_config.txt` are hard denials (D87).
 - A remote-supplied name containing `/`, `\`, `:`, NUL, or a `..` segment is
   refused before any local path is built.
 
@@ -213,11 +365,17 @@ Under `ux0:data/vitaFTPShell/`:
 |---|---|---|
 | `sites.cfg` | Version header, one site per line, percent-encoded fields | Temp, sync, rename |
 | `settings.cfg` | Last local path, last site, server port | Temp, sync, rename |
-| `session.log` | One tab-separated record per line, monotonic ms plus fields | Append; rotate at 64 KiB |
-| `session.old.log` | The one previous generation | Replaced on rotation |
+| `session.log` | One tab-separated record per line, monotonic ms plus typed fields | Append; rotate at 256 KiB |
+| `session.old.log` | The first previous generation | Renamed to `session.old2.log` on rotation |
+| `session.old2.log` | The second previous generation | Replaced on rotation |
 
 A server's reply text is never a log field: a hostile server can echo a credential
-back in a 530. One log line is bounded at 4096 bytes; an overlong record is
+back in a 530. The log is always on and records app start/stop, screen changes,
+button edges, commands, IME begin/result (never the value), listings, queue
+depth, transfers, server clients, saves, and errors (D54). The app pushes
+fixed log records to the worker through the handoff log ring, so the worker
+remains the one writer. A full ring is counted and written as a `log` event.
+One log line is bounded at 4096 bytes; an overlong record is
 dropped whole, never split. A file that fails to parse yields whatever lines are
 valid and is never overwritten until the user saves. A stale `.old` aside is
 restored when the target is missing and cleared when both exist, so an
@@ -231,18 +389,53 @@ Passwords appear in `sites.cfg` by design and never in the log.
 The planner produces a plan before anything is touched: the ordered creates,
 copies, renames, and deletes, the conflict decision, and the rollback list. The
 executor walks the plan and reports progress; it makes no policy decisions.
+The executor is resumable (D72, KTD20): a heap-owned `FsOpRun` holds the step
+cursor, the applied-step list, the copy sub-phase, the open handles, progress,
+and the copy buffer. `fsop_run_step` advances by a byte budget and a bounded
+number of atomic steps, checks cancel at every copy chunk and before every
+step, and keeps the rollback list as its own phase; the blocking `fsop_run`
+remains a wrapper over it. The worker runs one local slice per `worker_step`
+between network ticks, so a copy no longer blocks the client, server, or queue.
+- `UiState` keeps one dock per lane. Events route by direction
+  (`XFER_DIR_LOCAL_*` is the local lane); while both run the network lane stays
+  full and the local lane renders as a badge, and the focused-dock confirm
+  offers KEEP / CANCEL NETWORK / CANCEL LOCAL (D78). `UI_CMD_CANCEL_NETWORK`
+  and `UI_CMD_CANCEL_LOCAL` target one lane; the single-lane confirm keeps
+  `UI_CMD_CANCEL_TRANSFER`.
+- The lanes arbitrate with canonical-path reservations (`src/core/reserve.c`):
+  a path and its `.vftp.*` sidecars; equal paths conflict unless both read; a
+  tree delete, rename, or recursive move conflicts with ancestors and
+  descendants; a server read of an ancestor is allowed and the exact held path
+  or a sidecar is refused. A local plan reserves every step at plan time; a
+  download reserves its local destination and an upload its source; a server
+  data or mutating command checks after resolving, answers 450, disarms PASV,
+  and holds the path until its transfer ends. A collision asks WAIT / SKIP /
+  CANCEL; a queued transfer waits without a prompt and resumes when the blocker
+  releases. The containing directory is deliberately not locked (D72).
 
 - Recursion creates parents before children.
 - A copy or move into itself or a descendant is refused.
 - Every file is written under a reserved temporary name in the destination
-  directory and renamed into place after a successful close (KTD12). Replace-on-
-  rename is a port capability; when it is absent the core plans the aside
-  fallback, and before a destination is written it restores or clears a stale
-  aside left by an interrupted run.
-- A cross-volume move deletes the source only after the rename, and removes the
-  destination if that delete fails (D36).
+  directory, closed, and renamed into place (KTD12). Replace-on-rename is a port
+  capability; when it is absent the core uses the aside fallback, and before a
+  destination is written it restores or clears a stale aside left by an
+  interrupted run. The temp and the destination are synced as durability hints;
+  a refused sync is recorded and logged, not treated as a commit failure, and
+  only close and rename decide the commit (D76). Directory sync is the
+  documented deferred gap.
+- A copy rollback removes only a destination the plan created. A destination
+  that existed and reached commit stays new; an old file is never deleted to
+  satisfy a rollback.
+- A cross-volume move is atomic per file: copy, rename, delete source. If the
+  source delete fails, a new destination is removed; an overwritten destination
+  is kept and the failure is named. A batch that fails after some moves leaves
+  the completed moves and reports `n OF m MOVED`, never deleting a moved file
+  (D45).
 - Cancel or failure removes the temp; the previous destination stays
-  byte-identical.
+  byte-identical. A recursive delete cannot be rolled back and reports
+  `DELETED n OF m`.
+- The planner uses a 256 KiB arena, 2048 steps, and 2048 rollbacks; a plan that
+  would overflow is refused, never truncated (D46).
 
 ## Error model
 
@@ -276,10 +469,12 @@ so a rendered state is the shipped composition, not a copy.
 - Artifact `vitaftpshell-v<version>-b<build>.vpk`; `build/` keeps exactly one.
 - The unstripped ELF is kept.
 - Host tests are a separate script and never enter the VPK.
-- `src/main.c` is a stub until U13: it includes no platform header, because the
-  renderer owns `vita2d` and each adapter owns its SDK calls. The libvita2d link
-  and the SDK stubs join when U13 adds the gfx and adapter sources to the app
-  target; linking an uncalled library is an unused link.
+- `src/main.c` is the composition root: it constructs each adapter once, calls
+  `draw_init`, starts the app, and owns shutdown. It includes no platform
+  header; the six `psp2_*.c` adapters own the SDK calls and `draw.c` owns
+  `vita2d`.
+- The app target compiles the real core, gfx, ui, app, and adapter sources and
+  links `vita2d`, the SDK stubs the adapters call, `m`, and `pthread` (D48).
 - `tools/test/run.sh` scans every `.c` and `.h` under `src/` against the
   seven-file allowlist and fails on a `psp2/`, `psp2common/`, `psp2kern/`, or
   `vita2d.h` include elsewhere. `tools/` is host-only and outside the guard:
@@ -289,8 +484,8 @@ so a rendered state is the shipped composition, not a copy.
 
 ## Host tests
 
-`tools/test/run.sh` compiles the real policy, presentation, and runtime against
-fakes and asserts:
+`tools/test/run.sh` compiles the real core and graphics against fakes and
+asserts:
 
 - every refusal of the dependency rule (a `psp2/` or `vita2d.h` include
   anywhere under `src/` outside the seven-file allowlist fails the run);
@@ -299,13 +494,30 @@ fakes and asserts:
 - site round-trip, corrupt-file handling, atomic save, log formatting, and
   rotation;
 - the client and the server against a scripted peer in each direction;
-- queue order, the conflict decision, recursion, the copy-into-itself refusal,
-  cancellation, rollback, partial cleanup, and the rename-replace capability;
+- queue order, the active network item, the conflict decision, and
+  the fake-job walk;
+- planner order, merge, the conflict gate, the copy-into-itself refusal, the
+  volume-root refusal, protected deletes, and the plan caps;
+- executor overwrite with and without replace-on-rename, stale-aside recovery,
+  cancel mid-copy, a kill at each write step, the destination sync, per-file
+  move semantics, rollback, partial delete reporting, and `MOVE INCOMPLETE`;
+- the input repeat decoder, every input-table row, marks across CWD/L/R, volume
+  and connection clearing, dock focus, confirm scrolling, IME cancel, and the
+  volume-root delete refusal;
 - the handoff: a producer faster than the consumer, a full ring, a coalesced
-  progress stream, a latched terminal state, and three listing generations;
-- the reducer's transitions, marks, dock focus, confirm scrolling, and the
-  high-risk confirmation;
-- the recorded draw calls for each screen state.
+  progress stream, a latched server state, three listing generations, and the
+  UI log ring;
+- the log format: every event family, the three-generation rotation, the
+  percent-encoded fields, and that a password sentinel never appears;
+- `tools/test/tsan.sh` builds the handoff with plain stores and requires a
+  ThreadSanitizer race, so the release/acquire on the publish index is proven
+  necessary rather than assumed;
+- the reducer's transitions, marks, dock focus, and confirm scrolling;
+- the recorded draw calls and strings for every render state:
+  WORKSPACE, SITES, SITE EDITOR, SERVER, ACTIONS, CONFIRM, and TEXT ENTRY;
+- the app/worker integration: connect, list, mark, download, cancel, a failed
+  site save, shutdown with an active transfer, and quit with the server on;
+- `tools/test/tsan.sh` also remains a required negative ordering check.
 
 A test that only proves a constant is not a test. A hardware run is the only
 evidence that promotes the project to `verified`.
@@ -332,11 +544,14 @@ Any Vita behavior that has not run on hardware is tagged `[C]` in the adapter th
 depends on it, naming the claim and the reason. The open ones:
 
 - [C] `select` over `sceNet` sockets for a mixed control, data, and listener set
-  under FTP timing, with `sceNetEpollWait` as the fallback.
+  under FTP timing, with `sceNetEpollWait` or ftpvitalib's blocking accept on a
+  dedicated server thread as the fallback (D59).
 - [C] whether `sceIoRename` replaces an existing target, and the fallback in
   KTD12 if it does not.
-- [C] `sceIoDevctl` free space on `uma0:` under the shipped eboot.
-- [C] IME dialog init order and masked text behavior.
+- [C] IME dialog init sequence, first NONE window, and masked text behavior
+  (D56).
+- [C] `pthread_attr_setstacksize` accepts a 192 KiB worker stack on the Vita
+  (D57); the app falls back to the pthread default if it does not.
 
 ## GPLv3 boundary
 

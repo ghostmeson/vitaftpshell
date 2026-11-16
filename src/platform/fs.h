@@ -50,8 +50,7 @@ typedef struct FsFile FsFile;
 
 typedef enum {
     FS_OPEN_READ = 0,
-    FS_OPEN_WRITE_CREATE, /* create when absent, keep existing contents */
-    FS_OPEN_WRITE_TRUNC   /* create or truncate */
+    FS_OPEN_WRITE_TRUNC /* create or truncate */
 } FsOpenMode;
 
 /* known == 0 means the platform cannot report it; bytes is then meaningless. */

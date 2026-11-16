@@ -89,6 +89,17 @@ entry, and 960 × 544 readability.
 _Why it serves the approach:_ on a 5-inch, keyboard-less console the interface
 is the product; a desktop layout would break the bet before the protocol does.
 
+## Ambition
+
+The default console-side file navigation and transfer workspace: the app a Vita
+owner reaches for before installing a PC client for the same job. Progress is
+measured, not claimed: the server-matrix pass, the transfer completion rate, and
+crash-free hardware sessions in the on-device log, all reported on the evidence
+page.
+
+_This does not reopen the no-parity boundary:_ being the default console
+workspace is a different goal from matching VitaShell feature for feature.
+
 ## Brand
 
 **One-liner:** The Vita on both sides of the transfer.

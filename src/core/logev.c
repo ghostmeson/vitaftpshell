@@ -61,6 +61,8 @@ void logev_init(LogRecord *record, LogEvent event)
     record->event = event;
     record->port = -1;
     record->clients = -1;
+    record->build = -1;
+    record->value = LOGEV_NO_VALUE;
 }
 
 const char *logev_event_name(LogEvent event)
@@ -88,6 +90,26 @@ const char *logev_event_name(LogEvent event)
         return "server_client";
     case LOGEV_SAVE:
         return "save";
+    case LOGEV_APP_START:
+        return "app_start";
+    case LOGEV_APP_STOP:
+        return "app_stop";
+    case LOGEV_SCREEN:
+        return "screen";
+    case LOGEV_KEY:
+        return "key";
+    case LOGEV_COMMAND:
+        return "command";
+    case LOGEV_IME:
+        return "ime";
+    case LOGEV_QUEUE:
+        return "queue";
+    case LOGEV_ERROR:
+        return "error";
+    case LOGEV_LOG:
+        return "log";
+    case LOGEV_SETTINGS:
+        return "settings";
     default:
         return "unknown";
     }
@@ -118,6 +140,33 @@ int logev_format(char *buf, size_t n, uint64_t now_ms, const LogRecord *record)
         return 0;
     if (record->cls != NULL &&
         !append_field(buf, n, &used, "cls", record->cls))
+        return 0;
+    if (record->screen != NULL &&
+        !append_field(buf, n, &used, "screen", record->screen))
+        return 0;
+    if (record->key != NULL &&
+        !append_field(buf, n, &used, "key", record->key))
+        return 0;
+    if (record->command != NULL &&
+        !append_field(buf, n, &used, "cmd", record->command))
+        return 0;
+    if (record->detail != NULL &&
+        !append_field(buf, n, &used, "detail", record->detail))
+        return 0;
+    if (record->version != NULL &&
+        !append_field(buf, n, &used, "ver", record->version))
+        return 0;
+    if (record->build >= 0 &&
+        !append_uint(buf, n, &used, "build", (uint64_t)record->build))
+        return 0;
+    if (record->value != LOGEV_NO_VALUE &&
+        !append_uint(buf, n, &used, "value", (uint64_t)record->value))
+        return 0;
+    if (record->repeat &&
+        !append_uint(buf, n, &used, "repeat", 1))
+        return 0;
+    if (record->masked &&
+        !append_uint(buf, n, &used, "masked", 1))
         return 0;
 
     if (record->event == LOGEV_TRANSFER_START ||

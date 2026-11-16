@@ -254,14 +254,16 @@ ReplyPasvResult reply_parse_pasv(const char *text,
     if (port <= 0)
         return REPLY_PASV_MALFORMED;
 
-    NetAddress addr;
-    addr.addr = ((uint32_t)h[0] << 24) | ((uint32_t)h[1] << 16) |
-                ((uint32_t)h[2] << 8) | (uint32_t)h[3];
+    NetAddress parsed;
+    parsed.addr = ((uint32_t)h[0] << 24) | ((uint32_t)h[1] << 16) |
+                  ((uint32_t)h[2] << 8) | (uint32_t)h[3];
+    parsed.port = (uint16_t)port;
+
+    /* The PASV host is untrusted. Use the control peer and only the port from
+     * the reply: this prevents an FTP-bounce redirect, fixes NATed servers and
+     * makes a localhost site work when the server advertises its LAN address. */
+    NetAddress addr = control_peer != NULL ? *control_peer : parsed;
     addr.port = (uint16_t)port;
-
-    if (control_peer != NULL && addr.addr != control_peer->addr)
-        return REPLY_PASV_REFUSED;
-
     *out = addr;
     return REPLY_PASV_OK;
 }

@@ -8,17 +8,27 @@
 #include <string.h>
 
 #define CLIENT_RESOLVE_MS 3000
-#define CLIENT_CONNECT_MS 3000
-#define CLIENT_GREETING_LOGIN_MS 2000
-#define CLIENT_FIRST_LIST_MS 2000
-#define CLIENT_COMMAND_MS 5000
-#define CLIENT_DATA_IDLE_MS 15000
+#define CLIENT_CONNECT_MS 12000
+#define CLIENT_GREETING_LOGIN_MS 5000
+#define CLIENT_FIRST_LIST_MS 10000
+#define CLIENT_COMMAND_MS 10000
+#define CLIENT_DATA_IDLE_MS 20000
 #define CLIENT_ABORT_MS 5000
 #define CLIENT_ABORT_GRACE_MS 250
-#define CLIENT_TOTAL_BUDGET_MS 10000
+/* A transfer whose payload is complete still waits for the final reply. It
+ * gets the command timeout, so a server that dies after the data does not
+ * latch the lane. */
+#define CLIENT_FINAL_REPLY_MS CLIENT_COMMAND_MS
+#define CLIENT_TOTAL_BUDGET_MS 35000
+#define CLIENT_KEEPALIVE_MS 20000
+#define CLIENT_KEEPALIVE_TIMEOUT_MS 5000
 
 #define CLIENT_SEND_MAX (FTP_PATH_MAX + 64)
 #define CLIENT_DATA_BUF 4096
+/* One tick moves at most this much payload; the local lane uses the same
+ * shape so neither starves the other. */
+#define CLIENT_DATA_BYTES_PER_TICK (32u * 1024u)
+#define CLIENT_DATA_SLICE_MS 6
 
 typedef enum {
     CSTEP_NONE = 0,
@@ -28,6 +38,7 @@ typedef enum {
     CSTEP_TYPE,
     CSTEP_PWD,
     CSTEP_FEAT,
+    CSTEP_SIZE,
     CSTEP_PASV,
     CSTEP_DATA_CMD,
     CSTEP_CWD,
@@ -36,6 +47,9 @@ typedef enum {
     CSTEP_RNTO,
     CSTEP_DELE,
     CSTEP_RMD,
+    CSTEP_MLST,
+    CSTEP_SIZE_STAT,
+    CSTEP_NOOP,
     CSTEP_QUIT
 } ClientStep;
 
@@ -62,6 +76,7 @@ struct FtpClient {
     FtpStage stage;
     FtpDataState data_state;
     FtpCause cause;
+    NetResult last_net;
     FtpClientOperation op;
     ClientStep step;
     ClientListKind list_kind;
@@ -104,6 +119,8 @@ struct FtpClient {
     int budget_active;
     uint64_t stage_deadline;
     uint64_t data_deadline;
+    uint64_t final_reply_deadline;
+    int file_kept;
 
     FsFile *file;
     int file_eof;
@@ -115,6 +132,8 @@ struct FtpClient {
     char data_buf[CLIENT_DATA_BUF];
     size_t data_len;
     size_t data_off;
+    unsigned data_budget;
+    uint64_t data_slice_start;
 
     FtpLineReader list_lines;
 
@@ -125,6 +144,14 @@ struct FtpClient {
     uint64_t abor_grace_deadline;
     int op_active;
     int op_reported;
+    int keepalive_pending;
+    uint64_t last_activity;
+
+    int stat_exists;
+    int stat_is_dir;
+    int stat_unsupported;
+    uint64_t stat_size;
+    int stat_size_known;
 
     char last_detail[FTP_REPLY_TEXT_MAX];
 };
@@ -152,6 +179,11 @@ static uint64_t now_ms(FtpClient *client)
     return client->clock->now_ms(client->clock->ctx);
 }
 
+static void client_touch(FtpClient *client)
+{
+    client->last_activity = now_ms(client);
+}
+
 static void event_init(FtpClientEvent *event, FtpClientEventKind kind)
 {
     memset(event, 0, sizeof(*event));
@@ -172,7 +204,14 @@ static void client_state_event(FtpClient *client)
     event.data_state = client->data_state;
     event.stage = client->stage;
     event.cause = client->cause;
+    event.net = client->last_net;
+    event.peer = client->resolved;
     event.operation = client->op;
+    event.detail = client->last_detail[0] != '\0' ? client->last_detail : NULL;
+    event.file_kept = client->file_kept;
+    event.bytes = client->transferred;
+    event.total = client->total;
+    event.total_known = client->total_known;
     client_emit(client, &event);
 }
 
@@ -261,6 +300,14 @@ static void client_emit_op_done(FtpClient *client, int ok, FtpCause cause,
     event.operation = client->op;
     event.ok = ok;
     event.detail = detail;
+    event.file_kept = client->file_kept;
+    if (client->op == FTP_CLIENT_OP_STAT) {
+        event.exists = client->stat_exists;
+        event.is_dir = client->stat_is_dir;
+        event.unsupported = client->stat_unsupported;
+        event.file_size = client->stat_size;
+        event.file_size_known = client->stat_size_known;
+    }
     if (client->op == FTP_CLIENT_OP_LIST || client->op == FTP_CLIENT_OP_NLST)
         event.path = client->list_path;
     else if (client->op == FTP_CLIENT_OP_RENAME)
@@ -281,6 +328,12 @@ static void client_close_data(FtpClient *client)
     client->data_state = FTP_DATA_NONE;
     client->data_len = 0;
     client->data_off = 0;
+}
+
+static void client_begin_draining(FtpClient *client)
+{
+    client->data_state = FTP_DATA_DRAINING;
+    client->final_reply_deadline = now_ms(client) + CLIENT_FINAL_REPLY_MS;
 }
 
 static void client_close_control(FtpClient *client)
@@ -309,9 +362,11 @@ static void client_clear_op(FtpClient *client)
     client->step = CSTEP_NONE;
     client->stage_deadline = 0;
     client->data_deadline = 0;
+    client->final_reply_deadline = 0;
     client->budget_active = 0;
     client->final_seen = 0;
     client->first_listing = 0;
+    client->file_kept = 0;
     if (client->state == FTP_CLIENT_READY || client->state == FTP_CLIENT_IDLE)
         client->stage = FTP_STAGE_NONE;
 }
@@ -418,6 +473,7 @@ static int client_send(FtpClient *client, const char *fmt, ...)
         client_lost(client, "CONTROL WRITE FAILED");
         return 0;
     }
+    client_touch(client);
     return 1;
 }
 
@@ -492,7 +548,8 @@ static void client_begin_abort(FtpClient *client, FtpCause cause,
 
 static int client_start_op(FtpClient *client, FtpClientOperation op)
 {
-    if (client->op_active || client->abor_drain > 0 || client->abor_grace)
+    if (client->op_active || client->abor_drain > 0 || client->abor_grace ||
+        client->keepalive_pending)
         return 0;
     client->op = op;
     client->op_active = 1;
@@ -605,6 +662,7 @@ static void client_start_pasv(FtpClient *client)
 static void client_begin_listing(FtpClient *client, int first)
 {
     client->first_listing = first;
+    client->data_kind = CDATA_LIST;
     client->listing_open = 1;
     client->listing_rows = 0;
     ftp_line_init(&client->list_lines);
@@ -663,11 +721,14 @@ static void client_complete_data(FtpClient *client, int ok, FtpCause cause,
 
     if (ok) {
         if (client->data_kind == CDATA_RETR) {
-            FsResult r = ftp_temp_finish(client->fs, &client->temp);
+            FtpCommitStep step = FTP_COMMIT_OK;
+            FsResult r = ftp_temp_finish(client->fs, &client->temp, &step);
             if (r != FS_OK) {
                 client_command_fail(client, FTP_CAUSE_STORAGE,
                                     FTP_STAGE_TRANSFER,
-                                    "DESTINATION COMMIT FAILED");
+                                    step == FTP_COMMIT_RENAME
+                                        ? "DESTINATION RENAME FAILED"
+                                        : "DESTINATION CLOSE FAILED");
                 return;
             }
         } else if (client->file != NULL) {
@@ -691,6 +752,35 @@ static void client_data_failure(FtpClient *client, FtpCause cause,
     FtpStage stage =
         client->data_kind == CDATA_LIST ? FTP_STAGE_DATA : FTP_STAGE_TRANSFER;
     client_begin_abort(client, cause, stage, detail);
+}
+
+/* The final reply never arrived. Keep a download only when the expected size is
+ * known and met; everything else is a partial. The control session ends either
+ * way, so a late reply cannot be read as the next command's answer. */
+static void client_finish_without_reply(FtpClient *client)
+{
+    /* At least the expected size means the payload is complete; a file that
+     * grew after the preflight must not be deleted as short. */
+    int keep = client->data_kind == CDATA_RETR && client->total_known &&
+               client->transferred >= client->total;
+
+    if (keep) {
+        FtpCommitStep step = FTP_COMMIT_OK;
+        FsResult r = ftp_temp_finish(client->fs, &client->temp, &step);
+        if (r != FS_OK) {
+            client_command_fail(client, FTP_CAUSE_STORAGE, FTP_STAGE_TRANSFER,
+                                step == FTP_COMMIT_RENAME
+                                    ? "DESTINATION RENAME FAILED"
+                                    : "DESTINATION CLOSE FAILED");
+            return;
+        }
+        client->file_kept = 1;
+    }
+
+    client_enter_terminal(client, FTP_CLIENT_LOST, FTP_CAUSE_NETWORK,
+                          client->data_kind == CDATA_LIST ? FTP_STAGE_DATA
+                                                          : FTP_STAGE_TRANSFER,
+                          "FINAL REPLY MISSING");
 }
 
 static void client_protocol_error(FtpClient *client, const char *detail)
@@ -717,25 +807,25 @@ static int client_write_all(FsPort *fs, FsFile *file, const char *data,
     return 1;
 }
 
-static void client_pump_receive(FtpClient *client)
+static int client_pump_receive(FtpClient *client)
 {
     char buf[2048];
     size_t got = 0;
     NetResult r = client->net->receive(client->net->ctx, client->data, buf,
                                        sizeof(buf), &got);
     if (r == NET_WOULD_BLOCK)
-        return;
+        return 0;
     if (r == NET_CLOSED || (r == NET_OK && got == 0)) {
         client_close_data(client);
-        client->data_state = FTP_DATA_DRAINING;
+        client_begin_draining(client);
         if (client->final_seen)
             client_complete_data(client, 1, FTP_CAUSE_APP,
                                  client->stage, NULL);
-        return;
+        return 0;
     }
     if (r != NET_OK) {
         client_data_failure(client, FTP_CAUSE_NETWORK, "DATA CONNECTION LOST");
-        return;
+        return 0;
     }
 
     client->data_deadline = now_ms(client) + CLIENT_DATA_IDLE_MS;
@@ -743,7 +833,7 @@ static void client_pump_receive(FtpClient *client)
 
     if (client->first_listing && client->stage_deadline != 0) {
         /* The first listing budget ends when rows actually start arriving;
-         * after this the 15 s data-idle deadline governs. */
+         * after this the 20 s data-idle deadline governs. */
         client->stage_deadline = 0;
         client->budget_active = 0;
         client_set_stage(client, FTP_STAGE_DATA);
@@ -756,14 +846,18 @@ static void client_pump_receive(FtpClient *client)
             !client_write_all(client->fs, client->temp.file, buf, got)) {
             client_data_failure(client, FTP_CAUSE_STORAGE,
                                 "DESTINATION WRITE FAILED");
-            return;
+            return 0;
         }
     }
 
+    client->data_budget = got >= client->data_budget
+                              ? 0
+                              : client->data_budget - (unsigned)got;
     client_emit_progress(client);
+    return 1;
 }
 
-static void client_pump_send(FtpClient *client)
+static int client_pump_send(FtpClient *client)
 {
     if (client->data_off < client->data_len) {
         size_t sent = 0;
@@ -771,28 +865,31 @@ static void client_pump_send(FtpClient *client)
             client->net->ctx, client->data, client->data_buf + client->data_off,
             client->data_len - client->data_off, &sent);
         if (r == NET_WOULD_BLOCK)
-            return;
+            return 0;
         if (r != NET_OK || sent == 0) {
             client_data_failure(client, FTP_CAUSE_NETWORK,
                                 "DATA CONNECTION LOST");
-            return;
+            return 0;
         }
         client->data_off += sent;
         client->transferred += sent;
         client->data_deadline = now_ms(client) + CLIENT_DATA_IDLE_MS;
+        client->data_budget = sent >= client->data_budget
+                                  ? 0
+                                  : client->data_budget - (unsigned)sent;
         client_emit_progress(client);
-        return;
+        return 1;
     }
 
     if (client->file_eof) {
         client_close_data(client);
-        client->data_state = FTP_DATA_DRAINING;
-        return;
+        client_begin_draining(client);
+        return 0;
     }
 
     if (client->file == NULL) {
         client_data_failure(client, FTP_CAUSE_STORAGE, "SOURCE FILE MISSING");
-        return;
+        return 0;
     }
 
     size_t got = 0;
@@ -802,38 +899,79 @@ static void client_pump_send(FtpClient *client)
     if (r == FS_END) {
         client->file_eof = 1;
         client_close_data(client);
-        client->data_state = FTP_DATA_DRAINING;
-        return;
+        client_begin_draining(client);
+        return 0;
     }
     if (r != FS_OK) {
         client_data_failure(client, FTP_CAUSE_STORAGE, "SOURCE READ FAILED");
-        return;
+        return 0;
     }
     if (got == 0) {
         client->file_eof = 1;
         client_close_data(client);
-        client->data_state = FTP_DATA_DRAINING;
-        return;
+        client_begin_draining(client);
+        return 0;
     }
 
     client->data_len = got;
     client->data_off = 0;
     client->data_deadline = now_ms(client) + CLIENT_DATA_IDLE_MS;
-    client_pump_send(client);
+    return 1;
 }
 
 static void client_pump_data(FtpClient *client)
 {
     if (client->data_state != FTP_DATA_ACTIVE || client->data == NULL)
         return;
-    if (client->data_kind == CDATA_STOR)
-        client_pump_send(client);
-    else
-        client_pump_receive(client);
+    while (client->data_budget > 0) {
+        if (now_ms(client) - client->data_slice_start >= CLIENT_DATA_SLICE_MS)
+            break;
+        int moved = client->data_kind == CDATA_STOR
+                        ? client_pump_send(client)
+                        : client_pump_receive(client);
+        if (!moved)
+            break;
+    }
+}
+
+static void client_parse_mlst(FtpClient *client, const Reply *reply)
+{
+    client->stat_is_dir = 0;
+    client->stat_size = 0;
+    client->stat_size_known = 0;
+
+    const char *body = reply->body[0] != '\0' ? reply->body : reply->text;
+    const char *facts = strstr(body, "type=");
+    if (facts == NULL)
+        return;
+
+    const char *line = facts;
+    while (line > body && line[-1] != '\n')
+        line--;
+    while (*line == ' ' || *line == '\t')
+        line++;
+
+    char copy[REPLY_BODY_MAX];
+    size_t n = 0;
+    while (line[n] != '\0' && line[n] != '\n' && line[n] != '\r' &&
+           n + 1 < sizeof(copy)) {
+        copy[n] = line[n];
+        n++;
+    }
+    copy[n] = '\0';
+
+    ListingEntry entry;
+    if (listing_parse_mlsd(copy, &entry) == LISTING_OK) {
+        client->stat_is_dir = entry.type == LISTING_DIR;
+        client->stat_size = entry.size;
+        client->stat_size_known = entry.size_known;
+    }
 }
 
 static void client_handle_reply(FtpClient *client, const Reply *reply)
 {
+    client_touch(client);
+
     if (client->abor_drain > 0) {
         client_handle_abor_reply(client, reply);
         return;
@@ -945,6 +1083,7 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
                                             &client->data_addr,
                                             CLIENT_CONNECT_MS, &client->data);
         if (nr != NET_OK) {
+            client->last_net = nr;
             client->data = NULL;
             client->data_state = FTP_DATA_NONE;
             client_command_fail(client, FTP_CAUSE_NETWORK, FTP_STAGE_DATA,
@@ -953,6 +1092,20 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
         }
         client->data_state = FTP_DATA_ACCEPTED;
         client_send_data_command(client);
+        return;
+    }
+
+    case CSTEP_SIZE: {
+        if (reply->code == 213 && reply->text[0] >= '0' &&
+            reply->text[0] <= '9') {
+            char *end = NULL;
+            unsigned long long size = strtoull(reply->text, &end, 10);
+            if (end != reply->text) {
+                client->total = size;
+                client->total_known = 1;
+            }
+        }
+        client_start_pasv(client);
         return;
     }
 
@@ -1062,6 +1215,89 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
         client_fail_server(client, FTP_STAGE_COMMAND, reply->text);
         return;
 
+    case CSTEP_SIZE_STAT:
+        client->stat_exists = 0;
+        client->stat_unsupported = 0;
+        client->stat_is_dir = 0;
+        client->stat_size = 0;
+        client->stat_size_known = 0;
+        if (reply->code == 213) {
+            char *end = NULL;
+            unsigned long long size = strtoull(reply->text, &end, 10);
+            if (end != reply->text) {
+                client->stat_exists = 1;
+                client->stat_size = size;
+                client->stat_size_known = 1;
+                client_emit_op_done(client, 1, FTP_CAUSE_APP,
+                                    FTP_STAGE_COMMAND, NULL);
+            } else {
+                /* A 213 we cannot read is treated as unsupported so the
+                 * transfer proceeds instead of silently skipping the check. */
+                client->stat_unsupported = 1;
+                client_emit_op_done(client, 1, FTP_CAUSE_APP,
+                                    FTP_STAGE_COMMAND, NULL);
+            }
+            client_clear_op(client);
+            return;
+        }
+        if (reply->code == 550) {
+            client_emit_op_done(client, 1, FTP_CAUSE_APP, FTP_STAGE_COMMAND,
+                                NULL);
+            client_clear_op(client);
+            return;
+        }
+        if (reply->code == 500 || reply->code == 501 ||
+            reply->code == 502 || reply->code == 504) {
+            client->stat_unsupported = 1;
+            client_emit_op_done(client, 1, FTP_CAUSE_APP, FTP_STAGE_COMMAND,
+                                NULL);
+            client_clear_op(client);
+            return;
+        }
+        client_fail_server(client, FTP_STAGE_COMMAND, reply->text);
+        return;
+
+    case CSTEP_MLST:
+        client->stat_exists = 0;
+        client->stat_unsupported = 0;
+        client->stat_is_dir = 0;
+        client->stat_size = 0;
+        client->stat_size_known = 0;
+        if (reply->code == 250) {
+            client->stat_exists = 1;
+            client_parse_mlst(client, reply);
+            client_emit_op_done(client, 1, FTP_CAUSE_APP, FTP_STAGE_COMMAND,
+                                NULL);
+            client_clear_op(client);
+            return;
+        }
+        if (reply->code == 550) {
+            client_emit_op_done(client, 1, FTP_CAUSE_APP, FTP_STAGE_COMMAND,
+                                NULL);
+            client_clear_op(client);
+            return;
+        }
+        if (reply->code == 500 || reply->code == 501 ||
+            reply->code == 502 || reply->code == 504) {
+            client->stat_unsupported = 1;
+            client_emit_op_done(client, 1, FTP_CAUSE_APP, FTP_STAGE_COMMAND,
+                                NULL);
+            client_clear_op(client);
+            return;
+        }
+        client_fail_server(client, FTP_STAGE_COMMAND, reply->text);
+        return;
+
+    case CSTEP_NOOP:
+        /* Keepalive only. Any 2xx closes it; a 421 is a close notice, and a
+         * 5xx still means the server answered, so the session is alive. */
+        client->keepalive_pending = 0;
+        client->stage_deadline = 0;
+        client->step = CSTEP_NONE;
+        if (reply->code == 421)
+            client_lost(client, "SERVER CLOSED THE CONTROL CHANNEL");
+        return;
+
     case CSTEP_QUIT:
         if (reply->code >= 200 && reply->code < 300) {
             client_close_control(client);
@@ -1104,6 +1340,7 @@ static void client_handle_cwd_reply(FtpClient *client, const Reply *reply)
 
 static void client_handle_line(FtpClient *client, const char *line, size_t len)
 {
+    client_touch(client);
     Reply reply;
     ReplyResult r = reply_reader_line(&client->replies, line, len, &reply);
     if (r == REPLY_OK) {
@@ -1173,6 +1410,7 @@ static void client_reset_session(FtpClient *client)
     client->stage = FTP_STAGE_NONE;
     client->data_state = FTP_DATA_NONE;
     client->cause = FTP_CAUSE_APP;
+    client->last_net = NET_OK;
     client->op = FTP_CLIENT_OP_CONNECT;
     client->op_active = 0;
     client->op_reported = 0;
@@ -1183,6 +1421,13 @@ static void client_reset_session(FtpClient *client)
     client->abor_drain = 0;
     client->abor_grace = 0;
     client->abor_grace_deadline = 0;
+    client->keepalive_pending = 0;
+    client->last_activity = 0;
+    client->stat_exists = 0;
+    client->stat_is_dir = 0;
+    client->stat_unsupported = 0;
+    client->stat_size = 0;
+    client->stat_size_known = 0;
     client->final_seen = 0;
     client->listing_open = 0;
     client->listing_rows = 0;
@@ -1261,6 +1506,7 @@ FtpClientResult ftp_client_connect(FtpClient *client,
     client->op_active = 1;
     client->op_reported = 0;
     client->session_start = now_ms(client);
+    client->last_activity = client->session_start;
     client->budget_deadline = client->session_start + CLIENT_TOTAL_BUDGET_MS;
     client->budget_active = 1;
     client->stage = FTP_STAGE_RESOLVE;
@@ -1273,6 +1519,7 @@ FtpClientResult ftp_client_connect(FtpClient *client,
     NetResult r = client->net->resolve(client->net->ctx, client->host,
                                        CLIENT_RESOLVE_MS, &address);
     if (r != NET_OK) {
+        client->last_net = r;
         client_enter_terminal(client,
                               r == NET_TIMEOUT ? FTP_CLIENT_STALLED
                                                : FTP_CLIENT_FAILED,
@@ -1293,6 +1540,7 @@ FtpClientResult ftp_client_connect(FtpClient *client,
     r = client->net->connect(client->net->ctx, &address, CLIENT_CONNECT_MS,
                              &client->control);
     if (r != NET_OK) {
+        client->last_net = r;
         client->control = NULL;
         client_enter_terminal(client,
                               r == NET_TIMEOUT ? FTP_CLIENT_STALLED
@@ -1304,6 +1552,7 @@ FtpClientResult ftp_client_connect(FtpClient *client,
     }
 
     client->control_peer = address;
+    client->last_net = NET_OK;
     client->stage = FTP_STAGE_GREETING;
     client->stage_deadline =
         min_deadline(now_ms(client) + CLIENT_GREETING_LOGIN_MS,
@@ -1398,8 +1647,8 @@ FtpClientResult ftp_client_download(FtpClient *client,
         return FTP_CLIENT_DENIED;
     if (out_risk != NULL)
         *out_risk = risk;
-    if (risk == PATH_RISK_HIGH && !transfer->risk_approved)
-        return FTP_CLIENT_NEED_RISK;
+    /* D87: the local high-risk gate is retired. The hard denials in
+     * path_check_write still refuse boot_config and protected paths. */
 
     if (client->state != FTP_CLIENT_READY)
         return FTP_CLIENT_NOT_CONNECTED;
@@ -1419,21 +1668,26 @@ FtpClientResult ftp_client_download(FtpClient *client,
     if (tr != FS_OK) {
         client->cause = FTP_CAUSE_STORAGE;
         client_set_state(client, FTP_CLIENT_READY);
-        client_emit_op_done(client, 0, FTP_CAUSE_STORAGE,
-                            FTP_STAGE_TRANSFER, "DESTINATION OPEN FAILED");
         client_clear_op(client);
-        return FTP_CLIENT_OK;
+        /* No operation-done event: the worker owns the one failure terminal
+         * for a transfer that never started. */
+        copy_str(client->last_detail, sizeof(client->last_detail),
+                 "DESTINATION OPEN FAILED");
+        return FTP_CLIENT_LOCAL_FAILED;
     }
 
     client->data_kind = CDATA_RETR;
     client->transferred = 0;
-    client->total = 0;
-    client->total_known = 0;
+    client->total = transfer->total;
+    client->total_known = transfer->total_known;
     client->stage = FTP_STAGE_TRANSFER;
     client->stage_deadline = now_ms(client) + CLIENT_COMMAND_MS;
     client_set_state(client, FTP_CLIENT_TRANSFERRING);
     client_emit_progress(client);
-    client_start_pasv(client);
+    /* A listing can predate the transfer; ask for the size this transfer will
+     * actually move. A server without SIZE keeps the listing hint (D89). */
+    client->step = CSTEP_SIZE;
+    client_send(client, "SIZE %s", client->pending_path);
     return FTP_CLIENT_OK;
 }
 
@@ -1462,10 +1716,10 @@ FtpClientResult ftp_client_upload(FtpClient *client,
     if (r != FS_OK) {
         client->cause = FTP_CAUSE_STORAGE;
         client_set_state(client, FTP_CLIENT_READY);
-        client_emit_op_done(client, 0, FTP_CAUSE_STORAGE,
-                            FTP_STAGE_TRANSFER, "SOURCE OPEN FAILED");
         client_clear_op(client);
-        return FTP_CLIENT_OK;
+        copy_str(client->last_detail, sizeof(client->last_detail),
+                 "SOURCE OPEN FAILED");
+        return FTP_CLIENT_LOCAL_FAILED;
     }
 
     FsEntry entry;
@@ -1536,6 +1790,68 @@ FtpClientResult ftp_client_rmdir(FtpClient *client, const char *path)
                                  "RMD");
 }
 
+FtpClientResult ftp_client_mlst(FtpClient *client, const char *path)
+{
+    if (client == NULL)
+        return FTP_CLIENT_INVALID;
+    if (client->state != FTP_CLIENT_READY)
+        return FTP_CLIENT_NOT_CONNECTED;
+    if (!client_start_op(client, FTP_CLIENT_OP_STAT))
+        return FTP_CLIENT_BUSY;
+    if (!ftp_remote_normalize(client->cwd, path, client->pending_path,
+                              sizeof(client->pending_path)) ||
+        !ftp_remote_path_is_safe(client->pending_path)) {
+        client_clear_op(client);
+        return FTP_CLIENT_INVALID;
+    }
+
+    client->stat_exists = 0;
+    client->stat_is_dir = 0;
+    client->stat_unsupported = 0;
+    client->stat_size = 0;
+    client->stat_size_known = 0;
+    client->stage = FTP_STAGE_COMMAND;
+    client->stage_deadline = now_ms(client) + CLIENT_COMMAND_MS;
+    client->step = CSTEP_MLST;
+    if (!client_send(client, "MLST %s", client->pending_path)) {
+        /* The control write failed and client_lost already owns the session.
+         * Do not leave the worker waiting for a STAT event that cannot come. */
+        client_clear_op(client);
+        return FTP_CLIENT_NOT_CONNECTED;
+    }
+    return FTP_CLIENT_OK;
+}
+
+FtpClientResult ftp_client_size(FtpClient *client, const char *path)
+{
+    if (client == NULL)
+        return FTP_CLIENT_INVALID;
+    if (client->state != FTP_CLIENT_READY)
+        return FTP_CLIENT_NOT_CONNECTED;
+    if (!client_start_op(client, FTP_CLIENT_OP_STAT))
+        return FTP_CLIENT_BUSY;
+    if (!ftp_remote_normalize(client->cwd, path, client->pending_path,
+                              sizeof(client->pending_path)) ||
+        !ftp_remote_path_is_safe(client->pending_path)) {
+        client_clear_op(client);
+        return FTP_CLIENT_INVALID;
+    }
+
+    client->stat_exists = 0;
+    client->stat_is_dir = 0;
+    client->stat_unsupported = 0;
+    client->stat_size = 0;
+    client->stat_size_known = 0;
+    client->stage = FTP_STAGE_COMMAND;
+    client->stage_deadline = now_ms(client) + CLIENT_COMMAND_MS;
+    client->step = CSTEP_SIZE_STAT;
+    if (!client_send(client, "SIZE %s", client->pending_path)) {
+        client_clear_op(client);
+        return FTP_CLIENT_NOT_CONNECTED;
+    }
+    return FTP_CLIENT_OK;
+}
+
 FtpClientResult ftp_client_rename(FtpClient *client, const char *from,
                                   const char *to)
 {
@@ -1578,6 +1894,47 @@ FtpClientResult ftp_client_quit(FtpClient *client)
     return FTP_CLIENT_OK;
 }
 
+FtpClientResult ftp_client_disconnect(FtpClient *client)
+{
+    if (client == NULL)
+        return FTP_CLIENT_INVALID;
+    if (client->state == FTP_CLIENT_IDLE)
+        return FTP_CLIENT_NOT_CONNECTED;
+
+    /* An intentional disconnect: no QUIT round trip, no session-lost event.
+     * The caller has already decided the session is over; closing here is
+     * deterministic even when the peer is gone. */
+    client_abort_local(client);
+    client_close_data(client);
+    client_close_control(client);
+
+    client->listing_open = 0;
+    client->op_active = 0;
+    client->op_reported = 0;
+    client->abor_drain = 0;
+    client->abor_grace = 0;
+    client->abor_grace_deadline = 0;
+    client->keepalive_pending = 0;
+    client->last_activity = 0;
+    client->step = CSTEP_NONE;
+    client->stage = FTP_STAGE_NONE;
+    client->data_state = FTP_DATA_NONE;
+    client->budget_active = 0;
+    client->budget_deadline = 0;
+    client->stage_deadline = 0;
+    client->data_deadline = 0;
+    client->final_seen = 0;
+    client->first_listing = 0;
+    client->transferred = 0;
+    client->total = 0;
+    client->total_known = 0;
+    client->send_len = 0;
+    client->send_off = 0;
+    client->state = FTP_CLIENT_IDLE;
+    client_state_event(client);
+    return FTP_CLIENT_OK;
+}
+
 FtpClientResult ftp_client_cancel(FtpClient *client)
 {
     if (client == NULL)
@@ -1585,14 +1942,14 @@ FtpClientResult ftp_client_cancel(FtpClient *client)
     if (client->state != FTP_CLIENT_LISTING &&
         client->state != FTP_CLIENT_TRANSFERRING)
         return FTP_CLIENT_INVALID;
-    if (client->data_state == FTP_DATA_NONE)
+    if (client->data_state == FTP_DATA_NONE && client->step != CSTEP_SIZE)
         return FTP_CLIENT_INVALID;
 
     client_begin_abort(client, FTP_CAUSE_USER, client->stage, "CANCELLED");
     return FTP_CLIENT_OK;
 }
 
-void ftp_client_tick(FtpClient *client)
+void ftp_client_tick(FtpClient *client, unsigned wait_ms)
 {
     if (client == NULL)
         return;
@@ -1603,6 +1960,8 @@ void ftp_client_tick(FtpClient *client)
         return;
 
     uint64_t now = now_ms(client);
+    client->data_budget = CLIENT_DATA_BYTES_PER_TICK;
+    client->data_slice_start = now;
 
     if (client->send_off < client->send_len) {
         if (!client_flush(client)) {
@@ -1634,7 +1993,7 @@ void ftp_client_tick(FtpClient *client)
     if (set.count > 0) {
         NetReadySet ready;
         NetResult wr =
-            client->net->wait(client->net->ctx, &set, 50, &ready);
+            client->net->wait(client->net->ctx, &set, wait_ms, &ready);
         if (wr != NET_OK) {
             client_lost(client, "WAIT FAILED");
             return;
@@ -1673,7 +2032,18 @@ void ftp_client_tick(FtpClient *client)
         return;
     }
 
+    if (client->data_state == FTP_DATA_DRAINING &&
+        client->final_reply_deadline != 0 &&
+        now >= client->final_reply_deadline) {
+        client_finish_without_reply(client);
+        return;
+    }
+
     if (client->stage_deadline != 0 && now >= client->stage_deadline) {
+        if (client->keepalive_pending) {
+            client_lost(client, "KEEPALIVE TIMEOUT");
+            return;
+        }
         if (client->stage == FTP_STAGE_DATA ||
             client->stage == FTP_STAGE_TRANSFER) {
             if (client->data_state == FTP_DATA_ACTIVE) {
@@ -1691,10 +2061,28 @@ void ftp_client_tick(FtpClient *client)
         return;
     }
 
-    if ((client->data_state == FTP_DATA_ACTIVE ||
-         client->data_state == FTP_DATA_DRAINING) &&
+    /* DRAINING is waiting for the final reply, not for payload; the stage
+     * deadline governs it, so a slow 226 cannot discard a complete file. */
+    if (client->data_state == FTP_DATA_ACTIVE &&
         client->data_deadline != 0 && now >= client->data_deadline) {
-        client_data_failure(client, FTP_CAUSE_NETWORK, "DATA IDLE 15S");
+        client_data_failure(client, FTP_CAUSE_NETWORK, "DATA IDLE");
+        return;
+    }
+
+    /* An idle control channel can be half-open after a server dies or a NAT
+     * drops the flow; no FIN reaches select. A NOOP is the only portable way to
+     * prove the session still exists. */
+    if (client->state == FTP_CLIENT_READY && !client->op_active &&
+        !client->keepalive_pending && client->step == CSTEP_NONE &&
+        client->abor_drain == 0 && !client->abor_grace &&
+        now - client->last_activity >= CLIENT_KEEPALIVE_MS) {
+        if (!client_send(client, "NOOP")) {
+            client_lost(client, "CONTROL WRITE FAILED");
+            return;
+        }
+        client->keepalive_pending = 1;
+        client->step = CSTEP_NOOP;
+        client->stage_deadline = now_ms(client) + CLIENT_KEEPALIVE_TIMEOUT_MS;
         return;
     }
 
@@ -1738,5 +2126,11 @@ int ftp_client_has_mlsd(const FtpClient *client)
 int ftp_client_busy(const FtpClient *client)
 {
     return client != NULL &&
-           (client->op_active || client->abor_drain > 0 || client->abor_grace);
+           (client->op_active || client->abor_drain > 0 ||
+            client->abor_grace || client->keepalive_pending);
+}
+
+const char *ftp_client_last_detail(const FtpClient *client)
+{
+    return client != NULL ? client->last_detail : "";
 }

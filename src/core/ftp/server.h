@@ -13,9 +13,12 @@
 
 /*
  * Anonymous passive FTP server. OFF is the resting state. The machine binds
- * the control port and control+1 on the LAN address, accepts one client, and
- * runs one data command at a time. Every path resolves through the shared path
- * table; a denial answers exactly as a missing path and creates nothing.
+ * the control port at start and gives each of the four session slots its own
+ * data port (control+1+slot), bound on that slot's first PASV and held until
+ * the server stops; a data connection is attributed by the port it arrives on.
+ * It accepts up to four clients and runs one data command at a time (D86).
+ * Every path resolves through the shared path table; a denial answers exactly
+ * as a missing path and creates nothing.
  */
 
 typedef enum {
@@ -48,9 +51,18 @@ typedef struct {
     uint64_t total;
     int total_known;
     int ok;
+    /* CLIENT: the session whose record this is, so the panel never pairs one
+     * peer with another session's command. */
+    int session_index;
+    NetAddress peer;
+    const char *op;
 } FtpServerEvent;
 
 typedef void (*FtpServerEventFn)(void *ctx, const FtpServerEvent *event);
+
+/* A protocol trace for the session log. The server never includes a PASS
+ * argument; a trace line is already safe to write. */
+typedef void (*FtpServerTraceFn)(void *ctx, const char *line);
 
 typedef enum {
     FTP_SERVER_OK = 0,
@@ -68,12 +80,36 @@ void ftp_server_destroy(FtpServer *server);
 
 FtpServerResult ftp_server_start(FtpServer *server, uint16_t control_port);
 void ftp_server_stop(FtpServer *server);
-void ftp_server_tick(FtpServer *server);
+
+/* U26: path arbitration. CHECK asks whether a path is held (1 = held); HOLD
+ * claims a data command's path for the transfer; RELEASE drops the server
+ * lane at the transfer end. A held path answers 450 and disarms PASV. */
+typedef enum {
+    FTP_GUARD_CHECK = 0,
+    FTP_GUARD_HOLD,
+    FTP_GUARD_RELEASE
+} FtpGuardAction;
+
+typedef int (*FtpServerGuardFn)(void *ctx, FtpGuardAction action,
+                                const char *local_path, int write, int tree);
+
+void ftp_server_set_guard(FtpServer *server, FtpServerGuardFn guard,
+                          void *ctx);
+void ftp_server_set_trace(FtpServer *server, FtpServerTraceFn trace,
+                          void *ctx);
+/* `wait_ms` bounds the socket wait; pass 0 while a local job needs the slice. */
+void ftp_server_tick(FtpServer *server, unsigned wait_ms);
 
 FtpServerState ftp_server_state(const FtpServer *server);
 int ftp_server_clients(const FtpServer *server);
 int ftp_server_busy(const FtpServer *server);
 uint16_t ftp_server_control_port(const FtpServer *server);
-uint16_t ftp_server_data_port(const FtpServer *server);
+/* Slot `slot`'s passive data port (control+1+slot), or 0 for an invalid slot.
+ * The 227 reply and the tests read this one value. */
+uint16_t ftp_server_data_port(const FtpServer *server, int slot);
+/* The active session's last command, for the transfer direction. The CLIENT
+ * panel reads the event's own session record instead. */
+const char *ftp_server_last_command(const FtpServer *server);
+NetAddress ftp_server_lan_address(const FtpServer *server);
 
 #endif

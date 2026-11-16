@@ -18,4 +18,9 @@ void fmt_percent(char *buf, size_t n, uint64_t done, uint64_t total,
 void fmt_count(char *buf, size_t n, unsigned count, const char *singular,
                const char *plural);
 
+/* Bounded copy: always terminates, silently truncates at n-1. Use this for a
+ * one-string field so GCC's format-truncation warning does not fire on a
+ * deliberate truncation. */
+void fmt_copy(char *dst, size_t n, const char *src);
+
 #endif
