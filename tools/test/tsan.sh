@@ -97,3 +97,37 @@ if [[ "$status" -ne 0 ]] || ! grep -q "test_app_thread: OK" "$OUT/app-run.log"; 
 fi
 
 echo "tsan: threaded app clean with the fakes"
+
+# --- Threaded transfer ------------------------------------------------------
+# The second app-thread binary drives a download, the SIZE-only refresh, a
+# cancel, and a server session while the scripted peer runs on its own thread.
+if ! "$CC" -std=c99 -O1 -g -pthread -fsanitize=thread \
+  -I"$ROOT/src" -I"$ROOT/tools/fake" -I"$ROOT/tools/preview" \
+  "$ROOT/tools/test/test_app_thread_xfer.c" "$ROOT"/tools/fake/*.c \
+  "$ROOT"/src/core/*.c "$ROOT"/src/core/ftp/*.c "$ROOT"/src/gfx/*.c \
+  "$ROOT"/src/ui/*.c "$ROOT"/src/app/*.c \
+  "$ROOT/tools/preview/vita2d_soft.c" -lz -lm \
+  -o "$OUT/test_app_thread_xfer" 2>"$OUT/xfer-compile.log"; then
+  cat "$OUT/xfer-compile.log" >&2
+  echo "tsan: the threaded transfer build failed after the TSan probe" >&2
+  exit 1
+fi
+
+set +e
+"$OUT/test_app_thread_xfer" >"$OUT/xfer-run.log" 2>&1
+status=$?
+set -e
+
+if grep -q "WARNING: ThreadSanitizer" "$OUT/xfer-run.log"; then
+  cat "$OUT/xfer-run.log" >&2
+  echo "tsan: the threaded transfer test reported a race" >&2
+  exit 1
+fi
+if [[ "$status" -ne 0 ]] || ! grep -q "test_app_thread_xfer: OK" \
+  "$OUT/xfer-run.log"; then
+  cat "$OUT/xfer-run.log" >&2
+  echo "tsan: the threaded transfer test did not complete cleanly" >&2
+  exit 1
+fi
+
+echo "tsan: threaded transfer clean with the fakes"
