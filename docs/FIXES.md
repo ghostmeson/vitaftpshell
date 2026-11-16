@@ -75,6 +75,31 @@ or spaces; the Vita filesystem's own folding remains `[C]` and needs the
 console. A SIZE-only probe cannot report a type for a destination outside the
 current remote listing; the server's STOR refusal is the remaining signal.
 
+## Review remediation (b72)
+
+The full review of the residual sweep (`ce-code-review`, base `dd7aad3`, run
+`20261116-002414-b4c0cc07`) returned `Ready with fixes`. The validator confirmed
+14 findings, rejected two, and left one unresolved; the confirmed items that
+needed code are below.
+
+| Build | Symptom | Cause and fix | Evidence | Status |
+|---|---|---|---|---|
+| b72 | **A cancelled upload preflight could apply its verdict to the next item.** | `upload_stat_ready` held one destination's answer while a cancel could drop that item. The result now carries its destination, a mismatch is discarded, and a cancel, clear, or batch end clears the latch. | Code path; host suite | `HOST b72` |
+| b72 | **The TSan gate skipped itself when the app test failed to build.** | Any compile failure exited 0. The script now probes TSan once with a trivial program and treats a later source failure as a hard error; the app run must print its OK line. | `tools/test/tsan.sh`; host run | `HOST b72` |
+| b72 | **A SIZE-only upload could not see a folder destination.** | SIZE reports no type. The worker now checks the current remote listing's row for the destination and keeps the `DESTINATION IS A FOLDER` refusal. | `test_upload_preflight_size_folder` | `HOST b72` |
+| b72 | **A lane could peek the other lane's single-lane cancel; a notice survived a failure; the lane count and header contract were loose; the queue call still took dead outcome arguments.** | The peek and consume now share the other-lane guard; the local executor consumes the press it saw; a failure clears the notice; `HANDOFF_CANCEL_LANE_COUNT` names the two slots; the SIZE/MLST headers name 500/501/502/504; `xfer_release`/`xfer_cancel_active` take only the queue and next item. | `test_cancel_slots`, `test_uistate`, `test_client`, `test_xfer`; host run | `HOST b72` |
+
+**Validator outcomes.** #14 (the adopt/writer claim race) was rejected as
+pre-existing: the b67 change that introduced adopt is in the base and this pass
+only tests it. #19 (`FEAT` `modify*`) was rejected because the server does emit
+`modify=` when the filesystem reports an mtime; the Vita adapter's unknown mtime
+is the recorded D48 limit, not a false capability. #9 (a stale single-lane
+cancel replayed against another lane) was unresolved; the peek/consume guard and
+consume-at-peek change above remove the mechanism, but no test drives the exact
+cross-thread interleaving. The PASV review item was not a defect: the adapter
+binds the listener to `INADDR_ANY` (the wildcard keeps it valid across a link
+change), so only the advertised `227` address needed the refresh.
+
 ## Open-issues pass (b68)
 
 | Build | Symptom | Cause and fix | Evidence | Status |
