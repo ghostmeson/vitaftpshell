@@ -421,9 +421,28 @@ static void test_server_actions(void)
     CHECK(command(UI_CMD_STOP_SERVER) != NULL);
     send_key(UI_KEY_DOWN);
     CHECK(s_state.server.focus_start == 0);
+    /* Cross opens text entry seeded with the live port; the edit command
+     * comes back with what the IME returned, not with the current value. */
     send_key(UI_KEY_CROSS);
+    const UiCommand *ime = command(UI_CMD_OPEN_IME);
+    CHECK(ime != NULL);
+    if (ime != NULL) {
+        CHECK(ime->field == UI_FIELD_PORT);
+        CHECK(ime->value == 5);
+        CHECK(strcmp(ime->title, "SERVER PORT") == 0);
+        CHECK(strcmp(ime->text, "1337") == 0);
+    }
+    CHECK(s_state.text.open == 1);
+    UiStateEvent typed;
+    memset(&typed, 0, sizeof(typed));
+    typed.kind = UI_EVT_IME_RESULT;
+    typed.ok = 1;
+    snprintf(typed.text, sizeof(typed.text), "1338");
+    send_event(&typed);
     CHECK(command(UI_CMD_EDIT_PORT) != NULL);
-    CHECK(command(UI_CMD_EDIT_PORT)->value == 1337);
+    CHECK(command(UI_CMD_EDIT_PORT)->value == 1338);
+    CHECK(s_state.text.open == 0);
+    CHECK(s_state.screen == UI_SCREEN_SERVER);
     send_key(UI_KEY_CIRCLE);
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
 
