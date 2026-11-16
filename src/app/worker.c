@@ -32,6 +32,10 @@
 #define WORKER_LOCAL_SLICE_MS 6
 #define WORKER_LOCAL_STEPS_MAX 16
 #define WORKER_CONFIRM_ITEMS HANDOFF_CONFIRM_ITEMS
+/* KTD7: one local item changes at most two parent folders, and one clipboard
+ * batch carries UI_CLIP_MAX items, so the deduped set cannot overflow. */
+#define WORKER_CHANGED_DIRS_MAX (UI_CLIP_MAX * 2)
+#define WORKER_FOLDER_GONE_TEXT "FOLDER GONE"
 /* The editor and the start path share the server's own range, so a port the
  * user can enter is a port the server can bind. */
 #define WORKER_SERVER_PORT_MIN FTP_SERVER_PORT_MIN
@@ -71,7 +75,6 @@ typedef struct {
     int active;
     unsigned id;
     unsigned dropped_id;
-    UiPane pane; /* the local view that issued the batch */
     int total;
     int index;
     int done;
@@ -114,6 +117,10 @@ struct Worker {
     char local_path[UI_PANE_COUNT][PATH_MAX_LEN];
     char remote_path[PATH_MAX_LEN];
     char store_dir[PATH_MAX_LEN];
+    /* KTD7: the exact parent folders the running local batch has changed.
+     * The terminal reloads only the local views that show one of them. */
+    Path changed_dirs[WORKER_CHANGED_DIRS_MAX];
+    int changed_dir_count;
 
     /* Free space is a device property. Query it once per volume (and refresh
      * at the volume root), not on every subfolder; ur0:/uma0: stay unknown. */
@@ -250,6 +257,10 @@ static const char *last_name(const char *path);
 static int source_in_folder(const char *source, const char *folder);
 static void queue_pending_action(Worker *worker, const UiCommand *command);
 static void local_batch_advance(Worker *worker);
+static void local_batch_complete(Worker *worker);
+static void changed_dir_add(Worker *worker, const char *dir);
+static void changed_dir_add_parent(Worker *worker, const char *path);
+static void reload_views_showing(Worker *worker, const char *folder);
 static int run_plan_begin(Worker *worker, const UiCommand *command,
                           FsOpPlan *plan);
 static void execute_action(Worker *worker, const UiCommand *command,
@@ -383,7 +394,6 @@ static void local_batch_begin(Worker *worker, const UiCommand *command,
     memset(&worker->local_batch, 0, sizeof(worker->local_batch));
     worker->local_batch.active = 1;
     worker->local_batch.id = id;
-    worker->local_batch.pane = local_view(command);
     worker->local_batch.total = total;
     worker->local_batch.index = command->batch_index;
     worker->local_batch.direction = direction;
@@ -396,6 +406,7 @@ static void local_batch_begin(Worker *worker, const UiCommand *command,
     worker->local_batch.started_ms = now_ms(worker);
     worker->local_batch.last_ms = worker->local_batch.started_ms;
     worker->local_batch.total_known = 1;
+    worker->changed_dir_count = 0;
 }
 
 static void local_batch_emit_done(Worker *worker)
@@ -435,6 +446,84 @@ static void local_batch_emit_done(Worker *worker)
     worker->batch_preflight_id = 0;
 }
 
+/* KTD7: command paths are already canonical, so recording a parent never walks
+ * or widens the set: an operation inside ux0:data changes ux0:data, never
+ * ux0:. The candidate is stored in the next slot; commit keeps the set unique
+ * and counts it only when it is new. */
+static void changed_dir_commit(Worker *worker)
+{
+    const Path *candidate = &worker->changed_dirs[worker->changed_dir_count];
+    for (int i = 0; i < worker->changed_dir_count; ++i) {
+        if (path_ci_equal(worker->changed_dirs[i].text, candidate->text))
+            return;
+    }
+    worker->changed_dir_count++;
+}
+
+/* The folder itself changed (a copy or move destination). */
+static void changed_dir_add(Worker *worker, const char *dir)
+{
+    if (dir == NULL || dir[0] == '\0' || strcmp(dir, "*") == 0)
+        return;
+    if (worker->changed_dir_count >= WORKER_CHANGED_DIRS_MAX)
+        return;
+    Path *slot = &worker->changed_dirs[worker->changed_dir_count];
+    if (path_canonicalize(dir, slot) != PATH_OK)
+        return;
+    changed_dir_commit(worker);
+}
+
+/* The parent of a changed path (a delete, mkdir, or rename operand). */
+static void changed_dir_add_parent(Worker *worker, const char *path)
+{
+    if (path == NULL || path[0] == '\0' || strcmp(path, "*") == 0)
+        return;
+    if (worker->changed_dir_count >= WORKER_CHANGED_DIRS_MAX)
+        return;
+    Path *slot = &worker->changed_dirs[worker->changed_dir_count];
+    if (path_parent(path, slot) != PATH_OK)
+        return;
+    changed_dir_commit(worker);
+}
+
+/* Reload every local view whose current folder is exactly this folder. */
+static void reload_views_showing(Worker *worker, const char *folder)
+{
+    for (int i = 0; i < UI_PANE_COUNT; ++i) {
+        if (!ui_pane_is_local((UiPane)i))
+            continue;
+        const char *path = worker->local_path[i];
+        if (strcmp(path, "*") == 0)
+            continue;
+        if (path_ci_equal(path, folder))
+            worker_list_local(worker, (UiPane)i, path);
+    }
+}
+
+/* One terminal, then one reload for each affected view and none for the rest
+ * (R9, KTD7). A view is reloaded at most once because the view loop owns the
+ * outer pass. */
+static void local_batch_complete(Worker *worker)
+{
+    if (!worker->local_batch.active)
+        return;
+    local_batch_emit_done(worker);
+    for (int i = 0; i < UI_PANE_COUNT; ++i) {
+        if (!ui_pane_is_local((UiPane)i))
+            continue;
+        const char *path = worker->local_path[i];
+        if (strcmp(path, "*") == 0)
+            continue;
+        for (int c = 0; c < worker->changed_dir_count; ++c) {
+            if (path_ci_equal(path, worker->changed_dirs[c].text)) {
+                worker_list_local(worker, (UiPane)i, path);
+                break;
+            }
+        }
+    }
+    worker->changed_dir_count = 0;
+}
+
 static void local_batch_record(Worker *worker, FsOpRunResult result,
                                const FsOpPlan *plan,
                                const FsOpProgress *progress)
@@ -468,11 +557,8 @@ static void local_batch_skip_item(Worker *worker, const UiCommand *command)
         return;
     batch->skipped++;
     batch->last_ms = now_ms(worker);
-    if (command->batch_last || batch->index + 1 >= batch->total) {
-        worker_list_local(worker, batch->pane,
-                          worker->local_path[local_index(batch->pane)]);
-        local_batch_emit_done(worker);
-    }
+    if (command->batch_last || batch->index + 1 >= batch->total)
+        local_batch_complete(worker);
 }
 
 static void local_batch_cancel(Worker *worker)
@@ -484,9 +570,7 @@ static void local_batch_cancel(Worker *worker)
                   batch->failed - batch->cancelled;
     if (missing > 0)
         batch->cancelled += missing;
-    worker_list_local(worker, batch->pane,
-                      worker->local_path[local_index(batch->pane)]);
-    local_batch_emit_done(worker);
+    local_batch_complete(worker);
     worker->pending_command_count = 0;
     worker->batch_execute_index = 0;
     worker->batch_preflight_count = 0;
@@ -509,7 +593,7 @@ static void local_batch_flush(Worker *worker)
                   batch->failed - batch->cancelled;
     if (missing > 0)
         batch->failed += missing;
-    local_batch_emit_done(worker);
+    local_batch_complete(worker);
 }
 
 static int local_cancel_requested(void *ctx)
@@ -625,11 +709,8 @@ static void local_batch_advance(Worker *worker)
         worker->batch_preflight_count = 0;
         /* A refused item never reaches run_plan and therefore never records
          * itself; flush the batch here instead of waiting for the idle timer. */
-        if (batch->active) {
-            worker_list_local(worker, batch->pane,
-                              worker->local_path[local_index(batch->pane)]);
-            local_batch_emit_done(worker);
-        }
+        if (batch->active)
+            local_batch_complete(worker);
         return;
     }
 
@@ -842,19 +923,15 @@ static const char *fs_result_text(FsResult result)
     }
 }
 
-/* A finished download changes the left local folder (the download target is
- * always UI_PANE_LOCAL); the kept-file terminal needs the same refresh. */
+/* A finished download changes its destination folder, and a kept file changes
+ * it too. Reload every local view that shows that exact folder and leave the
+ * others alone (R9, KTD7). */
 static void refresh_local_after_download(Worker *worker,
                                          const XferItem *item)
 {
-    const char *path = worker->local_path[UI_PANE_LOCAL];
-    if (strcmp(path, "*") == 0) {
-        worker_list_root(worker, UI_PANE_LOCAL);
-        return;
-    }
     Path parent;
     if (path_parent(item->destination.text, &parent) == PATH_OK)
-        worker_list_local(worker, UI_PANE_LOCAL, parent.text);
+        reload_views_showing(worker, parent.text);
 }
 
 static void emit_transfer_done(Worker *worker, XferDirection direction,
@@ -1111,6 +1188,10 @@ static int row_risk(const char *dir, const char *name)
 static void worker_list_root(Worker *worker, UiPane pane)
 {
     emit_listing_begin(worker, pane, "*");
+    /* The virtual root is the view's folder even when the listing itself
+     * cannot start, so a fallback is never overwritten by a later failure. */
+    fmt_copy(worker->local_path[local_index(pane)],
+             sizeof(worker->local_path[local_index(pane)]), "*");
     log_event(worker, LOGEV_LIST, NULL, NULL, "*", "begin", "app", 0, 0);
     int slot = handoff_listing_begin(worker->handoff, pane);
     if (slot < 0) {
@@ -1135,8 +1216,6 @@ static void worker_list_root(Worker *worker, UiPane pane)
     }
 
     handoff_listing_publish(worker->handoff, pane, slot, rows, count);
-    fmt_copy(worker->local_path[local_index(pane)],
-             sizeof(worker->local_path[local_index(pane)]), "*");
     log_event(worker, LOGEV_LIST, NULL, NULL, "*", "end", "app",
               (uint64_t)count, 0);
     emit_listing_end(worker, pane, "*", 1, 0, 0, 0, "");
@@ -1190,6 +1269,19 @@ static void worker_list_local(Worker *worker, UiPane pane, const char *path)
         handoff_listing_publish(worker->handoff, pane, slot, rows, count);
         log_event(worker, LOGEV_LIST, NULL, NULL, canonical.text, "open",
                   "storage", count, 0);
+        if (result == FS_NOT_FOUND) {
+            /* The view's folder is gone: a removed mount or a deleted folder.
+             * ALL DRIVES is the only honest view, and the reset is per view so
+             * a hidden local view is fixed too. The failed listing gets no END:
+             * both listings happen in one worker step, and an END for the dead
+             * generation would clear the root rows the app applies from the
+             * newer one. The reason is reported once, after the root listing,
+             * so no LISTING FAILED stays on a dead path (R9, AE14). */
+            worker_list_root(worker, pane);
+            emit_error(worker, pane, WORKER_FOLDER_GONE_TEXT,
+                       OP_CAUSE_STORAGE, OP_STAGE_COMMAND);
+            return;
+        }
         emit_listing_end(worker, pane, canonical.text, 0, 0, 0, 0,
                          fs_result_text(result));
         return;
@@ -1779,6 +1871,75 @@ static void emit_local_progress(Worker *worker)
     emit(worker, &event);
 }
 
+/* Did the run leave a changed path behind? A success did. A delete that
+ * stopped part way did, because deletes are never rolled back. A copied or
+ * moved item that rolled back cleanly did not; one whose rollback failed did
+ * and reports the rollback stage (KTD7). */
+static int run_changed_paths(FsOpRunResult result, FsOpKind kind,
+                             const FsOpProgress *progress)
+{
+    if (result == FSOP_RUN_OK)
+        return 1;
+    if (progress->stage == OP_STAGE_ROLLBACK)
+        return 1;
+    return kind == FSOP_DELETE && progress->files_done > 0;
+}
+
+/* KTD7: name the exact parent folders this item changed. A copy and a move
+ * change the destination folder; a mkdir and a rename change the parent of
+ * their target; a delete changes the removed path's parent. Ancestors (and
+ * descendants) are not part of the set. */
+static void record_local_changes(Worker *worker, const UiCommand *command,
+                                 FsOpRunResult result,
+                                 const FsOpProgress *progress)
+{
+    if (command == NULL || progress == NULL)
+        return;
+
+    FsOpKind kind;
+    switch (command->action) {
+    case UI_ACTION_COPY:
+        kind = FSOP_COPY;
+        break;
+    case UI_ACTION_MOVE:
+        kind = FSOP_MOVE;
+        break;
+    case UI_ACTION_DELETE:
+        kind = FSOP_DELETE;
+        break;
+    case UI_ACTION_NEW_FOLDER:
+        kind = FSOP_MKDIR;
+        break;
+    case UI_ACTION_RENAME:
+        kind = FSOP_RENAME;
+        break;
+    default:
+        return;
+    }
+    if (!run_changed_paths(result, kind, progress))
+        return;
+
+    switch (kind) {
+    case FSOP_COPY:
+        changed_dir_add(worker, command->path2);
+        break;
+    case FSOP_MOVE:
+        changed_dir_add_parent(worker, command->path);
+        changed_dir_add(worker, command->path2);
+        break;
+    case FSOP_DELETE:
+        changed_dir_add_parent(worker, command->path);
+        break;
+    case FSOP_MKDIR:
+        changed_dir_add_parent(worker, command->path2);
+        break;
+    case FSOP_RENAME:
+        changed_dir_add_parent(worker, command->path);
+        changed_dir_add_parent(worker, command->path2);
+        break;
+    }
+}
+
 /* Emit the terminal exactly once and release the run, the plan, and the
  * command. Mirrors the blocking tail the old run_plan had. */
 static void finish_local_run(Worker *worker, FsOpRunResult result)
@@ -1795,6 +1956,7 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
 
     if (progress.sync_skipped)
         log_detail(worker, LOGEV_LOG, "sync skipped");
+    record_local_changes(worker, &command, result, &progress);
     local_batch_record(worker, result, plan, &progress);
 
     if (result == FSOP_RUN_OK) {
@@ -1832,10 +1994,7 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
         local_batch_cancel(worker);
     } else if (command.batch_last || !batch->active ||
                batch->index + 1 >= batch->total) {
-        UiPane refresh = batch->active ? batch->pane : issuing;
-        worker_list_local(worker, refresh,
-                          worker->local_path[local_index(refresh)]);
-        local_batch_emit_done(worker);
+        local_batch_complete(worker);
     }
 
     release_local_reservations(worker);

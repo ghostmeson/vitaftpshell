@@ -791,11 +791,15 @@ static void test_failed_connect_replaces_session(void)
     app_destroy(app);
 }
 
-static void select_local_named(App *app, const char *name)
+static void select_view_named(App *app, UiPane view, const char *name)
 {
+    if (app_state(app)->active_pane != view)
+        press(app, INPUT_BIT(INPUT_L1));
+    CHECK(app_state(app)->active_pane == view);
+
     /* Drive the cursor to the row by index, never across the last row: with a
      * transfer active that boundary enters the dock instead of wrapping. */
-    const UiPaneState *pane = &app_state(app)->panes[UI_PANE_LOCAL];
+    const UiPaneState *pane = &app_state(app)->panes[view];
     int target = -1;
     for (int i = 0; i < pane->row_count; ++i) {
         if (strcmp(pane->rows[i].name, name) == 0) {
@@ -803,16 +807,70 @@ static void select_local_named(App *app, const char *name)
             break;
         }
     }
+    CHECK(target >= 0);
     if (target < 0)
         return;
 
     for (int guard = 0; guard <= pane->row_count; ++guard) {
-        const UiPaneState *live = &app_state(app)->panes[UI_PANE_LOCAL];
+        const UiPaneState *live = &app_state(app)->panes[view];
         if (live->selected == target)
             return;
         press(app, live->selected < target ? INPUT_BIT(INPUT_DOWN)
                                            : INPUT_BIT(INPUT_UP));
     }
+}
+
+static void select_local_named(App *app, const char *name)
+{
+    select_view_named(app, UI_PANE_LOCAL, name);
+}
+
+/* List one view's folder through the worker command the UI would send, and
+ * wait for that view to settle. Used to place the second local view. */
+static void open_view_path(App *app, UiPane view, const char *path)
+{
+    UiCommand open;
+    memset(&open, 0, sizeof(open));
+    open.type = UI_CMD_OPEN_PATH;
+    open.pane = view;
+    snprintf(open.path, sizeof(open.path), "%s", path);
+    CHECK(handoff_command_push(app_handoff(app), &open) == 1);
+
+    UiPaneState *pane = &app_state(app)->panes[view];
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        pane = &app_state(app)->panes[view];
+        if (strcmp(pane->path, path) == 0 && !pane->loading &&
+            pane->row_count > 0)
+            break;
+    }
+    CHECK(strcmp(pane->path, path) == 0);
+    CHECK(!pane->loading);
+    CHECK(pane->row_count > 0);
+}
+
+/* Switch the right slot between its local and remote views through ACTIONS. */
+static void switch_right_view(App *app, int to_local)
+{
+    UiPane slot = app_state(app)->right_view;
+    if (app_state(app)->active_pane != slot)
+        press(app, INPUT_BIT(INPUT_L1));
+    CHECK(app_state(app)->active_pane == slot);
+
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->screen == UI_SCREEN_ACTIONS);
+    int want = (int)(to_local ? UI_ACTION_SWITCH_LOCAL
+                              : UI_ACTION_SWITCH_REMOTE);
+    for (int guard = 0;
+         guard < 12 && app_state(app)->actions.selected != want; ++guard)
+        press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == want);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+
+    UiPane expected = to_local ? UI_PANE_LOCAL_RIGHT : UI_PANE_REMOTE;
+    CHECK(app_state(app)->right_view == expected);
+    CHECK(app_state(app)->active_pane == expected);
 }
 
 static void enter_ux0_data(App *app)
@@ -3180,6 +3238,399 @@ static void test_right_local_error_on_right(void)
     app_destroy(app);
 }
 
+/* AE13: a delete in the left pane reloads the right local view showing that
+ * folder, keeps its cursor on a surviving name, and prunes the deleted name's
+ * mark (R9, KTD7). */
+static void test_cross_view_delete_reload(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/C.TXT", "C", 1);
+
+    enter_ux0_data(app);
+    switch_right_view(app, 1);
+    open_view_path(app, UI_PANE_LOCAL_RIGHT, "ux0:data");
+
+    /* The right view marks the file the left pane will delete, then parks its
+     * cursor on B.TXT, which survives. */
+    select_view_named(app, UI_PANE_LOCAL_RIGHT, "A.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    CHECK(ui_state_mark_count(app_state(app), UI_PANE_LOCAL_RIGHT) == 1);
+    select_view_named(app, UI_PANE_LOCAL_RIGHT, "B.TXT");
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(right->selected == 3); /* .., vitaFTPShell, A.TXT, B.TXT, C.TXT */
+
+    /* The left pane deletes A.TXT through ACTIONS. */
+    select_view_named(app, UI_PANE_LOCAL, "A.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    for (int i = 0; i < 5; ++i)
+        press(app, INPUT_BIT(INPUT_DOWN)); /* COPY..DELETE */
+    CHECK(app_state(app)->actions.selected == UI_ACTION_DELETE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 160; ++i) {
+        (void)app_tick(app);
+        right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+        if (!right->loading && right->row_count == 4 &&
+            ui_state_mark_count(app_state(app), UI_PANE_LOCAL_RIGHT) == 0)
+            break;
+    }
+
+    CHECK(!fake_fs_exists("ux0:data/A.TXT"));
+    right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(strcmp(right->path, "ux0:data") == 0);
+    CHECK(right->row_count == 4); /* .., vitaFTPShell, B.TXT, C.TXT */
+    CHECK(right->selected == 2);
+    CHECK(strcmp(right->rows[right->selected].name, "B.TXT") == 0);
+    CHECK(ui_state_mark_count(app_state(app), UI_PANE_LOCAL_RIGHT) == 0);
+
+    app_destroy(app);
+}
+
+/* A view showing a folder the batch did not touch is not reloaded (R9). */
+static void test_unaffected_local_view_stays(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    switch_right_view(app, 1);
+    open_view_path(app, UI_PANE_LOCAL_RIGHT, "ur0:tai");
+
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    const UiRow *rows = right->rows;
+    int row_count = right->row_count;
+    int selected = right->selected;
+    int scroll = right->scroll;
+
+    select_view_named(app, UI_PANE_LOCAL, "A.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    for (int i = 0; i < 5; ++i)
+        press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_DELETE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 160);
+
+    CHECK(!fake_fs_exists("ux0:data/A.TXT"));
+    right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(strcmp(right->path, "ur0:tai") == 0);
+    CHECK(right->rows == rows);
+    CHECK(right->row_count == row_count);
+    CHECK(right->selected == selected);
+    CHECK(right->scroll == scroll);
+
+    app_destroy(app);
+}
+
+/* A cross-folder move changes two parents, so both local views reload; each
+ * keeps its cursor on the name it had (R9, KTD7). */
+static void test_move_reloads_both_parents(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:other");
+    fake_fs_seed_file("ux0:other/KEEP.TXT", "K", 1);
+
+    enter_ux0_data(app);
+    switch_right_view(app, 1);
+    open_view_path(app, UI_PANE_LOCAL_RIGHT, "ux0:other");
+
+    /* The left pane marks A.TXT but leaves the cursor on B.TXT. */
+    select_view_named(app, UI_PANE_LOCAL, "A.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    select_view_named(app, UI_PANE_LOCAL, "B.TXT");
+    CHECK(app_state(app)->panes[UI_PANE_LOCAL].selected == 3);
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_DOWN)); /* COPY -> MOVE */
+    CHECK(app_state(app)->actions.selected == UI_ACTION_MOVE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    /* The right pane keeps its cursor on KEEP.TXT while the move lands. */
+    select_view_named(app, UI_PANE_LOCAL_RIGHT, "KEEP.TXT");
+    CHECK(app_state(app)->panes[UI_PANE_LOCAL_RIGHT].selected == 1);
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 160; ++i) {
+        (void)app_tick(app);
+        const UiPaneState *r = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+        if (!r->loading && r->row_count == 3)
+            break;
+    }
+
+    CHECK(!fake_fs_exists("ux0:data/A.TXT"));
+    CHECK(fake_fs_exists("ux0:other/A.TXT"));
+
+    const UiPaneState *left = &app_state(app)->panes[UI_PANE_LOCAL];
+    CHECK(left->row_count == 3); /* .., vitaFTPShell, B.TXT */
+    CHECK(left->selected == 2);
+    CHECK(strcmp(left->rows[left->selected].name, "B.TXT") == 0);
+
+    const UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(right->row_count == 3); /* .., A.TXT, KEEP.TXT */
+    CHECK(right->selected == 2);
+    CHECK(strcmp(right->rows[right->selected].name, "KEEP.TXT") == 0);
+
+    app_destroy(app);
+}
+
+/* A copy changes only the destination folder: the destination view reloads
+ * and the source view stays exactly as it was (R9, KTD7). */
+static void test_copy_reloads_destination_only(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:data/DEST");
+    fake_fs_seed_file("ux0:data/DEST/KEEP.TXT", "K", 1);
+
+    enter_ux0_data(app);
+    switch_right_view(app, 1);
+    open_view_path(app, UI_PANE_LOCAL_RIGHT, "ux0:data/DEST");
+
+    select_view_named(app, UI_PANE_LOCAL, "A.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_COPY);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    const UiPaneState *left = &app_state(app)->panes[UI_PANE_LOCAL];
+    const UiRow *left_rows = left->rows;
+    int left_count = left->row_count;
+    int left_selected = left->selected;
+
+    select_view_named(app, UI_PANE_LOCAL_RIGHT, "KEEP.TXT");
+    CHECK(app_state(app)->panes[UI_PANE_LOCAL_RIGHT].selected == 1);
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    for (int i = 0; i < 160; ++i) {
+        (void)app_tick(app);
+        right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+        if (!right->loading && right->row_count == 3)
+            break;
+    }
+
+    CHECK(fake_fs_exists("ux0:data/A.TXT"));
+    CHECK(fake_fs_exists("ux0:data/DEST/A.TXT"));
+    right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(right->row_count == 3); /* .., A.TXT, KEEP.TXT */
+    CHECK(right->selected == 2);
+    CHECK(strcmp(right->rows[right->selected].name, "KEEP.TXT") == 0);
+
+    left = &app_state(app)->panes[UI_PANE_LOCAL];
+    CHECK(left->rows == left_rows);
+    CHECK(left->row_count == left_count);
+    CHECK(left->selected == left_selected);
+
+    app_destroy(app);
+}
+
+/* A rename changes the parent of both operands; the view showing that folder
+ * reloads and the old name is gone (R9, KTD7). */
+static void test_rename_reloads_parent(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    switch_right_view(app, 1);
+    open_view_path(app, UI_PANE_LOCAL_RIGHT, "ux0:data");
+    select_view_named(app, UI_PANE_LOCAL_RIGHT, "A.TXT");
+    CHECK(app_state(app)->panes[UI_PANE_LOCAL_RIGHT].selected == 2);
+
+    select_view_named(app, UI_PANE_LOCAL, "B.TXT");
+    fake_ime_queue_text("C.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    for (int i = 0; i < 4; ++i)
+        press(app, INPUT_BIT(INPUT_DOWN)); /* COPY..RENAME */
+    CHECK(app_state(app)->actions.selected == UI_ACTION_RENAME);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 40);
+
+    CHECK(!fake_fs_exists("ux0:data/B.TXT"));
+    CHECK(fake_fs_exists("ux0:data/C.TXT"));
+
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(right->row_count == 4); /* .., vitaFTPShell, A.TXT, C.TXT */
+    CHECK(right->selected == 2);
+    CHECK(strcmp(right->rows[right->selected].name, "A.TXT") == 0);
+    int seen_c = 0;
+    for (int i = 0; i < right->row_count; ++i) {
+        CHECK(strcmp(right->rows[i].name, "B.TXT") != 0);
+        if (strcmp(right->rows[i].name, "C.TXT") == 0)
+            seen_c = 1;
+    }
+    CHECK(seen_c == 1);
+
+    app_destroy(app);
+}
+
+/* A download changes its destination folder, so every local view showing that
+ * folder reloads, hidden or not (R9, KTD7). */
+static void test_download_reloads_both_local_views(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/Z.TXT", "Z", 1);
+
+    enter_ux0_data(app);
+    switch_right_view(app, 1);
+    open_view_path(app, UI_PANE_LOCAL_RIGHT, "ux0:data");
+    select_view_named(app, UI_PANE_LOCAL_RIGHT, "Z.TXT");
+    CHECK(app_state(app)->panes[UI_PANE_LOCAL_RIGHT].selected == 4);
+    switch_right_view(app, 0);
+
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    select_remote(app);
+
+    /* TEST.BIN lands in ux0:data, the left view's folder. */
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 160; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        const UiPaneState *r = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+        if (app_state(app)->dock.state == UI_DOCK_DONE && !r->loading &&
+            r->row_count == 6)
+            break;
+    }
+
+    CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(right->row_count == 6); /* .., vitaFTPShell, A, B, TEST, Z */
+    CHECK(right->selected == 5);
+    CHECK(strcmp(right->rows[right->selected].name, "Z.TXT") == 0);
+
+    const UiPaneState *left = &app_state(app)->panes[UI_PANE_LOCAL];
+    int left_seen = 0;
+    for (int i = 0; i < left->row_count; ++i) {
+        if (strcmp(left->rows[i].name, "TEST.BIN") == 0)
+            left_seen = 1;
+    }
+    CHECK(left_seen == 1);
+
+    switch_right_view(app, 1);
+    right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(strcmp(right->path, "ux0:data") == 0);
+    CHECK(right->selected == 5);
+    CHECK(strcmp(right->rows[right->selected].name, "Z.TXT") == 0);
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+/* AE14: a folder that disappeared makes the view fall back to ALL DRIVES with
+ * a reason, not a permanent failure on the dead path (R9). */
+static void test_local_view_falls_back_from_removed_mount(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("uma0:");
+    fake_fs_add_dir("uma0:games");
+    fake_fs_seed_file("uma0:games/OLD.TXT", "OLD", 3);
+
+    open_view_path(app, UI_PANE_LOCAL, "uma0:games");
+    CHECK(strcmp(app_state(app)->panes[UI_PANE_LOCAL].path, "uma0:games") ==
+          0);
+
+    FsPort *fs = fake_fs_port();
+    CHECK(fs->remove(fs->ctx, "uma0:games/OLD.TXT") == FS_OK);
+    CHECK(fs->rmdir(fs->ctx, "uma0:games") == FS_OK);
+    CHECK(fs->rmdir(fs->ctx, "uma0:") == FS_OK);
+
+    /* Circle walks to the parent, which is gone too. */
+    press(app, INPUT_BIT(INPUT_CIRCLE));
+
+    UiPaneState *left = &app_state(app)->panes[UI_PANE_LOCAL];
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        left = &app_state(app)->panes[UI_PANE_LOCAL];
+        if (strcmp(left->path, "*") == 0 && !left->loading) {
+            if (left->error[0] != '\0' && left->row_count > 0)
+                break;
+        }
+    }
+
+    left = &app_state(app)->panes[UI_PANE_LOCAL];
+    CHECK(strcmp(left->path, "*") == 0);
+    CHECK(left->row_count >= 2);
+    CHECK(strcmp(left->error, "FOLDER GONE") == 0);
+    CHECK(log_count("FOLDER%20GONE") == 1);
+    for (int i = 0; i < left->row_count; ++i)
+        CHECK(strcmp(left->rows[i].name, "uma0:") != 0);
+
+    app_destroy(app);
+}
+
+/* A hidden local view that loses its folder is reset while it is hidden, so
+ * showing it lands on ALL DRIVES with the reason (R9). */
+static void test_hidden_local_view_falls_back_when_shown(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("uma0:");
+    fake_fs_add_dir("uma0:games");
+    fake_fs_seed_file("uma0:games/OLD.TXT", "OLD", 3);
+
+    switch_right_view(app, 1);
+    open_view_path(app, UI_PANE_LOCAL_RIGHT, "uma0:games");
+    switch_right_view(app, 0);
+    CHECK(app_state(app)->right_view == UI_PANE_REMOTE);
+
+    FsPort *fs = fake_fs_port();
+    CHECK(fs->remove(fs->ctx, "uma0:games/OLD.TXT") == FS_OK);
+    CHECK(fs->rmdir(fs->ctx, "uma0:games") == FS_OK);
+    CHECK(fs->rmdir(fs->ctx, "uma0:") == FS_OK);
+
+    /* The hidden view lists again while the remote view is on screen. */
+    UiCommand refresh;
+    memset(&refresh, 0, sizeof(refresh));
+    refresh.type = UI_CMD_REFRESH;
+    refresh.pane = UI_PANE_LOCAL_RIGHT;
+    CHECK(handoff_command_push(app_handoff(app), &refresh) == 1);
+
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+        if (strcmp(right->path, "*") == 0 && !right->loading &&
+            right->error[0] != '\0' && right->row_count > 0)
+            break;
+    }
+    CHECK(strcmp(right->path, "*") == 0);
+    CHECK(strcmp(right->error, "FOLDER GONE") == 0);
+
+    /* Showing the view keeps the fallback and its reason. */
+    switch_right_view(app, 1);
+    right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(strcmp(right->path, "*") == 0);
+    CHECK(right->row_count >= 2);
+    CHECK(strcmp(right->error, "FOLDER GONE") == 0);
+    CHECK(log_count("FOLDER%20GONE") == 1);
+    for (int i = 0; i < right->row_count; ++i)
+        CHECK(strcmp(right->rows[i].name, "uma0:") != 0);
+
+    app_destroy(app);
+}
+
 int main(void)
 {
     test_download_destination_failure();
@@ -3195,6 +3646,14 @@ int main(void)
     test_third_local_view_at_start();
     test_right_local_listing_keeps_left();
     test_right_local_error_on_right();
+    test_cross_view_delete_reload();
+    test_unaffected_local_view_stays();
+    test_move_reloads_both_parents();
+    test_copy_reloads_destination_only();
+    test_rename_reloads_parent();
+    test_download_reloads_both_local_views();
+    test_local_view_falls_back_from_removed_mount();
+    test_hidden_local_view_falls_back_when_shown();
     test_aside_debris_row();
     test_remote_navigation();
     test_remote_mutations();

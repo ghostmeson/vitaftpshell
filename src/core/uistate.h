@@ -76,6 +76,11 @@ typedef struct {
     int selected;
     int scroll;
 
+    /* A listing of the folder already open is a reload: the cursor's name is
+     * captured at the begin and re-found in the new rows (R9, KTD7). */
+    char cursor_name[PATH_NAME_MAX];
+    int cursor_valid;
+
     UiMark *marks;
     int mark_count;
     int mark_cap;

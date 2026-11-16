@@ -51,6 +51,13 @@ static FsPort s_port;
  * the newlib constants are the right key. Anything outside this table is
  * FS_IO rather than a guessed category.
  */
+/*
+ * [C] AE14 assumes a removed mount or a deleted folder answers ENOENT from
+ * sceIoDopen, so fs_list_open reports FS_NOT_FOUND and the worker falls the
+ * view back to ALL DRIVES. The console's answer for a removed mount (as
+ * opposed to a deleted folder) is unverified; if it reports ENODEV, this table
+ * maps it to FS_IO and that fallback would not fire. Confirm at code freeze.
+ */
 static FsResult fs_result_from_error(int code)
 {
     if (code >= 0)

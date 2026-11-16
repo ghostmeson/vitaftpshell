@@ -2131,6 +2131,23 @@ void ui_state_set_rows(UiState *state, UiPane pane, const UiRow *rows,
     if (state == NULL || pane >= UI_PANE_COUNT)
         return;
     UiPaneState *p = &state->panes[pane];
+    int restored = -1;
+    if (p->cursor_valid) {
+        /* Put the cursor back on the name it held before the reload; a name
+         * that is gone keeps the old index and lets clamp_pane settle it. */
+        int local = ui_pane_is_local(pane);
+        for (int r = 0; r < count; ++r) {
+            int same = local ? ci_equal(rows[r].name, p->cursor_name)
+                             : strcmp(rows[r].name, p->cursor_name) == 0;
+            if (same) {
+                restored = r;
+                break;
+            }
+        }
+        if (restored >= 0)
+            p->selected = restored;
+        p->cursor_valid = 0;
+    }
     p->rows = rows;
     p->row_count = count;
     p->truncated = truncated;
@@ -2138,6 +2155,14 @@ void ui_state_set_rows(UiState *state, UiPane pane, const UiRow *rows,
     p->empty = count == 0;
     prune_marks(p, !ui_pane_is_local(pane));
     clamp_pane(p);
+    if (restored >= 0) {
+        /* Keep the restored row visible without moving it further. */
+        if (p->selected < p->scroll)
+            p->scroll = p->selected;
+        else if (p->selected >= p->scroll + UI_ROWS_VISIBLE)
+            p->scroll = p->selected - UI_ROWS_VISIBLE + 1;
+        clamp_pane(p);
+    }
 }
 
 int ui_state_mark_count(const UiState *state, UiPane pane)
@@ -2206,6 +2231,15 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             clear_marks(pane);
         int path_changed = strcmp(pane->path, next) != 0;
         int new_session = !pane->connected || pane->session_lost;
+        /* A reload lists the folder already open: remember the cursor's name
+         * so the new rows can put the cursor back on it (R9, KTD7). */
+        pane->cursor_valid = 0;
+        if (!path_changed && !new_session && pane->rows != NULL &&
+            pane->selected >= 0 && pane->selected < pane->row_count) {
+            fmt_copy(pane->cursor_name, sizeof(pane->cursor_name),
+                     pane->rows[pane->selected].name);
+            pane->cursor_valid = pane->cursor_name[0] != '\0';
+        }
         fmt_copy(pane->path, sizeof(pane->path), next);
         pane->pending_path[0] = '\0';
         pane->loading = 1;
@@ -2247,6 +2281,8 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
                 pane->selected = 0;
                 pane->scroll = 0;
                 pane->empty = 1;
+                /* No rows arrived, so a reload has nothing to restore. */
+                pane->cursor_valid = 0;
                 fmt_copy(pane->error, sizeof(pane->error), event->text);
             } else {
                 pane->error[0] = '\0';

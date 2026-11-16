@@ -946,6 +946,136 @@ static void test_marks_pruned_after_delete(void)
     CHECK(ui_state_mark_count(&s_state, UI_PANE_LOCAL) == 1);
 }
 
+/* A reload of the folder in place puts the cursor back on the same name, not
+ * the same row index, and clamps when that name is gone (R9, KTD7). */
+static void test_reload_cursor_by_name(void)
+{
+    reset();
+    UiPaneState *pane = &s_state.panes[UI_PANE_LOCAL];
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_BEGIN;
+    event.pane = UI_PANE_LOCAL;
+    snprintf(event.path, sizeof(event.path), "ux0:data");
+
+    /* The cursor sits on A.TXT at index 2; the reload moves it to index 3. */
+    pane->selected = 2;
+    send_event(&event);
+    CHECK(pane->loading == 1);
+    UiRow moved[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "folder", .type = UI_ROW_DIR},
+        {.name = "MORE", .type = UI_ROW_DIR},
+        {.name = "A.TXT", .type = UI_ROW_FILE, .size = 10, .size_known = 1},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, moved, 4, 0);
+    CHECK(pane->selected == 3);
+    CHECK(strcmp(pane->rows[pane->selected].name, "A.TXT") == 0);
+
+    /* A name that is gone keeps the row index and clamps to the new list. */
+    pane->selected = 3;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_BEGIN;
+    event.pane = UI_PANE_LOCAL;
+    snprintf(event.path, sizeof(event.path), "ux0:data");
+    send_event(&event);
+    UiRow shorter[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "folder", .type = UI_ROW_DIR},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, shorter, 2, 0);
+    CHECK(pane->selected == 1);
+    CHECK(strcmp(pane->rows[pane->selected].name, "folder") == 0);
+}
+
+/* A reload prunes the marks whose names no longer exist and keeps the rest
+ * (R9). */
+static void test_reload_prunes_marks_by_name(void)
+{
+    reset();
+    UiPaneState *pane = &s_state.panes[UI_PANE_LOCAL];
+    pane->selected = 2; /* A.TXT */
+    send_key(UI_KEY_SQUARE);
+    pane->selected = 1; /* folder */
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_LOCAL) == 2);
+
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_BEGIN;
+    event.pane = UI_PANE_LOCAL;
+    snprintf(event.path, sizeof(event.path), "ux0:data");
+    send_event(&event);
+
+    UiRow without[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "folder", .type = UI_ROW_DIR},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, without, 2, 0);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
+    CHECK(ui_state_is_marked(&s_state, UI_PANE_LOCAL, "ux0:data/folder"));
+    CHECK(!ui_state_is_marked(&s_state, UI_PANE_LOCAL, "ux0:data/A.TXT"));
+    CHECK(pane->selected == 1);
+}
+
+/* A listing that failed on a folder that is gone is replaced by the ALL DRIVES
+ * root and one reason. The reducer must land there instead of keeping a
+ * LISTING FAILED on the dead path (R9, AE14). */
+static void test_vanished_folder_resets_to_root(void)
+{
+    reset();
+    UiPaneState *pane = &s_state.panes[UI_PANE_LOCAL];
+    UiStateEvent event;
+
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_BEGIN;
+    event.pane = UI_PANE_LOCAL;
+    snprintf(event.path, sizeof(event.path), "uma0:games");
+    send_event(&event);
+    CHECK(strcmp(pane->path, "uma0:games") == 0);
+
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_END;
+    event.pane = UI_PANE_LOCAL;
+    event.ok = 0;
+    snprintf(event.text, sizeof(event.text), "NOT FOUND");
+    send_event(&event);
+    CHECK(strcmp(pane->path, "uma0:games") == 0);
+    CHECK(strcmp(pane->error, "NOT FOUND") == 0);
+
+    /* The worker's fallback: the root listing, then the reason. */
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_BEGIN;
+    event.pane = UI_PANE_LOCAL;
+    snprintf(event.path, sizeof(event.path), "*");
+    send_event(&event);
+    CHECK(strcmp(pane->path, "*") == 0);
+
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_SET_ROWS;
+    event.pane = UI_PANE_LOCAL;
+    event.rows = s_volume_rows;
+    event.row_count = 2;
+    send_event(&event);
+
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_END;
+    event.pane = UI_PANE_LOCAL;
+    event.ok = 1;
+    send_event(&event);
+    CHECK(pane->error[0] == '\0');
+    CHECK(pane->row_count == 2);
+
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_ERROR;
+    event.pane = UI_PANE_LOCAL;
+    snprintf(event.text, sizeof(event.text), "FOLDER GONE");
+    send_event(&event);
+    CHECK(strcmp(pane->path, "*") == 0);
+    CHECK(strcmp(pane->error, "FOLDER GONE") == 0);
+    CHECK(strcmp(s_state.status, "FOLDER GONE") == 0);
+}
+
 static void test_action_returns_to_workspace(void)
 {
     reset();
@@ -2625,6 +2755,9 @@ int main(void)
     test_local_actions_inside_volume_root();
     test_actions_no_selection();
     test_marks_pruned_after_delete();
+    test_reload_cursor_by_name();
+    test_reload_prunes_marks_by_name();
+    test_vanished_folder_resets_to_root();
     test_action_returns_to_workspace();
     test_cursor_copy_folder();
     test_delete_confirm_items();
