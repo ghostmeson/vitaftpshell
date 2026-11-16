@@ -50,7 +50,7 @@ matrix passes.
   FileZilla rename/delete and the full three-volume browse. M10 and M13 are
   partly observed; M1–M9, M11, and M12 await the b72 console run.
 
-## Network closure (b73, host)
+## Network closure (b73-b74, host)
 
 The per-session data ports, the SIZE preflight refresh, and the threaded
 transfer suite; the artifact is `vitaftpshell-v01.00-b73.vpk`.
@@ -58,7 +58,7 @@ transfer suite; the artifact is `vitaftpshell-v01.00-b73.vpk`.
 | Build | Symptom | Cause and fix | Evidence | Status |
 |---|---|---|---|---|
 | b73 | **The server could not tell two sessions on one host apart.** | One passive listener on `control+1` with an address-only peer check. Each session slot now owns `control+1+slot`, bound on its first PASV and held until stop, so the arrival port identifies the owner (D92); a data-port bind failure answers 425 and leaves the server ON. | `test_slot_ports_two_sessions`, `test_data_port_bind_failure`, `test_slot_listener_binds_once`, `test_rearm_drains_stale_peer`, `test_control_port_ceiling`, `test_wait_set_stays_within_cap`; host run | `HOST b73` |
-| b73 | **The SERVER port field cannot open text entry, so the control port cannot be changed from the screen.** | Pressing Cross on the port field emits the edit command with the current value and never opens the IME; only the worker's validation runs. This predates b73 and is recorded rather than fixed here, because it is a UI behavior change outside the documentation sweep. | Inspection of the server key handler and the IME result path; no test covers the screen path | `PENDING` |
+| b74 | **The SERVER port field could not open text entry, so the control port could not be changed from the screen.** | Pressing Cross re-sent the edit command with the current value. It now opens the IME seeded with the live port and a five-character bound, and the answer returns as an edit command while the SERVER screen owns the prompt. | `test_server_port_editor`, `test_server_actions`; host run | `HOST b74` |
 ## Residual open-issues sweep (b72)
 
 | Build | Symptom | Cause and fix | Evidence | Status |
