@@ -24,6 +24,10 @@ typedef enum {
     VOLUME_UX0 = 0,
     VOLUME_UR0,
     VOLUME_UMA0,
+    VOLUME_IMC0,
+    VOLUME_GRO0,
+    VOLUME_GRW0,
+    VOLUME_APP0,
     VOLUME_COUNT
 } Volume;
 
@@ -31,7 +35,8 @@ typedef enum {
     PATH_OK = 0,
     PATH_INVALID,
     PATH_DENIED,
-    PATH_PROTECTED
+    PATH_PROTECTED,
+    PATH_READ_ONLY
 } PathResult;
 
 typedef enum {
@@ -50,6 +55,10 @@ PathResult path_parent(const char *path, Path *out);
 int path_is_volume_root(const char *path);
 int path_volume(const char *path, Volume *out);
 const char *path_volume_name(Volume volume);
+/* A token without its colon, as the server's virtual path carries it. */
+int path_volume_from_token(const char *token, size_t len, Volume *out);
+int path_volume_is_server_exposed(Volume volume);
+int path_volume_is_read_only(Volume volume);
 
 /* Server reads deny boot_config.txt and the app data folder; the tai folders
  * remain readable. The local manager may read boot_config.txt. */

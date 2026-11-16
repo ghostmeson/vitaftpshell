@@ -67,13 +67,33 @@ static void test_volume(void)
     CHECK(path_is_volume_root("ux0:"));
     CHECK(path_is_volume_root("UR0:/"));
     CHECK(path_is_volume_root("uma0:"));
+    CHECK(path_is_volume_root("imc0:"));
+    CHECK(path_is_volume_root("gro0:"));
+    CHECK(path_is_volume_root("grw0:"));
+    CHECK(path_is_volume_root("app0:"));
     CHECK(!path_is_volume_root("ux0:data"));
 
     Volume v;
     CHECK(path_volume("ux0:data", &v) && v == VOLUME_UX0);
     CHECK(path_volume("UR0:data", &v) && v == VOLUME_UR0);
     CHECK(path_volume("uma0:data", &v) && v == VOLUME_UMA0);
+    CHECK(path_volume("imc0:data", &v) && v == VOLUME_IMC0);
+    CHECK(path_volume("gro0:save", &v) && v == VOLUME_GRO0);
+    CHECK(path_volume("grw0:patch", &v) && v == VOLUME_GRW0);
+    CHECK(path_volume("app0:eboot.bin", &v) && v == VOLUME_APP0);
     CHECK(!path_volume("nope:data", &v));
+    CHECK(!path_volume("vs0:data", &v));
+    CHECK(!path_volume("os0:", &v));
+    CHECK(!path_volume("savedata0:x", &v));
+
+    CHECK(path_volume_is_server_exposed(VOLUME_UX0));
+    CHECK(path_volume_is_server_exposed(VOLUME_UR0));
+    CHECK(path_volume_is_server_exposed(VOLUME_UMA0));
+    CHECK(!path_volume_is_server_exposed(VOLUME_IMC0));
+    CHECK(!path_volume_is_server_exposed(VOLUME_APP0));
+    CHECK(path_volume_is_read_only(VOLUME_APP0));
+    CHECK(path_volume_is_read_only(VOLUME_GRO0));
+    CHECK(!path_volume_is_read_only(VOLUME_IMC0));
 }
 
 static void test_safety(void)
@@ -127,6 +147,17 @@ static void test_denials_and_risk(void)
     CHECK(path_is_high_risk("ux0:data/file.skprx"));
     CHECK(!path_is_high_risk("ux0:data/file.txt"));
 
+    CHECK(path_check_write("app0:eboot.bin", 0, &risk) == PATH_READ_ONLY);
+    CHECK(path_check_delete("app0:eboot.bin", 0, &risk) == PATH_READ_ONLY);
+    CHECK(path_check_rename("ux0:data/A.TXT", "app0:A.TXT", 0, &risk) ==
+          PATH_READ_ONLY);
+    CHECK(path_check_read("app0:eboot.bin", 0, &risk) == PATH_OK);
+    CHECK(path_check_write("gro0:save.bin", 0, &risk) == PATH_READ_ONLY);
+    CHECK(path_check_write("grw0:patch.bin", 0, &risk) == PATH_OK);
+    CHECK(path_is_protected("imc0:data"));
+    CHECK(path_is_protected("app0:"));
+    CHECK(path_is_protected("gro0:"));
+    CHECK(!path_is_protected("uma0:data"));
     CHECK(path_check_write("ux0:data/vitaFTPShell/sites.cfg", 0, &risk) ==
           PATH_OK);
     CHECK(risk == PATH_RISK_NORMAL);
@@ -187,6 +218,11 @@ static void test_shared_helpers(void)
     CHECK(path_is_ancestor("ux0:data", "ux0:data/a.bin"));
     CHECK(!path_is_ancestor("ux0:data/a", "ux0:data/a"));
     CHECK(!path_is_ancestor("ux0:data/a", "ux0:data/ab"));
+    CHECK(path_ci_equal("app0:A.TXT", "ux0:app/VFTPSHELL/A.TXT"));
+    CHECK(path_ci_equal("app0:", "ux0:app/VFTPSHELL"));
+    CHECK(path_is_ancestor("app0:folder", "ux0:app/VFTPSHELL/folder/file.txt"));
+    CHECK(!path_is_ancestor("app0:folder",
+                            "ux0:app/VFTPSHELL/other/file.txt"));
 }
 
 int main(void)

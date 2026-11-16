@@ -1519,6 +1519,10 @@ static void test_root_absent_volume(void)
     fake_fs_add_dir("ux0:");
     fake_fs_add_dir("ux0:data");
     fake_fs_add_dir("ur0:");
+    fake_fs_add_dir("imc0:");
+    fake_fs_add_dir("gro0:");
+    fake_fs_add_dir("grw0:");
+    fake_fs_add_dir("app0:");
     fake_net_set_link(1, 1, PEER_ADDR, 0);
 
     SCapture cap;
@@ -1538,6 +1542,12 @@ static void test_root_absent_volume(void)
     CHECK(strstr(tx, "UX0:") != NULL);
     CHECK(strstr(tx, "UR0:") != NULL);
     CHECK(strstr(tx, "UMA0:") == NULL);
+    CHECK(strstr(tx, "IMC0:") == NULL);
+    CHECK(strstr(tx, "GRO0:") == NULL);
+    CHECK(strstr(tx, "GRW0:") == NULL);
+    CHECK(strstr(tx, "APP0:") == NULL);
+    command_text(server, &client, "CWD /IMC0:", 550, NULL, 0);
+    command_text(server, &client, "CWD /APP0:", 550, NULL, 0);
 
     ftp_server_destroy(server);
 }

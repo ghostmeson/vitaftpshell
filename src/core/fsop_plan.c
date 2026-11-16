@@ -27,19 +27,6 @@ static int ci_equal(const char *a, const char *b)
     return *a == '\0' && *b == '\0';
 }
 
-static int ci_prefix(const char *text, const char *prefix)
-{
-    if (text == NULL || prefix == NULL)
-        return 0;
-    while (*prefix != '\0') {
-        if (*text == '\0' || lower_ascii(*text) != lower_ascii(*prefix))
-            return 0;
-        text++;
-        prefix++;
-    }
-    return 1;
-}
-
 static const char *last_segment(const char *path)
 {
     const char *name = path;
@@ -61,16 +48,15 @@ static int same_folder(const char *path, const char *folder)
 {
     Path parent;
     const char *p = parent_path(path, &parent);
-    return p != NULL && ci_equal(p, folder);
+    /* The path module owns the app0 alias, so a same-folder test sees the
+     * install tree and its alias as one folder. */
+    return p != NULL && path_ci_equal(p, folder);
 }
 
-/* True when `path` is `root` or below it, compared case-insensitively. */
+/* True when `path` is `root` or below it, with the same path identity. */
 static int inside_or_same(const char *path, const char *root)
 {
-    if (!ci_prefix(path, root))
-        return 0;
-    char next = path[strlen(root)];
-    return next == '\0' || next == '/' || next == ':';
+    return path_ci_equal(path, root) || path_is_ancestor(root, path);
 }
 
 static void fail(FsOpPlan *plan, const char *reason)
@@ -113,6 +99,8 @@ static const char *path_reason(PathResult result, const char *path)
             return "BOOT CONFIG DENIED";
         return "DENIED PATH";
     }
+    if (result == PATH_READ_ONLY)
+        return "READ-ONLY MOUNT";
     return "INVALID PATH";
 }
 
@@ -645,7 +633,7 @@ static void plan_rename(FsOpPlan *plan, const FsOpRequest *request)
     }
     plan->item_count = 1;
 
-    if (ci_equal(source.text, dest.text)) {
+    if (path_ci_equal(source.text, dest.text)) {
         plan->ok = 1;
         return;
     }

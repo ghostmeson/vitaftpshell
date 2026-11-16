@@ -154,6 +154,33 @@ static void test_same_folder(void)
     CHECK(strstr(s_plan.reason, "ALREADY IN THIS FOLDER") != NULL);
 }
 
+static void test_read_only_and_alias(void)
+{
+    facts_reset();
+    fact("ux0:data/A.TXT", FS_ENTRY_FILE, 3, 1);
+    const char *sources[] = {"ux0:data/A.TXT"};
+    FsOpFacts f = facts();
+    FsOpRequest copy = {FSOP_COPY, sources, 1, "app0:", &f,
+                        FSOP_CONFLICT_OVERWRITE};
+    CHECK(fsop_plan_build(&s_plan, &copy) == 0);
+    CHECK(strstr(s_plan.reason, "READ-ONLY MOUNT") != NULL);
+
+    facts_reset();
+    fact("app0:A.TXT", FS_ENTRY_FILE, 3, 1);
+    const char *alias_sources[] = {"app0:A.TXT"};
+    FsOpFacts alias = facts();
+    FsOpRequest move = {FSOP_MOVE, alias_sources, 1, "ux0:app/VFTPSHELL",
+                        &alias, FSOP_CONFLICT_OVERWRITE};
+    CHECK(fsop_plan_build(&s_plan, &move) == 0);
+    CHECK(strstr(s_plan.reason, "ALREADY IN THIS FOLDER") != NULL);
+
+    FsOpRequest dup = {FSOP_COPY, alias_sources, 1, "ux0:app/VFTPSHELL",
+                       &alias, FSOP_CONFLICT_OVERWRITE};
+    CHECK(fsop_plan_build(&s_plan, &dup) == 1);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_COPY_FILE,
+                          "ux0:app/VFTPSHELL/A copy.TXT") >= 0);
+}
+
 static void test_batch_conflict(void)
 {
     facts_reset();
@@ -380,6 +407,7 @@ int main(void)
     test_copy_into_self();
     test_cross_volume_move();
     test_same_folder();
+    test_read_only_and_alias();
     test_batch_conflict();
     test_tai_destination_allowed();
     test_merge();

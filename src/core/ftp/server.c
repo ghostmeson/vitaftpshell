@@ -686,12 +686,12 @@ static int starts_with_ci(const char *text, const char *prefix)
 
 static int volume_index(const char *token, size_t len)
 {
-    static const char *const NAMES[VOLUME_COUNT] = {"ux0", "ur0", "uma0"};
-    for (int v = 0; v < VOLUME_COUNT; ++v) {
-        if (len == strlen(NAMES[v]) && ci_equal_n(token, NAMES[v], len))
-            return v;
-    }
-    return -1;
+    Volume volume;
+    if (!path_volume_from_token(token, len, &volume))
+        return -1;
+    if (!path_volume_is_server_exposed(volume))
+        return -1;
+    return (int)volume;
 }
 
 /*
@@ -891,6 +891,8 @@ static int server_next_listing_line(FtpServer *server, char *out, size_t cap)
     if (server->listing_root) {
         while (server->root_index < VOLUME_COUNT) {
             Volume v = (Volume)server->root_index++;
+            if (!path_volume_is_server_exposed(v))
+                continue;
             const char *name = path_volume_name(v);
             FsEntry entry;
             memset(&entry, 0, sizeof(entry));

@@ -35,15 +35,44 @@ static int ci_prefix(const char *text, const char *prefix)
     return 1;
 }
 
+/* app0: is the installed app's tree. The alias is comparison-only: display
+ * and canonical paths keep the spelling the user typed, while a same-path,
+ * ancestry, or reservation test sees one location. [C] app0: resolves to
+ * ux0:app/VFTPSHELL on 3.65 Enso. */
+#define PATH_APP0_ALIAS "ux0:app/VFTPSHELL"
+
+static const char *location_key(const char *path, char *buf, size_t cap)
+{
+    if (path == NULL || cap == 0 || !ci_prefix(path, "app0:"))
+        return path;
+    const char *rest = path + 5;
+    int n = rest[0] == '\0'
+                ? snprintf(buf, cap, "%s", PATH_APP0_ALIAS)
+                : snprintf(buf, cap, "%s/%s", PATH_APP0_ALIAS, rest);
+    if (n <= 0 || (size_t)n >= cap)
+        return path;
+    return buf;
+}
+
 int path_ci_equal(const char *a, const char *b)
 {
-    return ci_equal(a, b);
+    if (a == NULL || b == NULL)
+        return 0;
+    char ab[PATH_MAX_LEN];
+    char bb[PATH_MAX_LEN];
+    return ci_equal(location_key(a, ab, sizeof(ab)),
+                    location_key(b, bb, sizeof(bb)));
 }
 
 int path_is_ancestor(const char *a, const char *b)
 {
     if (a == NULL || b == NULL || a[0] == '\0' || b[0] == '\0')
         return 0;
+
+    char ab[PATH_MAX_LEN];
+    char bb[PATH_MAX_LEN];
+    a = location_key(a, ab, sizeof(ab));
+    b = location_key(b, bb, sizeof(bb));
 
     size_t len = strlen(a);
     while (len > 0 && a[len - 1] == '/')
@@ -95,42 +124,77 @@ static int name_of_path(const char *path, const char **name, size_t *len)
     return 1;
 }
 
-static int volume_from_token(const char *token, size_t len, Volume *out)
+/* Display order is ALL DRIVES order. Membership defines the local list;
+ * the flags define server exposure, read-only, and protected data roots. */
+typedef struct {
+    const char *name;
+    unsigned flags;
+} VolumeDef;
+
+#define VOLUME_FLAG_SERVER (1u << 0)
+#define VOLUME_FLAG_READ_ONLY (1u << 1)
+#define VOLUME_FLAG_PROTECT_DATA (1u << 2)
+
+static const VolumeDef VOLUMES[VOLUME_COUNT] = {
+    {"ux0:", VOLUME_FLAG_SERVER | VOLUME_FLAG_PROTECT_DATA},
+    {"ur0:", VOLUME_FLAG_SERVER | VOLUME_FLAG_PROTECT_DATA},
+    {"uma0:", VOLUME_FLAG_SERVER},
+    {"imc0:", VOLUME_FLAG_PROTECT_DATA},
+    {"gro0:", VOLUME_FLAG_READ_ONLY},
+    {"grw0:", 0},
+    {"app0:", VOLUME_FLAG_READ_ONLY},
+};
+
+static unsigned volume_flags(Volume volume)
 {
-    if (len == 3) {
-        if ((token[0] == 'u' || token[0] == 'U') &&
-            (token[1] == 'x' || token[1] == 'X') && token[2] == '0') {
-            *out = VOLUME_UX0;
+    if ((int)volume < 0 || (int)volume >= VOLUME_COUNT)
+        return 0;
+    return VOLUMES[volume].flags;
+}
+
+int path_volume_from_token(const char *token, size_t len, Volume *out)
+{
+    if (token == NULL || out == NULL)
+        return 0;
+    for (int v = 0; v < VOLUME_COUNT; ++v) {
+        const char *name = VOLUMES[v].name;
+        size_t n = strlen(name);
+        if (n < 2 || name[n - 1] != ':')
+            continue;
+        --n;
+        if (n != len)
+            continue;
+        size_t i = 0;
+        while (i < len && lower(token[i]) == lower(name[i]))
+            ++i;
+        if (i == len) {
+            *out = (Volume)v;
             return 1;
         }
-        if ((token[0] == 'u' || token[0] == 'U') &&
-            (token[1] == 'r' || token[1] == 'R') && token[2] == '0') {
-            *out = VOLUME_UR0;
-            return 1;
-        }
-    }
-    if (len == 4 &&
-        (token[0] == 'u' || token[0] == 'U') &&
-        (token[1] == 'm' || token[1] == 'M') &&
-        (token[2] == 'a' || token[2] == 'A') && token[3] == '0') {
-        *out = VOLUME_UMA0;
-        return 1;
     }
     return 0;
 }
 
+int path_volume_is_server_exposed(Volume volume)
+{
+    return (volume_flags(volume) & VOLUME_FLAG_SERVER) != 0;
+}
+
+int path_volume_is_read_only(Volume volume)
+{
+    return (volume_flags(volume) & VOLUME_FLAG_READ_ONLY) != 0;
+}
+
+static int volume_from_token(const char *token, size_t len, Volume *out)
+{
+    return path_volume_from_token(token, len, out);
+}
+
 const char *path_volume_name(Volume volume)
 {
-    switch (volume) {
-    case VOLUME_UX0:
-        return "ux0:";
-    case VOLUME_UR0:
-        return "ur0:";
-    case VOLUME_UMA0:
-        return "uma0:";
-    default:
+    if ((int)volume < 0 || (int)volume >= VOLUME_COUNT)
         return "";
-    }
+    return VOLUMES[volume].name;
 }
 
 PathResult path_canonicalize(const char *input, Path *out)
@@ -278,9 +342,18 @@ int path_is_protected(const char *path)
         return 0;
 
     const char *p = canonical.text;
-    return ci_equal(p, "ux0:") || ci_equal(p, "ur0:") || ci_equal(p, "uma0:") ||
-           ci_equal(p, "ur0:data") || ci_equal(p, "ux0:data") ||
-           ci_equal(p, "ur0:tai") || ci_equal(p, "ux0:tai");
+    for (int v = 0; v < VOLUME_COUNT; ++v) {
+        const char *name = VOLUMES[v].name;
+        if (ci_equal(p, name))
+            return 1;
+        if ((VOLUMES[v].flags & VOLUME_FLAG_PROTECT_DATA) != 0) {
+            char data[16];
+            snprintf(data, sizeof(data), "%sdata", name);
+            if (ci_equal(p, data))
+                return 1;
+        }
+    }
+    return ci_equal(p, "ur0:tai") || ci_equal(p, "ux0:tai");
 }
 
 int path_is_high_risk(const char *path)
@@ -323,6 +396,10 @@ static PathResult check_path(const char *path, int server_role, PathRisk *risk)
 
     if (path_is_protected(p))
         return PATH_PROTECTED;
+
+    Volume volume;
+    if (path_volume(p, &volume) && path_volume_is_read_only(volume))
+        return PATH_READ_ONLY;
 
     if (risk != NULL)
         *risk = path_is_high_risk(p) ? PATH_RISK_HIGH : PATH_RISK_NORMAL;
