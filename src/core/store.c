@@ -14,6 +14,11 @@
 #define SETTINGS_HEADER "vitaFTPShell-settings 1"
 #define LINE_BUF 4096
 #define READ_BUF 256
+/* The FTP server follows its control port with four data ports, so 65531 is the
+ * highest startable port; the loader keeps a stored value inside the range the
+ * server and its editor accept (R6). */
+#define STORE_SERVER_PORT_MIN 1024
+#define STORE_SERVER_PORT_MAX 65531
 
 typedef struct {
     FsPort *fs;
@@ -503,8 +508,13 @@ StoreResult store_load_settings(FsPort *fs, const char *dir,
         } else if (strcmp(key, "server_port") == 0) {
             char *end = NULL;
             long port = strtol(value, &end, 10);
-            if (end != value && *end == '\0' && port >= 1 && port <= 65535)
+            if (end != value && *end == '\0') {
+                if (port < STORE_SERVER_PORT_MIN)
+                    port = STORE_SERVER_PORT_MIN;
+                if (port > STORE_SERVER_PORT_MAX)
+                    port = STORE_SERVER_PORT_MAX;
                 settings->server_port = (uint16_t)port;
+            }
         }
     }
 
