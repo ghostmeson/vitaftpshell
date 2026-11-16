@@ -6,71 +6,26 @@ anything.
 
 ## Status
 
-`building`. Phases 1-5 are complete: the build shape, the six port contracts
-and host fakes, the COCKPIT gfx base with the seven-surface layout table, the
-reply/listing/path/format policy, the site book/settings/store/log policy, the
-passive FTP client and server state machines, the transfer queue and slot
-arbitration, the local operation planner and executor, the input reducer and UI
-state, the cross-thread handoff, the seven screen surfaces, the six Vita
-adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
-twenty-one host suites, and `tools/preview/run.sh` renders 40 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b72.vpk` with the real app linked. b16,
-b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
-browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
-stack and rename completed; b22 made "no selection" disable every action except
-new folder; b23 fixed the server IP byte order and free-space queries, and FTP
-works. b24 added the clipboard/PASTE copy/move model and hardened DELETE; b25
-defers worker confirmations while a local dialog owns the screen. b26 widened
-the FTP client connect window and logged the resolved IP and raw network result;
-b27 clears the CONNECTING state on remote errors; b28 fixed the PASV data
-connection by using the control peer's address and the reply port; b32 contains
-the remote-pane fix (stuck READING, remote actions routed to the FTP client, DISCONNECT,
-site teardown, idle NOOP liveness, remote mark pruning); b36 adds REFRESH,
-unsafe-name refusal, download totals, upload MLST preflight, and folder-transfer
-refusal (R22/R23 deferred); b37 closes the review pass with an iterated queue
-pump, one session teardown that clears the overwrite latch, a truncated-success
-listing cap, the ALL DRIVES download fallback, the high-risk delete warning, and
-MLST send-failure handling. b37 has run on the console (operator report,
-2026-11-13); b38 fixes a regression where the unsafe-name guard refused to open
-the server's own `UX0:`/`UR0:`/`UMA0:` roots; b40 adds cursor COPY/MOVE,
-one batch terminal with past-tense dock words, the batch conflict preflight,
-full local cancel, the cyan cursor slab, the active-pane glow, and red failures;
-b40 crashed on the console (worker stack overflow, four cores in `logs/b40/`).
-b43 removes the 64 KiB `handle_action` array and the recursive batch call, adds
-a build-time worker-stack budget check, makes a refused sync a recorded hint,
-counts refused batch items, and reads `FAILED` on a total failure. b43 has run
-on the console (operator report, 2026-11-14): copy, paste, new folder, rename,
-and download work, and the dock words read correctly in green. b55 carries the
-review remediation (U1-U10): the failed-transfer terminal, the two-lane local
-guard with WAIT on both lanes, prompt identity, the UI stack budget, the
-budgeted transfer pumps, the server session bounds, and the single sidecar
-owner. b56 re-packages that code with the settled launcher icon (D84); b57
-added a server protocol trace, and its console log showed the worker's legacy
-global server-busy gate answering 450 to the app's own client. b58 removes that
-gate (D85), and the console confirmed both transfer directions between the app's
-own client and server. b60 accepts up to four server sessions, one data
-transfer at a time (D86), and has run on the console: FileZilla held two
-sessions and uploaded and downloaded successfully; the app-local client moved
-files across all three volumes. b61 applies D87; b62 trims the SERVER warning;
-b63 removes the warning panel and gives the client panel the full right column
-(D88). b66 closes the b63 review (the local conflict answer, the final-reply
-deadline, the armed-slot release, the foreign ABOR, the owner metadata read, the
-dropped PASS trace, the local terminal badge, and the CLIENT panel pairing); b68
-adds the size preflight, the sidecar rename denial, the listing-slot hold, and
-the two missing tests; b72 closes the non-hardware residual sweep (the app
-listing-slot proof, queue reconnect, dropped-PASS and ACTIVE owner-RETR tests,
-cancel and FEAT wording, PASV address refresh, per-lane cancels, the `ASIDE`
-debris mark and aside notice, dead queue latches, the shared confirm resolver,
-the TSan app run, and the SIZE upload fallback, D91). M13 and M10 are partly
-observed; M1–M9, M11, and M12 await the b72 console run, so the project is
-`building`, not `verified`. Do not start coding from this file alone: the plan
-is the source of truth for behavior, sequencing, and verification, and
-`docs/DESIGN.md` is the layout authority.
+<!-- status:begin -->
+`building`. vitaFTPShell is one PS Vita app with three roles: a passive FTP
+client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
+volumes, and an anonymous read-write FTP server. The seven screens, the
+app/worker runtime, and the six Vita adapters are implemented, and the host
+suites pass. A console pass of the v1 verification matrix is still pending, so
+the project is `building`, not `verified`.
+
+The live state and the single next action are on [the board](PROJECTS.md); the
+hardware evidence is in [the evidence record](docs/VERIFICATION.md).
+<!-- status:end -->
+
+Do not start coding from this file alone: the plan is the source of truth for
+behavior, sequencing, and verification, and `docs/DESIGN.md` is the layout
+authority.
 
 ## Read order
 
 1. `STRATEGY.md` — why the product exists, who it serves, boundaries, metrics.
-2. `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — the plan: R1-R73, KTD1-KTD18, U1-U17 in six phases, the verification contract.
+2. `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — the plan: R1-R74, KTD1-KTD25, U1-U28 in six phases, the verification contract.
 3. `PROJECTS.md` — current phase and the single next action.
 4. `docs/PROJECT.md` — scope, non-goals, roadmap, failure policy.
 5. `docs/ARCHITECTURE.md` — planned layers, ports, and allowed platform files.
@@ -97,7 +52,8 @@ shape; the transfer dock is where work is visible.
 - The client is passive FTP only, tries MLSD then LIST, and parses Unix and DOS
   listings.
 - Passwords are always remembered and stored unencrypted; they are never logged.
-- Multi-select and recursive folder operations are v1.
+- Multi-select and local recursive folder operations are v1; remote recursive
+  transfer is a v1 requirement that is planned, not built (R22/R23, D65).
 - One network transfer and one local job may run together when their canonical
   paths do not overlap; each lane queues its own items, a collision asks
   WAIT/SKIP/CANCEL, and a server-side transfer uses the network lane and
@@ -189,7 +145,7 @@ Policy and UI state must run on the host against fake `NetPort`, `FsPort`,
 - Unix, DOS, and MLSD listing parsing;
 - path joining, parent, and the protected-path rules;
 - batch conflict decisions and queue order;
-- recursive folder planning and the copy-into-itself refusal;
+- local recursive folder planning and the copy-into-itself refusal;
 - cancellation and partial-file cleanup decisions;
 - server command handling and path denial;
 - the input reducer and screen transitions;
@@ -238,10 +194,11 @@ run is the only evidence that promotes the project to `verified`.
 
 - Target: PS Vita 3.65 Enso, VitaSDK 2026.08, libvita2d.
 - `./build.sh` builds one UNSAFE eboot and one VPK; `./tools/test/run.sh` runs
-  the layering guard and the host tests; `./tools/preview/run.sh` renders the
-  screens on the host; `./send.sh <vita-ip>` uploads the current VPK. The app
-  target links the real core, gfx, ui, app, and adapters with libvita2d and the
-  SDK stubs the adapters call.
+  the layering guard, the docs guard, and the host tests;
+  `./tools/preview/run.sh` renders the screens on the host;
+  `./send.sh <vita-ip>` uploads the current VPK. The app target links the real
+  core, gfx, ui, app, and adapters with libvita2d and the SDK stubs the
+  adapters call.
 - `build.sh` runs `tools/check_worker_stack.py` against the linked ELF and fails
   before packaging when `handle_action` or the fixed worker chain exceeds its
   stack budget (D77). A stack overflow is a console run and a core dump to find,
@@ -283,7 +240,8 @@ A job is finished when:
 - `docs/` reflects the change, including a decision when one was made;
 - the fix is indexed in `docs/FIXES.md` with its hardware status;
 - no new `[C]` claim escaped the adapter;
-- the documentation link and code-fence check reports no issues;
+- the documentation gate and the workspace link and code-fence check report no
+  issues;
 - `verified` is not claimed without hardware evidence.
 
 ## What not to do
@@ -311,7 +269,8 @@ the no-selection rule, the server address/free-space policy, the clipboard, the
 destructive-confirmation rules, the FTP-client connect/PASV diagnostics, the
 remote-pane session/action rules, and the remote refresh/name/upload/folder
 rules; D85-D91 record the server sessions, access policy, warning removal, kept
-download, owner metadata, and the SIZE upload fallback.
+download, owner metadata, and the SIZE upload fallback; D92-D94 record the
+per-session data ports, the one-fact-one-home rule, and the documentation gate.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
@@ -362,10 +321,11 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D91
+    DECISIONS.md       numbered decisions, D1-D94
     FIXES.md           chronological fix index with HW/HOST/PENDING status
+    VERIFICATION.md    hardware matrix, build evidence, and the test record
     THIRD_PARTY.md     reused code, licenses, protocol references
-    plans/             the v1 plan: requirements, decisions, units, verification
+    plans/             the v1 plan and the active implementation plans
     features/          future feature documents
     design/            the settled screen sheets and renders
 ```

@@ -277,7 +277,7 @@ static void workspace_states(void)
     state.dock.direction = XFER_DIR_DOWNLOAD;
     snprintf(state.dock.name, sizeof(state.dock.name), "EMACS-29.4.TAR.XZ");
     snprintf(state.dock.message, sizeof(state.dock.message),
-             "DATA CONNECTION TIMED OUT  -  X TO RETRY");
+             "DATA CONNECTION TIMED OUT  -  RUN IT AGAIN");
     state.dock.done = 52219084;
     state.dock.total = 124465971;
     state.dock.total_known = 1;

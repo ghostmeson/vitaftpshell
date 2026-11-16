@@ -79,7 +79,7 @@
 
   <section class="dir" data-scene="s4">
     <div class="dir-head"><span class="dir-key">4</span><span class="dir-name">Failed, session healthy</span></div>
-    <p>The data channel timed out; the control session is still up. The dock names the failure and promises no partial output; the source stays selected for a manual retry.</p>
+    <p>The data channel timed out; the control session is still up. The dock names the failure and promises no partial output; the source stays selected, and the item is retried by running it again.</p>
     <canvas id="s4" aria-label="Workspace with a failed download and a healthy session"></canvas>
   </section>
 
@@ -597,7 +597,7 @@
     state: 'FAILED', stateColor: COL.yellow, subject: 'EMACS-29.4.TAR.XZ',
     right: [{ s: '1 OF 2', c: COL.dim }],
     progress: 0.42, barColor: COL.dim,
-    left: 'DATA CONNECTION TIMED OUT  -  X TO RETRY', rightText: 'NO PARTIAL KEPT', rightColor: COL.dim
+    left: 'DATA CONNECTION TIMED OUT  -  RUN IT AGAIN', rightText: 'NO PARTIAL KEPT', rightColor: COL.dim
   };
   const dockFailedControl = {
     state: 'FAILED', stateColor: COL.yellow, subject: 'EMACS-29.4.TAR.XZ',
