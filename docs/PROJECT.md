@@ -18,9 +18,9 @@ card to a PC, without making the PC the workspace.
 client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
 volumes, and an anonymous read-write FTP server. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
-suites pass. Remote recursive transfer (R22/R23) is the remaining v1
-requirement; the console matrix runs once at v1 code freeze (D95), so the
-project is `building`, not `verified`.
+suites pass. R22 and R23, remote recursive download and upload, are the
+remaining v1 requirements; the console matrix runs once at v1 code freeze
+(D95), so the project is `building`, not `verified`.
 
 The live state and the single next action are on [the board](../PROJECTS.md); the
 hardware evidence is in [the evidence record](VERIFICATION.md).
@@ -82,7 +82,7 @@ rows that prove them on hardware.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: v1 completion and verification | Remote recursion (R22/R23) is the remaining requirement; the full matrix runs once on the code-freeze build (D95), and the row-level evidence is the open work |
+| Phase 6: v1 completion and verification | R22 and R23 are the remaining requirements; the full matrix runs once on the code-freeze build (D95), and the row-level evidence is the open work |
 
 ## Failure policy
 

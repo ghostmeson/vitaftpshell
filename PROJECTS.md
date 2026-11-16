@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-16 — the completed plans are archived (six in all) and the v1 completion audit is recorded: D95 sequences one console pass at code freeze, the matrix grows to M1-M23 with a row for every surface a test user can exercise, the plan points at the matrix as its one home, and the status blocks name R22/R23 as the remaining requirement | Plan and build R22/R23, remote recursive download and upload, the only unbuilt v1 requirement | GPLv3. One UNSAFE eboot. b74 (265,736 bytes, SHA-256 `b25a5af7…`) is host-tested only; no row is promoted without console evidence. M16 probes whether the filesystem folds trailing dots and spaces, which the `boot_config.txt` denial depends on. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-16 — the completed plans are archived (six in all) and the v1 completion audit is recorded: D95 sequences one console pass at code freeze, the matrix grows to M1-M23 with a row for every surface a test user can exercise, the plan points at the matrix as its one home, and the status blocks name R22/R23 as the remaining requirement | Plan and build R22/R23, remote recursive download and upload, the only unbuilt v1 capability | GPLv3. One UNSAFE eboot. b74 (265,736 bytes, SHA-256 `b25a5af7…`) is host-tested only; no row is promoted without console evidence. M16 probes whether the filesystem folds trailing dots and spaces, which the `boot_config.txt` denial depends on. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
