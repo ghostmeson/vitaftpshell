@@ -89,7 +89,8 @@ for test_src in "${tests[@]}"; do
 
   # The graphics test links the renderer against the software vita2d shim, not
   # the policy core. The render suites link the real ui and core as well.
-  if [[ "$name" == "test_integration" || "$name" == "test_app_thread" ]]; then
+  if [[ "$name" == "test_integration" || "$name" == "test_app_thread" ||
+        "$name" == "test_app_thread_xfer" ]]; then
     "$CC" -std=c99 -O1 -g -Wall -Wextra -pthread \
       -I"$ROOT/src" -I"$ROOT/tools/fake" -I"$ROOT/tools/preview" \
       "$test_src" "$ROOT"/tools/fake/*.c "$ROOT"/src/core/*.c \

@@ -17,6 +17,10 @@
  *
  * A test seeds the control peer and link state, then queues bytes on the socket
  * the core opened. Every call is non-blocking, exactly like the adapter.
+ *
+ * Every callback and accessor takes one host mutex around the socket and
+ * listener state, so the app's worker and a test's scripted peer can share the
+ * singleton. The fakes are host-only; pthreads stay out of the policy layer.
  */
 
 void fake_net_reset(void);
