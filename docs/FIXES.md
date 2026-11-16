@@ -50,6 +50,15 @@ matrix passes.
   FileZilla rename/delete and the full three-volume browse. M10 and M13 are
   partly observed; M1–M9, M11, and M12 await the b72 console run.
 
+## Network closure (b73, host)
+
+The per-session data ports, the SIZE preflight refresh, and the threaded
+transfer suite; the artifact is `vitaftpshell-v01.00-b73.vpk`.
+
+| Build | Symptom | Cause and fix | Evidence | Status |
+|---|---|---|---|---|
+| b73 | **The server could not tell two sessions on one host apart.** | One passive listener on `control+1` with an address-only peer check. Each session slot now owns `control+1+slot`, bound on its first PASV and held until stop, so the arrival port identifies the owner (D92); a data-port bind failure answers 425 and leaves the server ON. | `test_slot_ports_two_sessions`, `test_data_port_bind_failure`, `test_slot_listener_binds_once`, `test_rearm_drains_stale_peer`, `test_control_port_ceiling`, `test_wait_set_stays_within_cap`; host run | `HOST b73` |
+| b73 | **The SERVER port field cannot open text entry, so the control port cannot be changed from the screen.** | Pressing Cross on the port field emits the edit command with the current value and never opens the IME; only the worker's validation runs. This predates b73 and is recorded rather than fixed here, because it is a UI behavior change outside the documentation sweep. | Inspection of the server key handler and the IME result path; no test covers the screen path | `PENDING` |
 ## Residual open-issues sweep (b72)
 
 | Build | Symptom | Cause and fix | Evidence | Status |
@@ -69,7 +78,6 @@ matrix passes.
 | b72 | **TSan reported a race in the fake clock, not the app.** | The fake clock's shared time is atomic. `tools/test/tsan.sh` probes TSan, keeps the negative handoff ordering check, and runs the real app thread with the fakes included; a source failure now fails the gate. | `tools/test/tsan.sh`; host run | `HOST b72` |
 | b72 | **An upload to a server without MLST kept the stale-overwrite behavior.** | The preflight prefers MLST and falls back to SIZE (213 exists, 550 missing, 5xx unsupported). A destination the current remote listing shows as a folder is still refused; a stale probe answer is discarded when its item is gone. D91 supersedes D65 section 4. | `test_size_stat`, `test_upload_preflight_size_fallback`, `test_upload_preflight_size_folder`; host run | `HOST b72` |
 
-| — | **The server could not tell two sessions on one host apart.** | One passive listener on `control+1` with an address-only peer check. Each session slot now owns `control+1+slot`, bound on its first PASV and held until stop, so the arrival port identifies the owner (D92); a data-port bind failure answers 425 and leaves the server ON. | `test_slot_ports_two_sessions`, `test_data_port_bind_failure`, `test_slot_listener_binds_once`, `test_rearm_drains_stale_peer`, `test_control_port_ceiling`, `test_wait_set_stays_within_cap`; host run | `HOST PENDING b73` |
 
 **Accepted residuals.** `path_canonicalize` still does not fold trailing dots
 or spaces; the Vita filesystem's own folding remains `[C]` and needs the

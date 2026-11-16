@@ -460,11 +460,10 @@ static void server_disarm(FtpServer *server)
         return;
     /* close_transfer clears data_session, and the drain below needs the owner
      * slot to find its listener. Capture it before the teardown. */
-    int slot = server->data_session;
+    NetSocket *listener = server_armed_listener(server);
     server_close_data(server);
     server_close_transfer(server);
-    if (slot >= 0 && slot < SERVER_MAX_CLIENTS)
-        server_drain_listener(server, server->data_listeners[slot]);
+    server_drain_listener(server, listener);
 }
 
 /* The one data slot belongs to a session in any non-idle state. Releasing it

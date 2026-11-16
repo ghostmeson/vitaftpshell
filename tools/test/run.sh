@@ -77,6 +77,9 @@ python3 "$ROOT/tools/check_worker_stack.py" --self-test
 # summaries, a divergent status block, and a retired phrase returning to a live
 # document. Its baseline may only shrink, so today's drift is measured while
 # new drift fails here (DR13).
+# The gate ships its own fixtures; run them before the real tree so a broken
+# check fails here instead of passing silently.
+python3 "$ROOT/tools/check_docs.py" --self-test
 python3 "$ROOT/tools/check_docs.py" --root "$ROOT"
 
 # --- Host tests -------------------------------------------------------------

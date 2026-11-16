@@ -64,7 +64,7 @@ rows that prove them on hardware.
 
 | Feature | Requirements | Matrix |
 |---|---|---|
-| FTP client — saved sites, browse, download, upload, mutations | R5, R6, R41 | M1, M2, M3, M14 |
+| FTP client — saved sites, browse, download, upload, mutations | R11, R13, R41 | M1, M2, M3, M14 |
 | Local file manager — browse, marks, copy/move, rename, delete, new folder | R30, R31, R39 | M11, M12, M13 |
 | Anonymous FTP server — four sessions, per-session data ports, path guard | R50, R51 | M5, M6, M7 |
 
@@ -81,7 +81,7 @@ rows that prove them on hardware.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | Console runs reported for the transfer and file-manager paths; the row-level M1–M13 transcription is the open work |
+| Phase 6: Hardware verification | Console runs reported for the transfer and file-manager paths; the row-level the full matrix transcription is the open work |
 
 ## Failure policy
 

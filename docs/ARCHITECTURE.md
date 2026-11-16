@@ -129,7 +129,7 @@ arena.
   leaves it `ON`. A transfer holds the one slot; a data or mutating command
   during it answers 450. `STOR` writes a temp and renames on close; a reset or
   timeout aborts the temp and leaves the previous destination byte-identical.
-  Network loss closes both listeners and returns `OFF`.
+  Network loss closes the control listener and every slot listener it has bound, and returns `OFF`.
 
 **Operations and state (U8/U16/U17/U9/U15).**
 

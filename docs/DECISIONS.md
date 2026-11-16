@@ -2073,7 +2073,11 @@ slot's port cannot exceed 65535.
 
 **Consequences:** A router forward for the server becomes four ports, one per
 slot; session slot 0 keeps the old port, one above the control port, so a
-single-client setup is unchanged. A data-port conflict costs that one PASV
+single-client setup is unchanged. The port identifies the owner while a session
+holds its slot: a slot's listener outlives its session, so a stale data
+connection from the previous session's PASV that arrives after the slot is
+reused can still match the new owner's control peer by address. Closing that
+window needs the deferred ephemeral-per-PASV listener. A data-port conflict costs that one PASV
 instead of stopping the server. D39 is superseded, and D59's and D63's port
 clauses and D86's single-PASV-port sentence are amended; the address,
 client-PASV, four-session, and ownership rules in those entries stand.
