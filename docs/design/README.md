@@ -109,7 +109,8 @@ The HTML sheets draw at 1:1 with the real 5×7 face; open them in a browser. The
 PNGs are the same canvases at 2× for records.
 
 **2026-11-15 amendments:** the SERVER client panel reads `UP TO 4 CLIENTS` and
-the server accepts four sessions with one data transfer at a time (D86). b63
+the server accepts four sessions with one data transfer at a time (D86). The
+2026-11-15 amendment
 removes the SERVER warning panel and gives the client panel the full right
 column (D88). The 2026-11-08 SERVER sheets remain the historical one-client and
 warning record.

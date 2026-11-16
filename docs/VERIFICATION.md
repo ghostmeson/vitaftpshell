@@ -247,7 +247,7 @@ integration suite and the threaded test is clean. A TSan run of the threaded
 test reports a data race in the singleton fake clock, not in the app; the fakes
 are not thread-safe, so TSan is not a gate until they are.
 The stack gate reports `handle_action` 6,656 B, the fixed chain 21,628 B, the
-folder-scan product 1,188 B, and the UI dispatch frame 80 B. The U1-U10 work
+folder-scan product 1,188 B, and the UI dispatch frame 80 B. The remediation plan's U1 through U10 work
 adds the local-open failure and retry, two lanes with a held download, the
 WAIT resume re-check, prompt identity, a 6 KiB tick, the foreign data peer and
 its deadline, the 30 s idle close, the sidecar predicates and refusal, and the
@@ -381,14 +381,16 @@ evidence are recorded here. The project therefore stays `building`.
 | M2 | LAN server with MLSD | MLSD is used, browse and download complete | pending | pending | PENDING |
 | M3 | LAN server with MLSD disabled | LIST fallback parses, browse and download complete | pending | pending | PENDING |
 | M4 | DOS-listing server | Names, sizes, and folders parse; a download completes | pending | pending | PENDING |
-| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete | FileZilla held two sessions at once on b60; upload of the 265,539-byte VPK and 786-byte `iconlayout.ini`, and download of `iconlayout.ini`, all 226; app-local transfers pass on all three volumes. FileZilla rename/delete and the full three-volume browse are not in the log | Complete the three-volume browse and a FileZilla rename/delete, then mark PASS | PART |
+| M5 | FileZilla against the Vita server | Browse all three volumes, upload, rename, delete; two sessions from one PC transfer on their own slot ports (D92) | FileZilla held two sessions at once on b60; upload of the 265,539-byte VPK and 786-byte `iconlayout.ini`, and download of `iconlayout.ini`, all 226; app-local transfers pass on all three volumes. FileZilla rename/delete and the full three-volume browse are not in the log | Complete the three-volume browse and a FileZilla rename/delete, then mark PASS | PART |
 | M6 | Denials through the server | `boot_config.txt`, `ux0:tai` upload, volume-root delete all refuse, and nothing is created | pending | pending | PENDING |
-| M7 | Second client and stop-during-write | 450 to the second client; stop during a write confirms and leaves no partial | pending | pending | PENDING |
+| M7 | Second client and stop-during-write | A second client is accepted; a fifth is refused; a data command during the owner's transfer answers 450; stop during a write confirms and leaves no partial | pending | pending | PENDING |
 | M8 | Network loss and cancel | Server stops and reports; cancel takes effect within 5 s; no crash dump | pending | pending | PENDING |
 | M9 | b40 selection and palette | Cursor slab legible in both panes, ACTIONS, and SITES; marks and risk stay visible; active pane outline and bloom; confirm list unchanged; failures red, neutral notices not | pending | pending | PENDING |
 | M10 | b40 cursor copy and dock words | COPY/PASTE without a mark; three-item batch ends `COPIED 3 ITEMS`; all-skipped `SKIPPED`; partial yellow; rename and new folder name themselves; no `2 OF 1` | COPY/PASTE and RENAME/NEW FOLDER work without marks; dock words read correctly in green (`COPIED`, `MOVED`, `DELETED`, `RENAMED`, `FOLDER CREATED`, `DOWNLOADED`) | b43 operator report 2026-11-14 | PART |
 | M11 | b40 local cancel and conflict prompt | Large local copy stops within 5 s with no partial; one conflict prompt names every existing destination; CANCEL ends the batch; cancelled delete reports `DELETED n OF m` | pending | pending | PENDING |
 | M12 | b41 parallel lanes and collision | Local copy and unrelated download progress; colliding paste asks WAIT/SKIP/CANCEL; WAIT resumes; server `STOR` on a held path gets 450; unrelated `PASV`/`LIST` work | pending | pending | PENDING |
+| M14 | Upload to an external login site | The app's client uploads a file to a login-protected remote site over plain FTP, and the dock reports the completed transfer | pending | pending | PENDING |
+| M15 | Remote mutation on an external server | Rename, delete, and new folder on an external server each report their reply, and the remote pane reflects the result | pending | pending | PENDING |
 | M13 | b43 crash pass | Copy a file across every volume pair, copy a folder, rename across the extension, and create a folder while the clipboard is armed; all complete, the dock names the operation, no `.psp2dmp` appears, and a refused sync logs `sync skipped` instead of failing | Copy, paste, folder copy, rename, new folder with the clipboard armed, and download all complete; no crash observed | b43 operator report 2026-11-14; session log not pulled | PART |
 
 ## Install and launch

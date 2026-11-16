@@ -69,11 +69,13 @@ matrix passes.
 | b72 | **TSan reported a race in the fake clock, not the app.** | The fake clock's shared time is atomic. `tools/test/tsan.sh` probes TSan, keeps the negative handoff ordering check, and runs the real app thread with the fakes included; a source failure now fails the gate. | `tools/test/tsan.sh`; host run | `HOST b72` |
 | b72 | **An upload to a server without MLST kept the stale-overwrite behavior.** | The preflight prefers MLST and falls back to SIZE (213 exists, 550 missing, 5xx unsupported). A destination the current remote listing shows as a folder is still refused; a stale probe answer is discarded when its item is gone. D91 supersedes D65 section 4. | `test_size_stat`, `test_upload_preflight_size_fallback`, `test_upload_preflight_size_folder`; host run | `HOST b72` |
 
-**Accepted residuals.** The fixed data port still cannot distinguish two
-sessions on one host (U4). `path_canonicalize` still does not fold trailing dots
+| — | **The server could not tell two sessions on one host apart.** | One passive listener on `control+1` with an address-only peer check. Each session slot now owns `control+1+slot`, bound on its first PASV and held until stop, so the arrival port identifies the owner (D92); a data-port bind failure answers 425 and leaves the server ON. | `test_slot_ports_two_sessions`, `test_data_port_bind_failure`, `test_slot_listener_binds_once`, `test_rearm_drains_stale_peer`, `test_control_port_ceiling`, `test_wait_set_stays_within_cap`; host run | `HOST PENDING b73` |
+
+**Accepted residuals.** `path_canonicalize` still does not fold trailing dots
 or spaces; the Vita filesystem's own folding remains `[C]` and needs the
 console. A SIZE-only probe cannot report a type for a destination outside the
-current remote listing; the server's STOR refusal is the remaining signal.
+current remote listing; the server's STOR refusal is the remaining signal, and
+the parent refresh closes the stale-listing half.
 
 ## Review remediation (b72)
 
@@ -109,7 +111,7 @@ change), so only the advertised `227` address needed the refresh.
 | b67 | **The UI released its listing slot after every frame while it kept rendering the rows.** | The handoff held the slot only for the frame. `handoff_listing_adopt` keeps the held generation or releases it and acquires the newest; the app holds each pane until shutdown (U3, R3). | `test_listing_adopt`; host run | `HOST b68` |
 | b67 | **The owner's own RETR metadata read and the two-item queue terminal had no tests.** | Add a pending-RETR owner test with a guard that refuses the foreign session, and mark both queue items so the terminal names the cancelled remainder (U5, R5). | `test_owner_size_while_download`, `test_download_final_reply_loses_queue`; host run | `HOST b68` |
 
-**Data-connection identity (U4).** The data accept cannot distinguish two sessions from one host: the listener is the fixed control+1 port (D59) and an FTP data connection's source port is ephemeral, so comparing ports would reject real clients. A per-PASV listener would need a `NetPort` bound-port output and a new platform claim. The fixed port stays; the same-host race is recorded here as accepted for v1.
+**Data-connection identity (U4).** Resolved by one data port per session slot (D92): slot *n* owns the port one above the control port for its slot, bound on its first PASV, so a data connection is attributed by the port it arrives on. Two sessions from one host can no longer be confused. The earlier decision to keep one fixed port is history in D39 and D59.
 
 ## Review remediation (b66)
 
@@ -415,7 +417,7 @@ here so they do not live only in a review report.
   rest await the b72 console run.
 - **Remaining `[C]` claims:** `select` over SceNet, IME masked text, the
   128 KiB pthread stack acceptance, `ur0:`/`uma0:` free space (now reported
-  unknown), the fixed `control+1` PASV data port, and the reply-line cap.
+  unknown), the per-session data ports (D92), and the reply-line cap.
 
 ## Method for the next session
 
