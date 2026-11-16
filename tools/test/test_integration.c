@@ -1953,7 +1953,9 @@ static void test_quit_with_server(void)
     CHECK(app_state(app)->server.run != UI_SERVER_OFF);
     CHECK(app_state(app)->server.address_known == 1);
     CHECK(strcmp(app_state(app)->server.address, "192.168.29.192") == 0);
-    CHECK(fake_net_listener_count() >= 2);
+    /* Start binds the control listener only; a slot's data listener binds on
+     * its first PASV, so a fresh server owns exactly one. */
+    CHECK(fake_net_listener_count() == 1);
     NetSocket *listener = fake_net_listener_at(0);
     CHECK(fake_net_is_open(listener) == 1);
 

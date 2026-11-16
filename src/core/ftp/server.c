@@ -69,11 +69,15 @@ struct FtpServer {
 
     FtpServerState state;
     uint16_t control_port;
-    uint16_t data_port;
+    /* One data port per session slot: control+1+slot. A slot binds its port on
+     * the first PASV and holds it until the server stops, so the port a data
+     * connection arrives on names its owner even when two sessions share an
+     * address (D86's one-armed-transfer rule stays global). */
+    uint16_t data_ports[SERVER_MAX_CLIENTS];
     NetAddress lan_address;
 
     NetSocket *control_listener;
-    NetSocket *data_listener;
+    NetSocket *data_listeners[SERVER_MAX_CLIENTS];
 
     ServerSession sessions[SERVER_MAX_CLIENTS];
     int active_session;
@@ -359,17 +363,49 @@ static void server_flush(ServerSession *session)
     session->tx_backlog = 0;
 }
 
-static void server_drain_listener(FtpServer *server)
+/* The armed transfer names its listener through data_session; a disarm clears
+ * that field, so callers that still need the listener capture it first. This
+ * is a lookup only: it never binds. */
+static NetSocket *server_armed_listener(const FtpServer *server)
 {
-    if (server->data_listener == NULL)
+    if (server->data_session < 0 || server->data_session >= SERVER_MAX_CLIENTS)
+        return NULL;
+    return server->data_listeners[server->data_session];
+}
+
+/* A slot binds its data port on first use and keeps the listener for the
+ * server's lifetime. Binding lazily keeps one occupied data port from stopping
+ * the whole server; the failure costs that PASV, not the session. */
+static NetSocket *server_slot_listener(FtpServer *server, int slot)
+{
+    if (server == NULL || slot < 0 || slot >= SERVER_MAX_CLIENTS)
+        return NULL;
+    if (server->data_listeners[slot] != NULL)
+        return server->data_listeners[slot];
+
+    /* Wildcard address: the 227 reply carries the current LAN address, so a
+     * DHCP change must not strand a bound listener. */
+    NetAddress bind;
+    bind.addr = 0;
+    bind.port = server->data_ports[slot];
+    NetSocket *listener = NULL;
+    if (server->net->listen(server->net->ctx, &bind, &listener) != NET_OK ||
+        listener == NULL)
+        return NULL;
+    server->data_listeners[slot] = listener;
+    return listener;
+}
+
+static void server_drain_listener(FtpServer *server, NetSocket *listener)
+{
+    if (listener == NULL)
         return;
 
     for (;;) {
         NetSocket *stale = NULL;
         NetAddress peer;
         NetResult r =
-            server->net->accept(server->net->ctx, server->data_listener, &stale,
-                                &peer);
+            server->net->accept(server->net->ctx, listener, &stale, &peer);
         if (r == NET_WOULD_BLOCK)
             return;
         if (r != NET_OK)
@@ -418,9 +454,13 @@ static void server_disarm(FtpServer *server)
 {
     if (server->data_state == FTP_DATA_ACTIVE)
         return;
+    /* close_transfer clears data_session, and the drain below needs the owner
+     * slot to find its listener. Capture it before the teardown. */
+    int slot = server->data_session;
     server_close_data(server);
     server_close_transfer(server);
-    server_drain_listener(server);
+    if (slot >= 0 && slot < SERVER_MAX_CLIENTS)
+        server_drain_listener(server, server->data_listeners[slot]);
 }
 
 /* The one data slot belongs to a session in any non-idle state. Releasing it
@@ -555,9 +595,11 @@ static void server_stop_internal(FtpServer *server, const char *detail)
         server->net->close(server->net->ctx, server->control_listener);
         server->control_listener = NULL;
     }
-    if (server->data_listener != NULL) {
-        server->net->close(server->net->ctx, server->data_listener);
-        server->data_listener = NULL;
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i) {
+        if (server->data_listeners[i] != NULL) {
+            server->net->close(server->net->ctx, server->data_listeners[i]);
+            server->data_listeners[i] = NULL;
+        }
     }
 
     server->clients = 0;
@@ -1188,14 +1230,22 @@ static void server_try_accept(FtpServer *server)
     if (owner == NULL)
         return;
 
+    /* A data command without a PASV has no listener to accept on. */
+    NetSocket *listener = server_armed_listener(server);
+    if (listener == NULL) {
+        server_reply(owner, 425, "Cannot open data connection.");
+        server_disarm(server);
+        return;
+    }
+
     /* Drain a bounded number of queued connections per tick. A foreign peer
      * is closed and the loop continues; the command only fails when the
      * pending deadline passes with no matching peer. */
     for (int i = 0; i < SERVER_ACCEPT_BATCH; ++i) {
         NetSocket *data = NULL;
         NetAddress peer;
-        NetResult r = server->net->accept(server->net->ctx,
-                                          server->data_listener, &data, &peer);
+        NetResult r = server->net->accept(server->net->ctx, listener, &data,
+                                          &peer);
         if (r == NET_WOULD_BLOCK)
             return;
         if (r != NET_OK) {
@@ -1351,26 +1401,32 @@ static void server_abort_command(ServerSession *session)
 static void server_pasv(ServerSession *session)
 {
     FtpServer *server = session->server;
-    if (server->data_listener == NULL) {
-        server_reply(session, 425, "Cannot open data connection.");
-        return;
-    }
+    int slot = server_session_index(server, session);
 
     if ((server->data_state == FTP_DATA_ACTIVE || server->pending_accept ||
          server->data_state == FTP_DATA_ARMED) &&
-        server->data_session != server_session_index(server, session)) {
+        server->data_session != slot) {
         server_reply(session, 450, "Another client is transferring.");
         return;
     }
 
     server_disarm(server);
-    server_drain_listener(server);
-    server->data_session = server_session_index(server, session);
+
+    /* A bind failure costs this PASV only: the server stays ON and no session
+     * is armed (R4). */
+    NetSocket *listener = server_slot_listener(server, slot);
+    if (listener == NULL) {
+        server_reply(session, 425, "Cannot open data connection.");
+        return;
+    }
+    server_drain_listener(server, listener);
+    server->data_session = slot;
     server->data_state = FTP_DATA_ARMED;
 
+    uint16_t port = ftp_server_data_port(server, slot);
     uint32_t a = server->lan_address.addr;
-    unsigned p1 = server->data_port / 256;
-    unsigned p2 = server->data_port % 256;
+    unsigned p1 = port / 256;
+    unsigned p2 = port % 256;
     server_reply(session, 227,
                  "Entering Passive Mode (%u,%u,%u,%u,%u,%u).", (a >> 24) & 0xFF,
                  (a >> 16) & 0xFF, (a >> 8) & 0xFF, a & 0xFF, p1, p2);
@@ -2161,7 +2217,8 @@ FtpServerResult ftp_server_start(FtpServer *server, uint16_t control_port)
 
     server->lan_address = link.address;
     server->control_port = control_port;
-    server->data_port = (uint16_t)(control_port + 1);
+    for (int i = 0; i < SERVER_MAX_CLIENTS; ++i)
+        server->data_ports[i] = (uint16_t)(control_port + 1 + i);
     server->state = FTP_SERVER_BINDING;
     server_state_event(server);
 
@@ -2170,18 +2227,8 @@ FtpServerResult ftp_server_start(FtpServer *server, uint16_t control_port)
     if (server->net->listen(server->net->ctx, &bind,
                             &server->control_listener) != NET_OK) {
         char detail[64];
-        snprintf(detail, sizeof(detail), "BIND FAILED ON %u/%u",
-                 (unsigned)control_port, (unsigned)server->data_port);
-        server_stop_internal(server, detail);
-        return FTP_SERVER_BIND_FAILED;
-    }
-
-    bind.port = server->data_port;
-    if (server->net->listen(server->net->ctx, &bind,
-                            &server->data_listener) != NET_OK) {
-        char detail[64];
-        snprintf(detail, sizeof(detail), "BIND FAILED ON %u/%u",
-                 (unsigned)control_port, (unsigned)server->data_port);
+        snprintf(detail, sizeof(detail), "BIND FAILED ON %u",
+                 (unsigned)control_port);
         server_stop_internal(server, detail);
         return FTP_SERVER_BIND_FAILED;
     }
@@ -2280,8 +2327,13 @@ void ftp_server_tick(FtpServer *server, unsigned wait_ms)
                                          : NET_WAIT_WRITE;
         set.count++;
     }
-    if (server->pending_accept && server->data_listener != NULL) {
-        set.items[set.count].socket = server->data_listener;
+    /* Only the armed slot's listener may enter the set: four sessions plus the
+     * data socket, that one listener, and the control listener stay under
+     * NET_WAIT_MAX. Registering all four slot listeners would stop the server
+     * on a wait failure. */
+    NetSocket *armed_listener = server_armed_listener(server);
+    if (server->pending_accept && armed_listener != NULL) {
+        set.items[set.count].socket = armed_listener;
         set.items[set.count].flags = NET_WAIT_READ;
         set.count++;
     }
@@ -2302,7 +2354,7 @@ void ftp_server_tick(FtpServer *server, unsigned wait_ms)
     for (unsigned i = 0; i < ready.count; ++i) {
         NetSocket *socket = ready.items[i].socket;
         if (socket == server->control_listener || socket == server->data ||
-            socket == server->data_listener)
+            socket == armed_listener)
             continue;
         for (int s = 0; s < SERVER_MAX_CLIENTS; ++s) {
             ServerSession *session = &server->sessions[s];
@@ -2376,6 +2428,13 @@ int ftp_server_busy(const FtpServer *server)
 uint16_t ftp_server_control_port(const FtpServer *server)
 {
     return server != NULL ? server->control_port : 0;
+}
+
+uint16_t ftp_server_data_port(const FtpServer *server, int slot)
+{
+    if (server == NULL || slot < 0 || slot >= SERVER_MAX_CLIENTS)
+        return 0;
+    return server->data_ports[slot];
 }
 
 const char *ftp_server_last_command(const FtpServer *server)

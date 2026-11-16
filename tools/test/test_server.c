@@ -24,6 +24,10 @@ static unsigned s_states_seen;
 #define PEER_ADDR 0xC0A8012Au
 #define PEER_PORT 40000
 
+/* The port the most recent 227 reply named; the data helpers queue a peer on
+ * that listener instead of relying on bind order. */
+static uint16_t s_data_port;
+
 typedef struct {
     FtpServerState state;
     int clients;
@@ -93,6 +97,7 @@ static void setup(void)
     fake_net_reset();
     fake_fs_reset();
     fake_clock_reset();
+    s_data_port = 0;
     fake_fs_add_dir("ux0:");
     fake_fs_add_dir("ux0:data");
     fake_fs_add_dir("ur0:");
@@ -109,15 +114,31 @@ static FtpServer *start_server(SCapture *cap)
     CHECK(server != NULL);
     CHECK(ftp_server_start(server, 1337) == FTP_SERVER_OK);
     CHECK(ftp_server_state(server) == FTP_SERVER_ON);
-    CHECK(fake_net_listener_count() == 2);
+    /* Start binds the control port only; a slot's data port is bound by that
+     * slot's first PASV and held until the server stops. */
+    CHECK(fake_net_listener_count() == 1);
     CHECK(fake_net_listener_addr(0).port == 1337);
-    CHECK(fake_net_listener_addr(1).port == 1338);
     return server;
 }
 
 static int read_reply(FakeFtpClient *client, int *code, char *text, size_t cap)
 {
-    return fake_ftp_client_read_reply(client, code, text, cap);
+    int got = fake_ftp_client_read_reply(client, code, text, cap);
+    if (got && *code == 227 && text != NULL) {
+        unsigned a = 0;
+        unsigned b = 0;
+        unsigned c = 0;
+        unsigned d = 0;
+        unsigned p1 = 0;
+        unsigned p2 = 0;
+        const char *open = strchr(text, '(');
+        if (open != NULL &&
+            sscanf(open, "(%u,%u,%u,%u,%u,%u)", &a, &b, &c, &d, &p1, &p2) ==
+                6 &&
+            p1 < 256 && p2 < 256)
+            s_data_port = (uint16_t)(p1 * 256 + p2);
+    }
+    return got;
 }
 
 static void command(FtpServer *server, FakeFtpClient *client, const char *cmd,
@@ -441,9 +462,23 @@ static void pasv(FtpServer *server, FakeFtpClient *client)
     command(server, client, "PASV", 227);
 }
 
+/* Listeners are looked up by their bound port, not by index: slots bind in
+ * first-arm order, so the control listener is the only fixed index. */
+static NetSocket *listener_for_port(uint16_t port)
+{
+    for (unsigned i = 0; i < fake_net_listener_count(); ++i) {
+        if (fake_net_listener_addr(i).port == port)
+            return fake_net_listener_at(i);
+    }
+    return NULL;
+}
+
 static void queue_data_peer_for(uint32_t peer, uint16_t port)
 {
-    fake_net_queue_accept(fake_net_listener_at(1), peer, port);
+    NetSocket *listener = listener_for_port(s_data_port);
+    CHECK(listener != NULL);
+    if (listener != NULL)
+        fake_net_queue_accept(listener, peer, port);
 }
 
 static void queue_data_peer(void)
@@ -1537,7 +1572,7 @@ static void test_peer_check(void)
      * reply until the accept deadline passes. */
     fake_ftp_client_send(&client, "RETR /UX0:/DATA/f.txt");
     ftp_server_tick(server, 0);
-    fake_net_queue_accept(fake_net_listener_at(1), 0x0A000009u, 40001);
+    fake_net_queue_accept(listener_for_port(s_data_port), 0x0A000009u, 40001);
     ftp_server_tick(server, 0);
     NetSocket *foreign = fake_net_accepted_at(1);
     CHECK(foreign != NULL);
@@ -1564,7 +1599,7 @@ static void test_peer_check_recovers(void)
     connect_session(server, &client);
 
     pasv(server, &client);
-    fake_net_queue_accept(fake_net_listener_at(1), 0x0A000009u, 40001);
+    fake_net_queue_accept(listener_for_port(s_data_port), 0x0A000009u, 40001);
     queue_data_peer();
     NetSocket *data =
         data_command(server, &client, "RETR /UX0:/DATA/f.txt", 150);
@@ -1675,14 +1710,220 @@ static void test_stop(void)
     SCapture cap;
     memset(&cap, 0, sizeof(cap));
     FtpServer *server = start_server(&cap);
-    FakeFtpClient client;
-    connect_session(server, &client);
+    FakeFtpClient a;
+    FakeFtpClient b;
+    connect_session(server, &a);
+    connect_second_session(server, &b, PEER_ADDR + 1, PEER_PORT + 20);
+
+    /* Bind both slot listeners through real transfers, then stop. */
+    pasv(server, &a);
+    queue_data_peer();
+    CHECK(data_command(server, &a, "MLSD /UX0:", 150) != NULL);
+    finish_data(server, &a, 226);
+    pasv(server, &b);
+    queue_data_peer_for(PEER_ADDR + 1, PEER_PORT + 21);
+    CHECK(data_command(server, &b, "MLSD /UX0:", 150) != NULL);
+    finish_data(server, &b, 226);
+
+    NetSocket *control_listener = listener_for_port(1337);
+    NetSocket *slot0_listener = listener_for_port(1338);
+    NetSocket *slot1_listener = listener_for_port(1339);
+    CHECK(control_listener != NULL);
+    CHECK(slot0_listener != NULL);
+    CHECK(slot1_listener != NULL);
+    CHECK(fake_net_listener_count() == 3);
 
     ftp_server_stop(server);
     CHECK(ftp_server_state(server) == FTP_SERVER_OFF);
     CHECK(ftp_server_clients(server) == 0);
-    CHECK(!fake_net_is_open(fake_net_listener_at(0)));
-    CHECK(!fake_net_is_open(fake_net_listener_at(1)));
+    CHECK(!fake_net_is_open(control_listener));
+    CHECK(!fake_net_is_open(slot0_listener));
+    CHECK(!fake_net_is_open(slot1_listener));
+
+    ftp_server_destroy(server);
+}
+
+/* AE1: two sessions from one address. The 227 names the slot's own port, and a
+ * data peer queued on the other slot's port is never accepted for this one. */
+static void test_slot_ports_two_sessions(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient a;
+    FakeFtpClient b;
+    connect_session(server, &a);
+    connect_second_session(server, &b, PEER_ADDR, PEER_PORT + 20);
+    CHECK(ftp_server_clients(server) == 2);
+
+    /* The slot table is the one place the ports live; slot 0 keeps control+1
+     * so the single-client case is unchanged. */
+    CHECK(ftp_server_data_port(server, 0) == 1338);
+    CHECK(ftp_server_data_port(server, 1) == 1339);
+    CHECK(ftp_server_data_port(server, 2) == 1340);
+    CHECK(ftp_server_data_port(server, 3) == 1341);
+    CHECK(ftp_server_data_port(server, 4) == 0);
+    CHECK(ftp_server_data_port(server, -1) == 0);
+
+    /* Slot 0 arms and receives on control+1. */
+    pasv(server, &a);
+    CHECK(s_data_port == 1338);
+    CHECK(s_data_port == ftp_server_data_port(server, 0));
+    CHECK(fake_net_listener_count() == 2);
+    CHECK(fake_net_listener_addr(1).port == 1338);
+    queue_data_peer();
+    NetSocket *data = data_command(server, &a, "MLSD /UX0:", 150);
+    CHECK(data != NULL);
+    finish_data(server, &a, 226);
+
+    /* Slot 1 advertises control+2. A peer that arrives on control+1 stays
+     * queued there; only the peer on control+2 is accepted. */
+    pasv(server, &b);
+    CHECK(s_data_port == 1339);
+    CHECK(s_data_port == ftp_server_data_port(server, 1));
+    CHECK(fake_net_listener_count() == 3);
+    CHECK(fake_net_listener_addr(2).port == 1339);
+    NetSocket *slot0_listener = listener_for_port(1338);
+    CHECK(slot0_listener != NULL);
+    unsigned before = fake_net_accept_count();
+    fake_net_queue_accept(slot0_listener, PEER_ADDR, PEER_PORT + 40);
+    queue_data_peer_for(PEER_ADDR, PEER_PORT + 30);
+
+    data = data_command(server, &b, "MLSD /UX0:", 150);
+    CHECK(data != NULL);
+    CHECK(fake_net_accept_count() == before + 1);
+    uint32_t peer_addr = 0;
+    uint16_t peer_port = 0;
+    fake_net_socket_peer(data, &peer_addr, &peer_port);
+    CHECK(peer_addr == PEER_ADDR);
+    CHECK(peer_port == PEER_PORT + 30);
+    finish_data(server, &b, 226);
+
+    /* A's next PASV drains the peer that was left queued on control+1. */
+    before = fake_net_accept_count();
+    pasv(server, &a);
+    CHECK(fake_net_accept_count() == before + 1);
+    NetSocket *stale = fake_net_accepted_at(before);
+    CHECK(stale != NULL);
+    CHECK(!fake_net_is_open(stale));
+    fake_net_socket_peer(stale, &peer_addr, &peer_port);
+    CHECK(peer_port == PEER_PORT + 40);
+
+    ftp_server_destroy(server);
+}
+
+/* A slot binds its port on the first PASV and reuses it; a second PASV adds no
+ * second listener. */
+static void test_slot_listener_binds_once(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    CHECK(fake_net_listener_count() == 1);
+    pasv(server, &client);
+    CHECK(fake_net_listener_count() == 2);
+    CHECK(s_data_port == 1338);
+    uint16_t first_port = s_data_port;
+
+    pasv(server, &client);
+    CHECK(fake_net_listener_count() == 2);
+    CHECK(s_data_port == first_port);
+
+    ftp_server_destroy(server);
+}
+
+/* One armed transfer stays server-wide: a second session's PASV is refused
+ * even though its own data port would be free. */
+static void test_second_pasv_450_while_armed(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient a;
+    FakeFtpClient b;
+    connect_session(server, &a);
+    connect_second_session(server, &b, PEER_ADDR + 1, PEER_PORT + 20);
+
+    pasv(server, &a);
+    command(server, &b, "PASV", 450);
+
+    ftp_server_destroy(server);
+}
+
+/* The wait set holds four control sockets, the armed slot's listener, and the
+ * control listener. The fake rejects an over-cap set exactly like the adapter. */
+static void test_wait_set_stays_within_cap(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+
+    FakeFtpClient clients[4];
+    connect_session(server, &clients[0]);
+    for (int i = 1; i < 4; ++i)
+        connect_second_session(server, &clients[i], PEER_ADDR + (uint32_t)i,
+                               (uint16_t)(PEER_PORT + 20 + i));
+
+    pasv(server, &clients[0]);
+    /* No peer queued: the accept stays pending, which is the state that adds
+     * the armed slot's listener to the set. */
+    fake_ftp_client_send(&clients[0], "MLSD /UX0:");
+    ftp_server_tick(server, 0);
+    ftp_server_tick(server, 0);
+
+    unsigned waits = fake_net_last_wait_count();
+    CHECK(waits <= 7);
+    CHECK(waits == 6);
+
+    NetWaitSet over;
+    NetReadySet ready;
+    memset(&over, 0, sizeof(over));
+    over.count = NET_WAIT_MAX + 1;
+    CHECK(fake_net_port()->wait(NULL, &over, 0, &ready) == NET_INVALID);
+
+    ftp_server_destroy(server);
+}
+
+/* A peer queued on a slot's listener before a disarm is closed by the next
+ * PASV instead of being accepted as that transfer's data connection. */
+static void test_rearm_drains_stale_peer(void)
+{
+    setup();
+    fake_fs_add_dir("ux0:data/FOLDER");
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient client;
+    connect_session(server, &client);
+
+    pasv(server, &client);
+    NetSocket *listener = listener_for_port(s_data_port);
+    CHECK(listener != NULL);
+    unsigned before = fake_net_accept_count();
+    fake_net_queue_accept(listener, PEER_ADDR, PEER_PORT + 50);
+
+    pasv(server, &client);
+    CHECK(fake_net_accept_count() == before + 1);
+    NetSocket *stale = fake_net_accepted_at(before);
+    CHECK(stale != NULL);
+    CHECK(!fake_net_is_open(stale));
+    uint32_t stale_addr = 0;
+    uint16_t stale_port = 0;
+    fake_net_socket_peer(stale, &stale_addr, &stale_port);
+    CHECK(stale_addr == PEER_ADDR);
+    CHECK(stale_port == PEER_PORT + 50);
+
+    queue_data_peer();
+    NetSocket *data = data_command(server, &client, "MLSD /UX0:/DATA", 150);
+    CHECK(data != NULL);
+    finish_data(server, &client, 226);
 
     ftp_server_destroy(server);
 }
@@ -1729,6 +1970,11 @@ int main(void)
     test_quit();
     test_network_loss();
     test_stop();
+    test_slot_ports_two_sessions();
+    test_slot_listener_binds_once();
+    test_second_pasv_450_while_armed();
+    test_wait_set_stays_within_cap();
+    test_rearm_drains_stale_peer();
 
     for (int st = FTP_SERVER_OFF; st <= FTP_SERVER_STOPPING; ++st)
         CHECK((s_states_seen & (1u << st)) != 0);

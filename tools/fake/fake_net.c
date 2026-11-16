@@ -34,6 +34,7 @@ static NetResult s_fail_next;
 static NetResult s_connect_result;
 static NetResult s_send_result;
 static unsigned s_overflow;
+static unsigned s_last_wait_count;
 static NetSocket *s_last_connected;
 static NetSocket *s_last_listener;
 static NetSocket *s_listeners[FAKE_NET_LISTENERS];
@@ -216,8 +217,17 @@ static NetResult fake_wait(void *ctx, const NetWaitSet *set, unsigned timeout_ms
     (void)ctx;
     (void)timeout_ms; /* a timeout is an empty set, not an error */
 
+    if (set == NULL || ready == NULL)
+        return NET_INVALID;
+
     ready->count = 0;
-    for (unsigned i = 0; i < set->count && i < NET_WAIT_MAX; ++i) {
+    s_last_wait_count = set->count;
+    /* The adapter refuses an over-cap set; truncating here would let a server
+     * bug pass on the host and stop the server on hardware. */
+    if (set->count > NET_WAIT_MAX)
+        return NET_INVALID;
+
+    for (unsigned i = 0; i < set->count; ++i) {
         NetSocket *socket = set->items[i].socket;
         if (socket == NULL || !socket->open)
             continue;
@@ -252,6 +262,7 @@ void fake_net_reset(void)
     s_connect_result = NET_OK;
     s_send_result = NET_OK;
     s_overflow = 0;
+    s_last_wait_count = 0;
     s_last_connected = NULL;
     s_last_listener = NULL;
     s_listener_count = 0;
@@ -306,6 +317,11 @@ void fake_net_fail_send_next(NetResult result)
 unsigned fake_net_overflow_count(void)
 {
     return s_overflow;
+}
+
+unsigned fake_net_last_wait_count(void)
+{
+    return s_last_wait_count;
 }
 
 void fake_net_set_link(int up, int known, uint32_t addr, uint16_t port)

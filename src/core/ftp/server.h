@@ -13,10 +13,12 @@
 
 /*
  * Anonymous passive FTP server. OFF is the resting state. The machine binds
- * the control port and control+1 on the LAN address, accepts up to four
- * clients, and runs one data command at a time (D86). Every path resolves
- * through the shared path
- * table; a denial answers exactly as a missing path and creates nothing.
+ * the control port at start and gives each of the four session slots its own
+ * data port (control+1+slot), bound on that slot's first PASV and held until
+ * the server stops; a data connection is attributed by the port it arrives on.
+ * It accepts up to four clients and runs one data command at a time (D86).
+ * Every path resolves through the shared path table; a denial answers exactly
+ * as a missing path and creates nothing.
  */
 
 typedef enum {
@@ -102,6 +104,9 @@ FtpServerState ftp_server_state(const FtpServer *server);
 int ftp_server_clients(const FtpServer *server);
 int ftp_server_busy(const FtpServer *server);
 uint16_t ftp_server_control_port(const FtpServer *server);
+/* Slot `slot`'s passive data port (control+1+slot), or 0 for an invalid slot.
+ * The 227 reply and the tests read this one value. */
+uint16_t ftp_server_data_port(const FtpServer *server, int slot);
 /* The active session's last command, for the transfer direction. The CLIENT
  * panel reads the event's own session record instead. */
 const char *ftp_server_last_command(const FtpServer *server);
