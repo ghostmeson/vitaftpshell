@@ -1425,7 +1425,7 @@ The units above landed with these recorded additions and shapes:
 | Preview | `./tools/preview/run.sh` | Every settled state renders on the host, including the new b40 and b41 states |
 | Build | `./build.sh` | One `vitaftpshell-v<version>-b<build>.vpk`, unstripped ELF kept |
 | Docs | the documentation link and code-fence check in `AGENTS.md` | No broken link, no odd fence |
-| Hardware | M1-M13 in `docs/VERIFICATION.md` | The product works on the console |
+| Hardware | the full matrix in `docs/VERIFICATION.md` | The product works on the console |
 
 b40 adds the cursor, palette, dock, batch, and cancel suites; b41 adds the reservation and interleaving suites; b55 adds the remediation suites and the threaded app test. `tools/test/run.sh` discovers them, so no CMake change is needed. The preview must render the new states before each build is flashed. Each hardware row records the build it passed on, and the final build re-runs M1-M13 because b41, b43, and b55 change the client, server, executor, worker, and dock paths.
 
@@ -1444,7 +1444,7 @@ A unit is not done because its tests pass; it is done when its scenarios pass, t
 - The session log never contains a password, proven across every event type.
 - `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `docs/THIRD_PARTY.md`, and `docs/DESIGN.md` match the code; `PROJECTS.md` carries the phase and the next action.
 - Every `[C]` claim lives in an adapter and names the claim and the reason.
-- M1-M13 have run on the console with their evidence in `docs/VERIFICATION.md` before the project moves to `verified`.
+- Every row of the matrix in `docs/VERIFICATION.md` has run on the console with its evidence before the project moves to `verified`.
 - Every local and network batch ends once, with done, skipped, failed, and cancelled counts; no batch ends green after a failed item.
 - Every hardware row records the build it passed on, and the final build re-runs M1-M13 because b41 changes the client, server, executor, and dock paths.
 - A local cancel stops within 5 s, removes the partial, and leaves the destination byte-identical.

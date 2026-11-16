@@ -577,6 +577,7 @@ static void test_cancel_stalled_transfer(void)
 
 typedef struct {
     int done;
+    int stop;
     int ok;
     int data_port_ok;
     int stage;
@@ -635,7 +636,8 @@ static void *server_probe_main(void *arg)
     ServerProbe *probe = arg;
     NetSocket *listener = NULL;
     probe->stage = 1;
-    for (unsigned i = 0; i < PEER_SPIN_LIMIT && listener == NULL; ++i) {
+    for (unsigned i = 0; i < PEER_SPIN_LIMIT && listener == NULL &&
+                    !__atomic_load_n(&probe->stop, __ATOMIC_ACQUIRE); ++i) {
         if (fake_net_listener_count() > 0)
             listener = probe_listener_for(SERVER_CONTROL_PORT);
         sched_yield();
@@ -646,7 +648,8 @@ static void *server_probe_main(void *arg)
     probe->stage = 2;
     fake_net_queue_accept(listener, PEER_ADDR, PEER_PORT);
     NetSocket *control = NULL;
-    for (unsigned i = 0; i < PEER_SPIN_LIMIT && control == NULL; ++i) {
+    for (unsigned i = 0; i < PEER_SPIN_LIMIT && control == NULL &&
+                    !__atomic_load_n(&probe->stop, __ATOMIC_ACQUIRE); ++i) {
         if (fake_net_accept_count() > 0)
             control = fake_net_accepted_at(0);
         sched_yield();
@@ -689,7 +692,8 @@ static void *server_probe_main(void *arg)
 
     probe->stage = 9;
     NetSocket *data = NULL;
-    for (unsigned i = 0; i < PEER_SPIN_LIMIT && data == NULL; ++i) {
+    for (unsigned i = 0; i < PEER_SPIN_LIMIT && data == NULL &&
+                    !__atomic_load_n(&probe->stop, __ATOMIC_ACQUIRE); ++i) {
         if (fake_net_accept_count() > before)
             data = fake_net_accepted_at(fake_net_accept_count() - 1);
         sched_yield();
@@ -744,6 +748,8 @@ static void test_server_session_retrieves(void)
             done = 1;
     }
     CHECK(done);
+    if (!done)
+        __atomic_store_n(&probe.stop, 1, __ATOMIC_RELEASE);
     if (probe_started)
         CHECK(pthread_join(thread, NULL) == 0);
 
