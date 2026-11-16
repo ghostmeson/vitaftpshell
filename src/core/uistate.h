@@ -45,6 +45,7 @@ typedef struct {
     uint8_t risk;
     uint8_t unsafe; /* a remote name with a separator or dot segment */
     uint8_t debris; /* a kept .vftp.old copy, not the user's file (D81) */
+    uint8_t readonly; /* a read-only mount row (R2) */
     uint64_t size;
     int size_known;
 } UiRow;

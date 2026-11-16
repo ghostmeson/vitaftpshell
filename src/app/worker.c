@@ -993,17 +993,18 @@ static void worker_list_root(Worker *worker)
 
     UiRow *rows = rows_for(worker, UI_PANE_LOCAL, slot);
     int count = 0;
-    static const char *const volumes[] = {"ux0:", "ur0:", "uma0:"};
-    for (int i = 0; i < 3; ++i) {
+    for (int v = 0; v < VOLUME_COUNT; ++v) {
+        const char *name = path_volume_name((Volume)v);
         FsEntry entry;
-        if (worker->ports.fs->stat(worker->ports.fs->ctx, volumes[i],
-                                   &entry) != FS_OK ||
+        if (worker->ports.fs->stat(worker->ports.fs->ctx, name, &entry) !=
+                FS_OK ||
             entry.type != FS_ENTRY_DIR)
             continue;
         UiRow *row = &rows[count++];
         memset(row, 0, sizeof(*row));
-        fmt_copy(row->name, sizeof(row->name), volumes[i]);
+        fmt_copy(row->name, sizeof(row->name), name);
         row->type = UI_ROW_VOLUME;
+        row->readonly = (uint8_t)path_volume_is_read_only((Volume)v);
     }
 
     handoff_listing_publish(worker->handoff, UI_PANE_LOCAL, slot, rows, count);
@@ -2729,12 +2730,12 @@ static void default_local_dir(Worker *worker, char *out, size_t cap)
         fmt_copy(out, cap, "ux0:data");
         return;
     }
-    static const char *const volumes[] = {"ux0:", "ur0:", "uma0:"};
-    for (int i = 0; i < 3; ++i) {
-        if (worker->ports.fs->stat(worker->ports.fs->ctx, volumes[i],
-                                   &entry) == FS_OK &&
+    for (int v = 0; v < VOLUME_COUNT; ++v) {
+        const char *name = path_volume_name((Volume)v);
+        if (worker->ports.fs->stat(worker->ports.fs->ctx, name, &entry) ==
+                FS_OK &&
             entry.type == FS_ENTRY_DIR) {
-            fmt_copy(out, cap, volumes[i]);
+            fmt_copy(out, cap, name);
             return;
         }
     }
@@ -3707,12 +3708,12 @@ static void pick_local_path(Worker *worker)
         }
     }
 
-    const char *volumes[3] = {"ux0:", "ur0:", "uma0:"};
-    for (int i = 0; i < 3; ++i) {
-        if (worker->ports.fs->stat(worker->ports.fs->ctx, volumes[i],
-                                   &entry) == FS_OK &&
+    for (int v = 0; v < VOLUME_COUNT; ++v) {
+        const char *name = path_volume_name((Volume)v);
+        if (worker->ports.fs->stat(worker->ports.fs->ctx, name, &entry) ==
+                FS_OK &&
             entry.type == FS_ENTRY_DIR) {
-            fmt_copy(worker->local_path, sizeof(worker->local_path), volumes[i]);
+            fmt_copy(worker->local_path, sizeof(worker->local_path), name);
             return;
         }
     }

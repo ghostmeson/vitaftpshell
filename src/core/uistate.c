@@ -641,11 +641,14 @@ void ui_actions_prepare(UiState *state)
              ? (strcmp(source, "*") == 0 || path_is_volume_root(source))
              : strcmp(source, "/") == 0);
     int protected_source = 0;
+    int read_only_source = 0;
     PathRisk risk = PATH_RISK_NORMAL;
     if (has_selection && pane_index == UI_PANE_LOCAL && source[0] != '\0') {
         PathResult check = path_check_delete(source, 0, &risk);
         if (check == PATH_PROTECTED || check == PATH_DENIED)
             protected_source = 1;
+        if (check == PATH_READ_ONLY)
+            read_only_source = 1;
     }
     int unsafe_source = has_selection && row != NULL && row->unsafe != 0;
     int source_is_dir = 0;
@@ -678,6 +681,19 @@ void ui_actions_prepare(UiState *state)
         }
         if (has_selection && source_is_dir)
             disable(actions, UI_ACTION_UPLOAD, "FOLDER NOT SUPPORTED");
+        if (has_selection && read_only_source) {
+            disable(actions, UI_ACTION_MOVE, "READ-ONLY MOUNT");
+            disable(actions, UI_ACTION_RENAME, "READ-ONLY MOUNT");
+            disable(actions, UI_ACTION_DELETE, "READ-ONLY MOUNT");
+        }
+        Volume dest_volume;
+        int dest_read_only =
+            path_volume(pane->path, &dest_volume) &&
+            path_volume_is_read_only(dest_volume);
+        if (dest_read_only) {
+            disable(actions, UI_ACTION_PASTE, "READ-ONLY MOUNT");
+            disable(actions, UI_ACTION_NEW_FOLDER, "READ-ONLY MOUNT");
+        }
         if (virtual_root)
             disable(actions, UI_ACTION_NEW_FOLDER, "ROOT");
         if (pane->mark_count > 1)
@@ -724,6 +740,10 @@ void ui_actions_prepare(UiState *state)
         }
         if (pane->mark_count > 1)
             disable(actions, UI_ACTION_RENAME, "ONE ITEM ONLY");
+        Volume download_volume;
+        if (path_volume(actions->other, &download_volume) &&
+            path_volume_is_read_only(download_volume))
+            disable(actions, UI_ACTION_DOWNLOAD, "READ-ONLY MOUNT");
         if (state->dock.active &&
             (state->dock.direction == XFER_DIR_DOWNLOAD ||
              state->dock.direction == XFER_DIR_UPLOAD))
@@ -1284,6 +1304,8 @@ static const char *protection_reason(PathResult result, const char *path)
         return path_is_volume_root(path) ? "VOLUME ROOT" : "PROTECTED PATH";
     if (result == PATH_DENIED)
         return "BOOT CONFIG DENIED";
+    if (result == PATH_READ_ONLY)
+        return "READ-ONLY MOUNT";
     return "INVALID PATH";
 }
 

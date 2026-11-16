@@ -43,6 +43,11 @@ static UiRow s_empty_rows[] = {
     {.name = "..", .type = UI_ROW_UP},
 };
 
+static UiRow s_readonly_rows[] = {
+    {.name = "..", .type = UI_ROW_UP},
+    {.name = "EBOOT.BIN", .type = UI_ROW_FILE, .size = 10, .size_known = 1},
+};
+
 static UiRow s_many_rows[15];
 
 static UiConfirmItem s_confirm_items[12];
@@ -406,6 +411,40 @@ static void test_sites_editor(void)
 
     send_key(UI_KEY_CIRCLE);
     CHECK(s_state.screen == UI_SCREEN_SITES);
+}
+
+static void test_read_only_actions(void)
+{
+    reset();
+    UiPaneState *pane = &s_state.panes[UI_PANE_LOCAL];
+    snprintf(pane->path, sizeof(pane->path), "app0:");
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_readonly_rows, 2, 0);
+    pane->selected = 1;
+    s_state.active_pane = UI_PANE_LOCAL;
+    s_state.clip_mode = UI_CLIP_COPY;
+    s_state.clip_count = 1;
+    snprintf(s_state.clip_paths[0].text, sizeof(s_state.clip_paths[0].text),
+             "ux0:data/A.TXT");
+
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    CHECK(s_state.actions.enabled[UI_ACTION_COPY] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_MOVE], "READ-ONLY MOUNT") ==
+          0);
+    CHECK(s_state.actions.enabled[UI_ACTION_RENAME] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_RENAME], "READ-ONLY MOUNT") ==
+          0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DELETE], "READ-ONLY MOUNT") ==
+          0);
+    CHECK(s_state.actions.enabled[UI_ACTION_PASTE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_PASTE], "READ-ONLY MOUNT") ==
+          0);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_NEW_FOLDER],
+                 "READ-ONLY MOUNT") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 1);
 }
 
 static void test_server_actions(void)
@@ -1655,6 +1694,7 @@ int main(void)
     test_open_and_parent();
     test_sites_editor();
     test_server_actions();
+    test_read_only_actions();
     test_confirm();
     test_high_risk_action();
     test_action_ime_and_risk();
