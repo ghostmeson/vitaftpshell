@@ -13,58 +13,17 @@ card to a PC, without making the PC the workspace.
 
 ## Status
 
-`building`. Strategy, requirements, the screen-by-screen design, and the
-architecture plan are complete. Phases 1-5 are done: the build shape, six port
-contracts and fakes, the gfx base and layout table, the reply/listing/path/
-format policy, the site/settings/store/log policy, the passive FTP client and
-server, the transfer queue, the local planner and executor, the input reducer
-and UI state, the cross-thread handoff, the seven screen surfaces, the six Vita
-adapters, and the app/worker runtime exist. `tools/test/run.sh` passes
-twenty-one host suites, `tools/preview/run.sh` renders 40 settled states, and
-`build.sh` emits `vitaftpshell-v01.00-b63.vpk` with the real app linked. b16 and b18 have
-run on the console: b18 proved the drive browser, pinned the IME as the
-new-folder/rename blocker, showed the client failing at TCP connect, and showed
-the server with no client. b20 opened the IME and reached a rename, then the
-worker crashed on a stack overflow; b21 fixed the worker stack and rename
-completed. b22 made "no selection" disable every file action except new folder,
-and exposed the server advertising a byte-swapped IP. b23 fixed the IP, matched
-ftpvitalib's net pool/backlog, and restricted free-space queries to `ux0:`; FTP
-works. b24 adds clipboard/PASTE copy/move and hardens DELETE; b25 defers worker
-confirmations while a local dialog owns the screen; b26 widens the FTP-client
-connect window and logs the resolved IP and raw network result; b27 clears the
-CONNECTING state on remote errors; b28 fixes PASV by using the control peer's
-address and the reply port; b32 fixes the remote pane (READING cleared on a
-failed CWD, remote actions over the FTP client, DISCONNECT, site teardown, an
-idle NOOP for liveness, remote mark pruning); b36 adds REFRESH, unsafe-name
-refusal, download totals, upload MLST preflight, and folder-transfer refusal
-(R22/R23 deferred); b37 closes the review pass with an iterated queue pump, one
-session teardown that clears the overwrite latch, a truncated-success listing
-cap, the ALL DRIVES download fallback, the high-risk delete warning, and MLST
-send-failure handling. b37 has run on the console (operator report,
-2026-11-13); b38 fixes the unsafe-name guard refusing to open the server's own
-`UX0:`/`UR0:`/`UMA0:` roots; b40 adds cursor COPY/MOVE, one batch terminal
-with past-tense dock words, the batch conflict preflight, full local cancel, the
-cyan cursor slab, the active-pane glow, and red failures; b40 crashed on the
-console and its four worker-stack cores are analysed in `VERIFICATION.md`. b43
-removes the 64 KiB `handle_action` array and the recursive batch call, enforces
-a worker-stack budget in `build.sh`, turns a refused sync into a recorded hint,
-counts refused batch items, and reads `FAILED` on a total failure. b43 has run
-on the console (operator report, 2026-11-14): copy, paste, new folder, rename,
-and download work, and the dock words read correctly in green. b55 carries the
-review remediation (U1-U10); b56 re-packages that code with the settled launcher
-icon (D84); b57 added a server protocol trace; b58 removes the global
-server-busy gate that refused `PASV`/`STOR`/`RETR` whenever the app's own network
-lane was active. The b57 log showed the app's client deadlocking against its own
-server: `transfer_start` → `PASV` → `450 Transfer in progress`. b58 is
-hardware-verified for both directions from the app's own client. FileZilla's
-`450 Busy` was the one-client rule colliding with a second control connection;
-b60 accepts up to four sessions with one data transfer at a time (D86). b61
-applies D87: the server exposes the app data folder and the `tai` folders, the
-local high-risk prompt is retired, and `ur0:tai/boot_config.txt` plus the system
-roots stay hard-denied. b62 trims the SERVER warning text; b63 removes the
-warning panel and gives the client panel the full right column (D88). M5 is PART
-until the b63 FileZilla retry. M13 and M10 are partly observed. The project stays `building` until every row has a
-recorded PASS.
+<!-- status:begin -->
+`building`. vitaFTPShell is one PS Vita app with three roles: a passive FTP
+client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
+volumes, and an anonymous read-write FTP server. The seven screens, the
+app/worker runtime, and the six Vita adapters are implemented, and the host
+suites pass. A console pass of the v1 verification matrix is still pending, so
+the project is `building`, not `verified`.
+
+The live state and the single next action are on [the board](../PROJECTS.md); the
+hardware evidence is in [the evidence record](VERIFICATION.md).
+<!-- status:end -->
 
 ## Users
 
@@ -78,21 +37,20 @@ recorded PASS.
 
 | Capability | In v1 |
 |---|---|
-| FTP client | Saved sites, anonymous and login, passive FTP, browse, download, upload, create, rename, delete, recursive folders |
-| Local manager | Browse the mounted `ux0:`/`ur0:`/`uma0:` volumes, multi-select, create, rename, copy, move, delete, recursive folders, free space |
+| FTP client | Saved sites, anonymous and login, passive FTP, browse, download, upload, create, rename, delete; remote recursive transfer is planned, not built (R22/R23, D65) |
+| Local manager | Browse the mounted `ux0:`/`ur0:`/`uma0:` volumes, multi-select, create, rename, copy, move, delete, local recursive folder operations, free space |
 | FTP server | Anonymous read-write, mounted `ux0:`/`ur0:`/`uma0:`, OFF at launch, up to four clients with one data transfer at a time, visible ON state |
-| Transfers | One active, queued batch, progress, cancel, overwrite/skip/cancel conflict prompt |
+| Transfers | One network transfer and one local job may run together, each with its own queued batch, progress, cancel, and overwrite/skip/cancel conflict prompt |
 | Interface | Two live panes, site manager, server panel, actions, confirms, system text entry, inline errors |
 
 The full behavior is in
 [`plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md),
-requirements R1-R70.
+requirements R1-R74.
 
 ## Non-goals
 
 - SFTP, FTPS, HTTP, WebDAV, or SMB in v1.
-- Resume, sync, scheduled transfers, or multiple active transfers.
-- Multiple simultaneous server clients.
+- Resume, sync, scheduled transfers, or more than one transfer per lane.
 - A background daemon, kernel plugin, `*KERNEL` entry, or boot-time component.
 - A PC-first desktop workflow or a desktop-client port.
 - VitaShell feature parity: archive extraction, USB mounting, media playback.
@@ -112,7 +70,7 @@ requirements R1-R70.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: Hardware verification | b37 and b43 hardware-tested (operator report); b40 crashed, four cores analysed; b60 observed FileZilla and app-local transfers; the b63 review remediation is host-tested; M1–M13 evidence transcription pending |
+| Phase 6: Hardware verification | Console runs reported for the transfer and file-manager paths; the row-level M1–M13 transcription is the open work |
 
 ## Failure policy
 
@@ -145,7 +103,7 @@ sessions, connect-to-first-listing, and server-matrix pass.
 |---|---|
 | Anonymous read-write server exposes the three Vita volumes, including app data and `tai` | OFF by default, visible ON state, `ACCESS READ-WRITE`, client count; the warning panel is removed (D88); `boot_config.txt` and system roots stay protected |
 | Passwords stored unencrypted | State it before the first save; never log them; no false encryption claim |
-| WiFi path has a b37 hardware report but no row-level evidence yet | Record connect, PASV, transfer, and timeout results in `VERIFICATION.md` |
+| WiFi path has a hardware report but no row-level evidence yet | Record connect, PASV, transfer, and timeout results in `VERIFICATION.md` |
 | Public FTP may decline | Personal servers keep the product useful; no protocol widening in v1 |
 | Controller-only density | Design phase reviews each screen before implementation |
 | Cross-volume batch move is not all-or-nothing | Each file is atomic; a batch failure leaves completed moves and reports `n OF m MOVED`, never deletes a moved file (D45) |
