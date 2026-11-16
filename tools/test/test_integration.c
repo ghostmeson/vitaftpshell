@@ -7,11 +7,11 @@
 #include "core/handoff.h"
 #include "fake_clock.h"
 #include "fake_fs.h"
-#include "fake_ftpd.h"
 #include "fake_ime.h"
 #include "fake_input.h"
 #include "fake_log.h"
 #include "fake_net.h"
+#include "fake_peer.h"
 #include "gfx/draw.h"
 
 static int s_failures;
@@ -28,210 +28,13 @@ static int s_failures;
 #define PEER_ADDR 0xC0A8012Au
 #define PEER_PORT 21
 
-/* Scripted MLST answers for the upload preflight. */
-enum {
-    MLST_NORMAL = 0,
-    MLST_UNSUPPORTED,
-    MLST_DIR,
-    MLST_FAIL
-};
-
-typedef struct {
-    FakeFtpd server;
-    NetSocket *control;
-    NetSocket *data;
-    const char *listing;
-    const char *sub_listing;
-    const char *payload;
-    const char *exists_path;
-    const char *exists_path2;
-    uint64_t exists_size;
-    int mlst_mode;
-    NetSocket *stor_data;
-    char last_stor[256];
-    char cwd[64];
-    int hold_data;
-    int hold_final;
-    int size_supported;
-    int list_fail;
-    int sizes;
-    int listings;
-    int list_fails;
-    int retrs;
-    int aborts;
-    int cwds;
-    int mkds;
-    int deles;
-    int rmds;
-    int renames;
-    int stors;
-} Peer;
-
-static void peer_init(Peer *peer, const char *listing, const char *payload)
+/* The shared scripted peer in tools/fake/fake_peer.c. The suite scripts the
+ * answers before the client connects. */
+static FakePeer *peer_new(void)
 {
-    memset(peer, 0, sizeof(*peer));
-    peer->control = fake_net_last_connected();
-    peer->listing = listing;
-    peer->payload = payload;
-    snprintf(peer->cwd, sizeof(peer->cwd), "/");
-    fake_ftpd_init(&peer->server, peer->control);
-    fake_ftpd_reply(&peer->server, 220, "Welcome.");
-}
-
-static void peer_serve(Peer *peer)
-{
-    char line[512];
-
-    if (peer->stor_data != NULL) {
-        char sink[512];
-        while (fake_net_read_tx(peer->stor_data, sink, sizeof(sink)) > 0) {
-        }
-        if (!fake_net_is_open(peer->stor_data)) {
-            fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
-            peer->stor_data = NULL;
-        }
-    }
-
-    while (fake_ftpd_next_command(&peer->server, line, sizeof(line)) == 1) {
-        if (strcmp(line, "USER anonymous") == 0 ||
-            strcmp(line, "USER bob") == 0) {
-            fake_ftpd_reply(&peer->server, 331, "Password required.");
-        } else if (strncmp(line, "PASS ", 5) == 0) {
-            fake_ftpd_reply(&peer->server, 230, "Logged in.");
-        } else if (strcmp(line, "TYPE I") == 0) {
-            fake_ftpd_reply(&peer->server, 200, "Type set.");
-        } else if (strcmp(line, "PWD") == 0) {
-            fake_ftpd_reply(&peer->server, 257,
-                            "\"/\" is the current directory.");
-        } else if (strcmp(line, "FEAT") == 0) {
-            fake_ftpd_send_raw(&peer->server,
-                               "211-Features:\r\n"
-                               " MLST type*;size*;modify*;perm*;\r\n"
-                               "211 End\r\n");
-        } else if (strcmp(line, "PASV") == 0) {
-            fake_ftpd_reply(&peer->server, 227,
-                            "Entering Passive Mode (192,168,1,42,19,140).");
-            peer->data = NULL;
-        } else if (strncmp(line, "CWD ", 4) == 0) {
-            snprintf(peer->cwd, sizeof(peer->cwd), "%s", line + 4);
-            peer->cwds++;
-            fake_ftpd_reply(&peer->server, 250, "Directory changed.");
-        } else if (strncmp(line, "MKD ", 4) == 0) {
-            peer->mkds++;
-            fake_ftpd_reply(&peer->server, 257, "Created.");
-        } else if (strncmp(line, "DELE ", 5) == 0) {
-            peer->deles++;
-            fake_ftpd_reply(&peer->server, 250, "Deleted.");
-        } else if (strncmp(line, "RMD ", 4) == 0) {
-            peer->rmds++;
-            fake_ftpd_reply(&peer->server, 250, "Removed.");
-        } else if (strncmp(line, "RNFR ", 5) == 0) {
-            peer->renames++;
-            fake_ftpd_reply(&peer->server, 350, "Ready for RNTO.");
-        } else if (strncmp(line, "RNTO ", 5) == 0) {
-            fake_ftpd_reply(&peer->server, 250, "Renamed.");
-        } else if (strncmp(line, "NOOP", 4) == 0) {
-            fake_ftpd_reply(&peer->server, 200, "Still here.");
-        } else if (strncmp(line, "MLST ", 5) == 0) {
-            const char *path = line + 5;
-            if (peer->mlst_mode == MLST_UNSUPPORTED) {
-                fake_ftpd_reply(&peer->server, 502, "Not implemented.");
-            } else if (peer->mlst_mode == MLST_FAIL) {
-                fake_ftpd_reply(&peer->server, 421,
-                                "Service not available.");
-            } else if (peer->mlst_mode == MLST_DIR) {
-                char reply_text[640];
-                snprintf(reply_text, sizeof(reply_text),
-                         "250-Listing %s\r\n"
-                         " type=dir; %s\r\n"
-                         "250 End\r\n",
-                         path, path);
-                fake_ftpd_send_raw(&peer->server, reply_text);
-            } else if (peer->exists_path != NULL &&
-                       strcmp(path, peer->exists_path) == 0) {
-                char reply_text[640];
-                snprintf(reply_text, sizeof(reply_text),
-                         "250-Listing %s\r\n"
-                         " type=file;size=%llu; %s\r\n"
-                         "250 End\r\n",
-                         path, (unsigned long long)peer->exists_size, path);
-                fake_ftpd_send_raw(&peer->server, reply_text);
-            } else {
-                fake_ftpd_reply(&peer->server, 550, "Not found.");
-            }
-        } else if (strncmp(line, "STOR ", 5) == 0) {
-            snprintf(peer->last_stor, sizeof(peer->last_stor), "%s",
-                     line + 5);
-            peer->stors++;
-            peer->stor_data = fake_net_last_connected();
-            if (peer->stor_data == peer->control)
-                peer->stor_data = NULL;
-            fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
-        } else if (strncmp(line, "MLSD ", 5) == 0 ||
-                   strncmp(line, "LIST ", 5) == 0) {
-            if (peer->list_fail) {
-                /* The client retries MLSD as LIST; both must fail for the
-                 * listing to end as a read error. */
-                peer->list_fails++;
-                fake_ftpd_reply(&peer->server, 550, "Listing refused.");
-                continue;
-            }
-            const char *listing = peer->listing;
-            if (strcmp(peer->cwd, "/") != 0 && peer->sub_listing != NULL)
-                listing = peer->sub_listing;
-            peer->data = fake_net_last_connected();
-            if (peer->data == peer->control)
-                peer->data = NULL;
-            fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
-            if (listing != NULL && peer->data != NULL) {
-                fake_net_queue_rx(peer->data, listing, strlen(listing));
-                fake_net_shutdown(peer->data);
-            }
-            fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
-            peer->listings++;
-            peer->data = NULL;
-        } else if (strncmp(line, "SIZE ", 5) == 0) {
-            const char *path = line + 5;
-            peer->sizes++;
-            int exists = (peer->exists_path != NULL &&
-                          strcmp(path, peer->exists_path) == 0) ||
-                         (peer->exists_path2 != NULL &&
-                          strcmp(path, peer->exists_path2) == 0);
-            if (peer->size_supported && exists) {
-                char size[32];
-                snprintf(size, sizeof(size), "%llu",
-                         (unsigned long long)peer->exists_size);
-                fake_ftpd_reply(&peer->server, 213, size);
-            } else if (peer->size_supported) {
-                fake_ftpd_reply(&peer->server, 550, "Not found.");
-            } else {
-                fake_ftpd_reply(&peer->server, 502, "Not implemented.");
-            }
-        } else if (strncmp(line, "RETR ", 5) == 0) {
-            peer->data = fake_net_last_connected();
-            if (peer->data == peer->control)
-                peer->data = NULL;
-            fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
-            peer->retrs++;
-            if (!peer->hold_data && peer->payload != NULL &&
-                peer->data != NULL) {
-                fake_net_queue_rx(peer->data, peer->payload,
-                                  strlen(peer->payload));
-                fake_net_shutdown(peer->data);
-                if (!peer->hold_final)
-                    fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
-                peer->data = NULL;
-            }
-        } else if (strcmp(line, "ABOR") == 0) {
-            fake_ftpd_reply(&peer->server, 426, "Transfer aborted.");
-            fake_ftpd_reply(&peer->server, 226, "Abort successful.");
-            peer->aborts++;
-        } else if (strcmp(line, "QUIT") == 0) {
-            fake_ftpd_reply(&peer->server, 221, "Bye.");
-        } else {
-            fake_ftpd_reply(&peer->server, 200, "OK.");
-        }
-    }
+    FakePeer *peer = fake_peer_create();
+    CHECK(peer != NULL);
+    return peer;
 }
 
 static App *make_app_ex(const char *seed_path, const char *seed_text,
@@ -282,16 +85,16 @@ static void press(App *app, uint32_t button)
     (void)app_tick(app);
 }
 
-static void pump(App *app, Peer *peer, int ticks)
+static void pump(App *app, FakePeer *peer, int ticks)
 {
     for (int i = 0; i < ticks; ++i) {
         (void)app_tick(app);
         if (peer != NULL)
-            peer_serve(peer);
+            fake_peer_serve(peer);
     }
 }
 
-static void connect_site_listing(App *app, Peer *peer, const char *listing,
+static void connect_site_listing(App *app, FakePeer *peer, const char *listing,
                                  const char *payload)
 {
     fake_net_set_resolve(PEER_ADDR, 0);
@@ -302,11 +105,13 @@ static void connect_site_listing(App *app, Peer *peer, const char *listing,
     press(app, INPUT_BIT(INPUT_CROSS));
     (void)app_tick(app);
 
-    peer_init(peer, listing, payload);
+    fake_peer_set_listing(peer, listing);
+    fake_peer_set_payload(peer, payload);
+    fake_peer_open(peer);
 
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(peer);
+        fake_peer_serve(peer);
         UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
         if (remote->connected && !remote->loading && remote->row_count >= 2)
             break;
@@ -319,7 +124,7 @@ static void connect_site_listing(App *app, Peer *peer, const char *listing,
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
 }
 
-static void connect_site(App *app, Peer *peer)
+static void connect_site(App *app, FakePeer *peer)
 {
     static const char *listing =
         "type=file;size=5;modify=20240101000000; TEST.BIN\r\n"
@@ -383,8 +188,8 @@ static void test_download_destination_failure(void)
     if (app == NULL)
         return;
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
     fake_fs_add_dir("ux0:data/TEST.BIN");
@@ -395,7 +200,7 @@ static void test_download_destination_failure(void)
 
     for (int i = 0; i < 60; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->dock.state == UI_DOCK_FAILED)
             break;
     }
@@ -412,7 +217,7 @@ static void test_download_destination_failure(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->dock.state == UI_DOCK_DONE)
             break;
     }
@@ -421,12 +226,13 @@ static void test_download_destination_failure(void)
     CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
     CHECK(!fake_fs_exists("ux0:data/TEST.BIN.vftp.part"));
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
 static void select_local_named(App *app, const char *name);
 static void enter_ux0_data(App *app);
-static void start_upload(App *app, Peer *peer);
+static void start_upload(App *app, FakePeer *peer);
 static void enter_local_named(App *app, const char *name, const char *path);
 
 /* A local job starts beside a held download (D72), and a lane cancel never
@@ -438,22 +244,22 @@ static void test_two_lanes_progress(void)
         return;
     fake_fs_add_dir("ux0:data/DEST");
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
-    peer.hold_data = 1;
+    fake_peer_set_hold_data(peer, 1);
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 80; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.retrs > 0 && app_state(app)->dock.active)
+        fake_peer_serve(peer);
+        if (fake_peer_retr_count(peer) > 0 && app_state(app)->dock.active)
             break;
     }
-    CHECK(peer.retrs > 0);
+    CHECK(fake_peer_retr_count(peer) > 0);
     CHECK(app_state(app)->dock.active == 1);
 
     /* A local copy starts while the download is live; the old guard refused it. */
@@ -468,7 +274,7 @@ static void test_two_lanes_progress(void)
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 40);
+    pump(app, peer, 40);
 
     CHECK(fake_fs_exists("ux0:data/DEST/A.TXT"));
     CHECK(app_state(app)->dock.active == 1);
@@ -481,7 +287,7 @@ static void test_two_lanes_progress(void)
     memset(&cancel, 0, sizeof(cancel));
     cancel.type = UI_CMD_CANCEL_LOCAL;
     CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
-    pump(app, &peer, 5);
+    pump(app, peer, 5);
     CHECK(app_state(app)->dock.active == 1);
 
     /* Cancel the download from the dock. */
@@ -492,10 +298,11 @@ static void test_two_lanes_progress(void)
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     press(app, INPUT_BIT(INPUT_RIGHT));
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 40);
-    CHECK(peer.aborts > 0);
+    pump(app, peer, 40);
+    CHECK(fake_peer_abort_count(peer) > 0);
     CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -507,22 +314,22 @@ static void test_two_cancel_presses(void)
     if (app == NULL)
         return;
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
-    peer.hold_data = 1;
+    fake_peer_set_hold_data(peer, 1);
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 80; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.retrs > 0 && app_state(app)->dock.active)
+        fake_peer_serve(peer);
+        if (fake_peer_retr_count(peer) > 0 && app_state(app)->dock.active)
             break;
     }
-    CHECK(peer.retrs > 0);
+    CHECK(fake_peer_retr_count(peer) > 0);
     CHECK(app_state(app)->dock.active == 1);
 
     UiCommand cancel;
@@ -533,10 +340,11 @@ static void test_two_cancel_presses(void)
     cancel.type = UI_CMD_CANCEL_LOCAL;
     CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
 
-    pump(app, &peer, 40);
-    CHECK(peer.aborts > 0);
+    pump(app, peer, 40);
+    CHECK(fake_peer_abort_count(peer) > 0);
     CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -550,19 +358,19 @@ static void test_wait_resume_rechecks(void)
     fake_fs_add_dir("ux0:data/SRC");
     fake_fs_seed_file("ux0:data/SRC/TEST.BIN", "B", 1);
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
-    peer.hold_data = 1;
+    fake_peer_set_hold_data(peer, 1);
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_SQUARE));
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 80; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.retrs > 0 && app_state(app)->dock.active)
+        fake_peer_serve(peer);
+        if (fake_peer_retr_count(peer) > 0 && app_state(app)->dock.active)
             break;
     }
     CHECK(app_state(app)->dock.active == 1);
@@ -587,7 +395,7 @@ static void test_wait_resume_rechecks(void)
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 10);
+    pump(app, peer, 10);
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     CHECK(app_state(app)->confirm.kind == UI_CONFIRM_PATH_BUSY);
     CHECK(app_state(app)->confirm.choices[0] == UI_CHOICE_WAIT);
@@ -602,11 +410,11 @@ static void test_wait_resume_rechecks(void)
     memset(&cancel, 0, sizeof(cancel));
     cancel.type = UI_CMD_CANCEL_NETWORK;
     CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
-    pump(app, &peer, 40);
+    pump(app, peer, 40);
 
     for (int i = 0; i < 40; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM &&
             app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT)
             break;
@@ -616,6 +424,7 @@ static void test_wait_resume_rechecks(void)
     CHECK(strcmp(app_state(app)->confirm.items[0].name,
                  "ux0:data/TEST.BIN") == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -768,21 +577,22 @@ static void test_upload_preflight_size_folder(void)
     static const char *listing =
         "type=dir;modify=20240101000000; DEST\r\n"
         "type=file;size=5;modify=20240101000000; F.BIN\r\n";
-    Peer peer;
-    connect_site_listing(app, &peer, listing, "HELLO");
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/DEST";
-    peer.exists_size = 0;
+    FakePeer *peer = peer_new();
+    connect_site_listing(app, peer, listing, "HELLO");
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/DEST");
+    fake_peer_set_exists_size(peer, 0);
 
-    start_upload(app, &peer);
-    CHECK(peer.sizes == 1);
+    start_upload(app, peer);
+    CHECK(fake_peer_size_count(peer) == 1);
     /* The row already types the destination, so no refresh is asked for. */
-    CHECK(peer.listings == 1);
-    CHECK(peer.stors == 0);
+    CHECK(fake_peer_listing_count(peer) == 1);
+    CHECK(fake_peer_stor_count(peer) == 0);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
     CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -792,8 +602,8 @@ static void test_connect_list_download(void)
     if (app == NULL)
         return;
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
     /* Rows are .., BIG.BIN, TEST.BIN; select TEST.BIN. */
@@ -805,7 +615,7 @@ static void test_connect_list_download(void)
 
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->dock.state == UI_DOCK_DONE)
             break;
     }
@@ -825,6 +635,7 @@ static void test_connect_list_download(void)
     CHECK(log_has("transfer_start"));
     CHECK(log_has("transfer_done"));
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1183,22 +994,22 @@ static void test_cancel(void)
     if (app == NULL)
         return;
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
     /* Select BIG.BIN directly (row 1). */
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_CROSS));
 
-    peer.hold_data = 1;
+    fake_peer_set_hold_data(peer, 1);
     for (int i = 0; i < 80; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.retrs > 0 && app_state(app)->dock.active)
+        fake_peer_serve(peer);
+        if (fake_peer_retr_count(peer) > 0 && app_state(app)->dock.active)
             break;
     }
-    CHECK(peer.retrs > 0);
+    CHECK(fake_peer_retr_count(peer) > 0);
     CHECK(app_state(app)->dock.active == 1);
     CHECK(app_state(app)->dock.total == 5);
     CHECK(app_state(app)->dock.total_known == 1);
@@ -1212,12 +1023,13 @@ static void test_cancel(void)
     press(app, INPUT_BIT(INPUT_RIGHT));
     press(app, INPUT_BIT(INPUT_CROSS));
 
-    pump(app, &peer, 40);
-    CHECK(peer.aborts > 0);
+    pump(app, peer, 40);
+    CHECK(fake_peer_abort_count(peer) > 0);
     CHECK(!fake_fs_exists("ux0:data/BIG.BIN"));
     CHECK(!fake_fs_exists("ux0:data/BIG.BIN.vftp.part"));
     CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1255,20 +1067,20 @@ static void test_shutdown_cancels(void)
     if (app == NULL)
         return;
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
     press(app, INPUT_BIT(INPUT_DOWN));
     press(app, INPUT_BIT(INPUT_CROSS));
-    peer.hold_data = 1;
+    fake_peer_set_hold_data(peer, 1);
     for (int i = 0; i < 80; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.retrs > 0)
+        fake_peer_serve(peer);
+        if (fake_peer_retr_count(peer) > 0)
             break;
     }
-    CHECK(peer.retrs > 0);
+    CHECK(fake_peer_retr_count(peer) > 0);
 
     UiCommand quit;
     memset(&quit, 0, sizeof(quit));
@@ -1279,6 +1091,7 @@ static void test_shutdown_cancels(void)
     CHECK(!fake_fs_exists("ux0:data/BIG.BIN"));
     CHECK(!fake_fs_exists("ux0:data/BIG.BIN.vftp.part"));
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1294,9 +1107,9 @@ static void test_remote_navigation(void)
     static const char *sub =
         "type=file;size=3;modify=20240101000000; IN.TXT\r\n";
 
-    Peer peer;
-    connect_site_listing(app, &peer, root, NULL);
-    peer.sub_listing = sub;
+    FakePeer *peer = peer_new();
+    connect_site_listing(app, peer, root, NULL);
+    fake_peer_set_sub_listing(peer, sub);
     select_remote(app);
 
     /* At the remote root there is no ".." row; SUB is row 0. */
@@ -1304,7 +1117,7 @@ static void test_remote_navigation(void)
 
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         UiPaneState *r = &app_state(app)->panes[UI_PANE_REMOTE];
         if (!r->loading && strcmp(r->path, "/SUB") == 0 &&
             r->row_count >= 2)
@@ -1312,7 +1125,7 @@ static void test_remote_navigation(void)
     }
 
     UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
-    CHECK(peer.cwds == 1);
+    CHECK(fake_peer_cwd_count(peer) == 1);
     CHECK(remote->loading == 0);
     CHECK(strcmp(remote->path, "/SUB") == 0);
     CHECK(remote->row_count >= 2);
@@ -1320,6 +1133,7 @@ static void test_remote_navigation(void)
     if (remote->rows != NULL)
         CHECK(strcmp(remote->rows[1].name, "IN.TXT") == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1333,8 +1147,8 @@ static void test_remote_mutations(void)
         "type=dir;size=0;modify=20240101000000; SUB\r\n"
         "type=file;size=5;modify=20240101000000; A.TXT\r\n";
 
-    Peer peer;
-    connect_site_listing(app, &peer, root, NULL);
+    FakePeer *peer = peer_new();
+    connect_site_listing(app, peer, root, NULL);
     select_remote(app);
 
     /* NEW FOLDER: cursor on ".." is no selection; the folder is the target. */
@@ -1343,8 +1157,8 @@ static void test_remote_mutations(void)
     press(app, INPUT_BIT(INPUT_DOWN)); /* DOWNLOAD -> NEW FOLDER */
     CHECK(app_state(app)->actions.selected == UI_ACTION_NEW_FOLDER);
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 80);
-    CHECK(peer.mkds == 1);
+    pump(app, peer, 80);
+    CHECK(fake_peer_mkd_count(peer) == 1);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
 
     /* RENAME the directory (row 0 at the remote root). */
@@ -1356,8 +1170,8 @@ static void test_remote_mutations(void)
     press(app, INPUT_BIT(INPUT_DOWN)); /* -> RENAME */
     CHECK(app_state(app)->actions.selected == UI_ACTION_RENAME);
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 80);
-    CHECK(peer.renames == 1);
+    pump(app, peer, 80);
+    CHECK(fake_peer_rename_count(peer) == 1);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
 
     /* DELETE the directory: the command must use RMD, not the local planner. */
@@ -1371,10 +1185,11 @@ static void test_remote_mutations(void)
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     press(app, INPUT_BIT(INPUT_RIGHT));
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 80);
-    CHECK(peer.rmds == 1);
+    pump(app, peer, 80);
+    CHECK(fake_peer_rmd_count(peer) == 1);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1384,8 +1199,8 @@ static void test_remote_disconnect_and_reconnect(void)
     if (app == NULL)
         return;
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
     /* DISCONNECT is the sixth remote action. */
@@ -1399,7 +1214,7 @@ static void test_remote_disconnect_and_reconnect(void)
     CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 0);
     CHECK(app_state(app)->panes[UI_PANE_REMOTE].row_count == 0);
     CHECK(app_state(app)->site_known == 0);
-    CHECK(fake_net_is_open(peer.control) == 0);
+    CHECK(fake_net_is_open(fake_peer_control(peer)) == 0);
 
     /* A connect while a session is shown as connected must tear it down and
      * start a new one instead of returning CONNECT REFUSED. */
@@ -1413,13 +1228,17 @@ static void test_remote_disconnect_and_reconnect(void)
     CHECK(handoff_command_push(app_handoff(app), &connect) == 1);
     (void)app_tick(app);
 
-    Peer again;
-    peer_init(&again, listing, "HELLO");
-    pump(app, &again, 120);
+    FakePeer *again = peer_new();
+    fake_peer_set_listing(again, listing);
+    fake_peer_set_payload(again, "HELLO");
+    fake_peer_open(again);
+    pump(app, again, 120);
     CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
-    CHECK(again.listings >= 1);
-    CHECK(again.cwds == 0); /* the first listing needs no CWD */
+    CHECK(fake_peer_listing_count(again) >= 1);
+    CHECK(fake_peer_cwd_count(again) == 0); /* the first listing needs no CWD */
 
+    fake_peer_destroy(again);
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1433,8 +1252,8 @@ static void test_remote_unsafe_name(void)
         "type=file;size=5;modify=20240101000000; EVIL/NAME\r\n"
         "type=file;size=3;modify=20240101000000; OK.TXT\r\n";
 
-    Peer peer;
-    connect_site_listing(app, &peer, root, NULL);
+    FakePeer *peer = peer_new();
+    connect_site_listing(app, peer, root, NULL);
     select_remote(app);
 
     UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
@@ -1446,6 +1265,7 @@ static void test_remote_unsafe_name(void)
     }
     CHECK(unsafe_index >= 0);
     if (unsafe_index < 0) {
+        fake_peer_destroy(peer);
         app_destroy(app);
         return;
     }
@@ -1463,6 +1283,7 @@ static void test_remote_unsafe_name(void)
     CHECK(strcmp(app_state(app)->actions.reason[UI_ACTION_DOWNLOAD],
                  "UNSAFE NAME") == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1476,8 +1297,8 @@ static void test_remote_volume_root_open(void)
         "type=dir;modify=20240101000000; UX0:\r\n"
         "type=dir;modify=20240101000000; UR0:\r\n";
 
-    Peer peer;
-    connect_site_listing(app, &peer, root, NULL);
+    FakePeer *peer = peer_new();
+    connect_site_listing(app, peer, root, NULL);
     select_remote(app);
 
     UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
@@ -1488,6 +1309,7 @@ static void test_remote_volume_root_open(void)
     }
     CHECK(target >= 0);
     if (target < 0) {
+        fake_peer_destroy(peer);
         app_destroy(app);
         return;
     }
@@ -1496,13 +1318,14 @@ static void test_remote_volume_root_open(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.cwds > 0)
+        fake_peer_serve(peer);
+        if (fake_peer_cwd_count(peer) > 0)
             break;
     }
-    CHECK(peer.cwds == 1);
-    CHECK(strcmp(peer.cwd, "/UX0:") == 0);
+    CHECK(fake_peer_cwd_count(peer) == 1);
+    CHECK(strcmp(fake_peer_cwd(peer), "/UX0:") == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1512,14 +1335,14 @@ static void test_remote_refresh(void)
     if (app == NULL)
         return;
 
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
     static const char *fresh =
         "type=file;size=7;modify=20240101000000; NEW.TXT\r\n"
         "type=file;size=9;modify=20240101000000; OTHER.TXT\r\n";
-    peer.listing = fresh;
+    fake_peer_set_listing(peer, fresh);
 
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     for (int i = 0; i < 4; ++i) /* DOWNLOAD -> REFRESH */
@@ -1529,7 +1352,7 @@ static void test_remote_refresh(void)
 
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         const UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
         if (!remote->loading && remote->row_count >= 2)
             break;
@@ -1547,6 +1370,7 @@ static void test_remote_refresh(void)
         CHECK(found == 1);
     }
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1574,10 +1398,10 @@ static void test_upload_conflict(void)
     }
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.exists_path = "/UP.TXT";
-    peer.exists_size = 5;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_exists_path(peer, "/UP.TXT");
+    fake_peer_set_exists_size(peer, 5);
 
     /* First attempt: the remote file exists, so the batch asks. */
     press(app, INPUT_BIT(INPUT_TRIANGLE));
@@ -1587,7 +1411,7 @@ static void test_upload_conflict(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
@@ -1595,8 +1419,8 @@ static void test_upload_conflict(void)
     CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
     press(app, INPUT_BIT(INPUT_RIGHT)); /* SKIP */
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 40);
-    CHECK(peer.stors == 0);
+    pump(app, peer, 40);
+    CHECK(fake_peer_stor_count(peer) == 0);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
 
     /* Second attempt: OVERWRITE. */
@@ -1606,7 +1430,7 @@ static void test_upload_conflict(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
@@ -1616,17 +1440,18 @@ static void test_upload_conflict(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 160; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.stors > 0 && app_state(app)->dock.state == UI_DOCK_DONE)
+        fake_peer_serve(peer);
+        if (fake_peer_stor_count(peer) > 0 &&
+            app_state(app)->dock.state == UI_DOCK_DONE)
             break;
     }
-    CHECK(peer.stors == 1);
-    CHECK(strcmp(peer.last_stor, "/UP.TXT") == 0);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(strcmp(fake_peer_last_stor(peer), "/UP.TXT") == 0);
 
     /* Let the post-upload remote refresh settle before the next action. */
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (!app_state(app)->panes[UI_PANE_REMOTE].loading)
             break;
     }
@@ -1638,14 +1463,14 @@ static void test_upload_conflict(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     press(app, INPUT_BIT(INPUT_CROSS)); /* CANCEL is focused first */
-    pump(app, &peer, 40);
-    CHECK(peer.stors == 1);
+    pump(app, peer, 40);
+    CHECK(fake_peer_stor_count(peer) == 1);
     /* CANCEL must be observed as a cancellation, not look like SKIP. */
     CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
     CHECK(strcmp(app_state(app)->status, "NETWORK CANCELLED") == 0);
@@ -1657,17 +1482,18 @@ static void test_upload_conflict(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     press(app, INPUT_BIT(INPUT_CIRCLE));
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
-static void start_upload(App *app, Peer *peer)
+static void start_upload(App *app, FakePeer *peer)
 {
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     press(app, INPUT_BIT(INPUT_DOWN));
@@ -1686,15 +1512,16 @@ static void test_upload_preflight_unsupported(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
 
     /* A server that does not implement MLST keeps the old direct STOR. */
-    start_upload(app, &peer);
-    CHECK(peer.stors == 1);
+    start_upload(app, peer);
+    CHECK(fake_peer_stor_count(peer) == 1);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1708,24 +1535,25 @@ static void test_upload_preflight_size_fallback(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/UP.TXT";
-    peer.exists_size = 5;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/UP.TXT");
+    fake_peer_set_exists_size(peer, 5);
 
-    start_upload(app, &peer);
-    CHECK(peer.sizes == 1);
+    start_upload(app, peer);
+    CHECK(fake_peer_size_count(peer) == 1);
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
 
     press(app, INPUT_BIT(INPUT_RIGHT)); /* SKIP */
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 40);
-    CHECK(peer.stors == 0);
+    pump(app, peer, 40);
+    CHECK(fake_peer_stor_count(peer) == 0);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1738,14 +1566,15 @@ static void test_upload_preflight_directory(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_DIR;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_DIR);
 
-    start_upload(app, &peer);
-    CHECK(peer.stors == 0);
+    start_upload(app, peer);
+    CHECK(fake_peer_stor_count(peer) == 0);
     CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1758,20 +1587,21 @@ static void test_upload_preflight_failure(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_FAIL;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_FAIL);
 
-    start_upload(app, &peer);
-    CHECK(peer.stors == 0);
+    start_upload(app, peer);
+    CHECK(fake_peer_stor_count(peer) == 0);
     CHECK(strstr(app_state(app)->status, "REMOTE CHECK FAILED") != NULL);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
 /* Start an upload through the actions ledger and drive the probe to its SIZE
  * answer, leaving the peer unable to answer the refresh that follows. */
-static void start_upload_until_size(App *app, Peer *peer)
+static void start_upload_until_size(App *app, FakePeer *peer)
 {
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     press(app, INPUT_BIT(INPUT_DOWN));
@@ -1781,11 +1611,11 @@ static void start_upload_until_size(App *app, Peer *peer)
 
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(peer);
-        if (peer->sizes == 1)
+        fake_peer_serve(peer);
+        if (fake_peer_size_count(peer) == 1)
             break;
     }
-    CHECK(peer->sizes == 1);
+    CHECK(fake_peer_size_count(peer) == 1);
     /* The answer is read on the next step; the peer then stays silent, so the
      * refresh it asks for is still in flight. */
     for (int i = 0; i < 4; ++i)
@@ -1804,22 +1634,22 @@ static void test_upload_preflight_refresh_folder(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/UP.TXT";
-    peer.exists_size = 5;
-    CHECK(peer.listings == 1);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/UP.TXT");
+    fake_peer_set_exists_size(peer, 5);
+    CHECK(fake_peer_listing_count(peer) == 1);
 
-    peer.listing = "type=dir;modify=20240101000000; UP.TXT\r\n";
+    fake_peer_set_listing(peer, "type=dir;modify=20240101000000; UP.TXT\r\n");
 
-    start_upload(app, &peer);
-    CHECK(peer.sizes == 1);
+    start_upload(app, peer);
+    CHECK(fake_peer_size_count(peer) == 1);
     /* One refresh, and no listing rescheduled after it: the lanes went idle
      * with the batch over, so a second listing would be a loop (KTD4). */
-    CHECK(peer.listings == 2);
-    CHECK(peer.stors == 0);
+    CHECK(fake_peer_listing_count(peer) == 2);
+    CHECK(fake_peer_stor_count(peer) == 0);
     CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
 
     /* The refreshed rows are the pane's rows, not a private copy. */
@@ -1828,6 +1658,7 @@ static void test_upload_preflight_refresh_folder(void)
     if (row != NULL)
         CHECK(row->type == UI_ROW_DIR);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1842,12 +1673,12 @@ static void test_upload_preflight_refresh_not_for_listed_file(void)
     enter_ux0_data(app);
     select_local_named(app, "TEST.BIN");
 
-    Peer peer;
-    connect_site(app, &peer); /* the open listing already holds TEST.BIN */
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/TEST.BIN";
-    peer.exists_size = 5;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer); /* the open listing already holds TEST.BIN */
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/TEST.BIN");
+    fake_peer_set_exists_size(peer, 5);
 
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     press(app, INPUT_BIT(INPUT_DOWN));
@@ -1856,12 +1687,13 @@ static void test_upload_preflight_refresh_not_for_listed_file(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
-    CHECK(peer.sizes == 1);
-    CHECK(peer.listings == 1); /* the row says file; nothing to refresh */
+    CHECK(fake_peer_size_count(peer) == 1);
+    /* The row says file; nothing to refresh. */
+    CHECK(fake_peer_listing_count(peer) == 1);
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
 
@@ -1870,13 +1702,14 @@ static void test_upload_preflight_refresh_not_for_listed_file(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.stors > 0)
+        fake_peer_serve(peer);
+        if (fake_peer_stor_count(peer) > 0)
             break;
     }
-    CHECK(peer.stors == 1);
-    CHECK(strcmp(peer.last_stor, "/TEST.BIN") == 0);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(strcmp(fake_peer_last_stor(peer), "/TEST.BIN") == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1891,11 +1724,11 @@ static void test_upload_preflight_refresh_not_needed(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/OTHER.TXT";
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/OTHER.TXT");
 
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     press(app, INPUT_BIT(INPUT_DOWN));
@@ -1904,15 +1737,16 @@ static void test_upload_preflight_refresh_not_needed(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.stors > 0)
+        fake_peer_serve(peer);
+        if (fake_peer_stor_count(peer) > 0)
             break;
     }
-    CHECK(peer.sizes == 1);
-    CHECK(peer.listings == 1); /* the open listing only */
-    CHECK(peer.stors == 1);
-    CHECK(strcmp(peer.last_stor, "/UP.TXT") == 0);
+    CHECK(fake_peer_size_count(peer) == 1);
+    CHECK(fake_peer_listing_count(peer) == 1); /* the open listing only */
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(strcmp(fake_peer_last_stor(peer), "/UP.TXT") == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1928,14 +1762,14 @@ static void test_upload_preflight_refresh_names_its_own_item(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/UP.TXT";
-    peer.exists_size = 5;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/UP.TXT");
+    fake_peer_set_exists_size(peer, 5);
 
-    start_upload_until_size(app, &peer);
+    start_upload_until_size(app, peer);
 
     /* The same destination again, queued behind the item whose refresh owns
      * the lane. The UI cannot do this itself (the pane is READING), so the
@@ -1953,16 +1787,18 @@ static void test_upload_preflight_refresh_names_its_own_item(void)
     /* The refreshed listing refuses the first item. The second one's own SIZE
      * then says the name is gone, so it is stored instead of inheriting the
      * first item's folder answer. */
-    peer.listing = "type=dir;modify=20240101000000; UP.TXT\r\n";
-    peer.exists_path = "/GONE.TXT";
-    pump(app, &peer, 160);
+    fake_peer_set_listing(peer, "type=dir;modify=20240101000000; UP.TXT\r\n");
+    fake_peer_set_exists_path(peer, "/GONE.TXT");
+    pump(app, peer, 160);
 
-    CHECK(peer.sizes == 2);
-    CHECK(peer.listings == 3); /* open, one refresh, the post-upload refresh */
-    CHECK(peer.stors == 1);
-    CHECK(strcmp(peer.last_stor, "/UP.TXT") == 0);
+    CHECK(fake_peer_size_count(peer) == 2);
+    /* Open, one refresh, the post-upload refresh. */
+    CHECK(fake_peer_listing_count(peer) == 3);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(strcmp(fake_peer_last_stor(peer), "/UP.TXT") == 0);
     CHECK(log_count("DESTINATION%20IS%20A%20FOLDER") == 1);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -1978,12 +1814,12 @@ static void test_upload_preflight_refresh_parent_not_shown(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/SUB/UP.TXT";
-    peer.exists_size = 5;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/SUB/UP.TXT");
+    fake_peer_set_exists_size(peer, 5);
 
     UiCommand upload;
     memset(&upload, 0, sizeof(upload));
@@ -1995,12 +1831,13 @@ static void test_upload_preflight_refresh_parent_not_shown(void)
     CHECK(handoff_command_push(app_handoff(app), &upload) == 1);
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
-    CHECK(peer.sizes == 1);
-    CHECK(peer.listings == 1); /* no refresh: /SUB is not what the pane shows */
+    CHECK(fake_peer_size_count(peer) == 1);
+    /* No refresh: /SUB is not what the pane shows. */
+    CHECK(fake_peer_listing_count(peer) == 1);
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
 
     press(app, INPUT_BIT(INPUT_RIGHT));
@@ -2008,13 +1845,14 @@ static void test_upload_preflight_refresh_parent_not_shown(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.stors > 0)
+        fake_peer_serve(peer);
+        if (fake_peer_stor_count(peer) > 0)
             break;
     }
-    CHECK(peer.stors == 1);
-    CHECK(strcmp(peer.last_stor, "/SUB/UP.TXT") == 0);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(strcmp(fake_peer_last_stor(peer), "/SUB/UP.TXT") == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -2029,14 +1867,14 @@ static void test_upload_preflight_refresh_refuses_cancel(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/UP.TXT";
-    peer.exists_size = 5;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/UP.TXT");
+    fake_peer_set_exists_size(peer, 5);
 
-    start_upload_until_size(app, &peer);
+    start_upload_until_size(app, peer);
 
     UiCommand cancel;
     memset(&cancel, 0, sizeof(cancel));
@@ -2045,13 +1883,14 @@ static void test_upload_preflight_refresh_refuses_cancel(void)
     (void)app_tick(app);
     CHECK(strstr(app_state(app)->status, "REMOTE CHECK IN PROGRESS") != NULL);
 
-    peer.listing = "type=dir;modify=20240101000000; UP.TXT\r\n";
-    pump(app, &peer, 120);
-    CHECK(peer.listings == 2);
-    CHECK(peer.stors == 0);
+    fake_peer_set_listing(peer, "type=dir;modify=20240101000000; UP.TXT\r\n");
+    pump(app, peer, 120);
+    CHECK(fake_peer_listing_count(peer) == 2);
+    CHECK(fake_peer_stor_count(peer) == 0);
     /* The refused cancel left the item in place: the refresh still decides it. */
     CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -2066,25 +1905,25 @@ static void test_upload_preflight_refresh_failure(void)
     enter_ux0_data(app);
     select_local_named(app, "UP.TXT");
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/UP.TXT";
-    peer.exists_size = 5;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/UP.TXT");
+    fake_peer_set_exists_size(peer, 5);
 
-    start_upload_until_size(app, &peer);
-    peer.list_fail = 1;
+    start_upload_until_size(app, peer);
+    fake_peer_set_list_fail(peer, 1);
 
     for (int i = 0; i < 60; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
     /* MLSD and its LIST fallback are both refused; the untyped destination
      * then follows the existing overwrite decision. */
-    CHECK(peer.list_fails == 2);
+    CHECK(fake_peer_list_fail_count(peer) == 2);
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     CHECK(strstr(app_state(app)->panes[UI_PANE_REMOTE].error,
                  "REMOTE LISTING FAILED") != NULL);
@@ -2096,13 +1935,14 @@ static void test_upload_preflight_refresh_failure(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.stors > 0)
+        fake_peer_serve(peer);
+        if (fake_peer_stor_count(peer) > 0)
             break;
     }
-    CHECK(peer.stors == 1);
-    CHECK(strcmp(peer.last_stor, "/UP.TXT") == 0);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(strcmp(fake_peer_last_stor(peer), "/UP.TXT") == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -2120,14 +1960,14 @@ static void test_upload_preflight_refresh_once_per_item(void)
     select_local_named(app, "B.TXT");
     press(app, INPUT_BIT(INPUT_SQUARE));
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.mlst_mode = MLST_UNSUPPORTED;
-    peer.size_supported = 1;
-    peer.exists_path = "/A.TXT";
-    peer.exists_path2 = "/B.TXT";
-    peer.exists_size = 1;
-    peer.listing = "type=dir;modify=20240101000000; A.TXT\r\n";
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(peer, 1);
+    fake_peer_set_exists_path(peer, "/A.TXT");
+    fake_peer_set_second_exists_path(peer, "/B.TXT");
+    fake_peer_set_exists_size(peer, 1);
+    fake_peer_set_listing(peer, "type=dir;modify=20240101000000; A.TXT\r\n");
 
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     press(app, INPUT_BIT(INPUT_DOWN));
@@ -2139,15 +1979,18 @@ static void test_upload_preflight_refresh_once_per_item(void)
         (void)app_tick(app);
         /* The first refresh types only A; retarget the peer so the second
          * item's refresh is needed and types only B. */
-        if (peer.listings == 2)
-            peer.listing = "type=dir;modify=20240101000000; B.TXT\r\n";
-        peer_serve(&peer);
+        if (fake_peer_listing_count(peer) == 2)
+            fake_peer_set_listing(peer,
+                                  "type=dir;modify=20240101000000; B.TXT\r\n");
+        fake_peer_serve(peer);
     }
-    CHECK(peer.sizes == 2);    /* each item asked for itself */
-    CHECK(peer.listings == 3); /* open, A's refresh, B's refresh */
-    CHECK(peer.stors == 0);
+    CHECK(fake_peer_size_count(peer) == 2);    /* each item asked for itself */
+    /* Open, A's refresh, B's refresh. */
+    CHECK(fake_peer_listing_count(peer) == 3);
+    CHECK(fake_peer_stor_count(peer) == 0);
     CHECK(log_count("DESTINATION%20IS%20A%20FOLDER") == 2);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -2158,8 +2001,8 @@ static void test_download_conflict(void)
         return;
 
     pump(app, NULL, 10);
-    Peer peer;
-    connect_site(app, &peer);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
     select_remote(app);
 
     /* Rows are .., BIG.BIN, TEST.BIN. */
@@ -2168,7 +2011,7 @@ static void test_download_conflict(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
@@ -2178,15 +2021,15 @@ static void test_download_conflict(void)
     /* SKIP keeps the local bytes and starts no RETR. */
     press(app, INPUT_BIT(INPUT_RIGHT));
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 60);
-    CHECK(peer.retrs == 0);
+    pump(app, peer, 60);
+    CHECK(fake_peer_retr_count(peer) == 0);
     CHECK(content_is("ux0:data/TEST.BIN", "OLD!!"));
 
     /* OVERWRITE runs the RETR and replaces the destination. */
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->screen == UI_SCREEN_CONFIRM)
             break;
     }
@@ -2196,13 +2039,15 @@ static void test_download_conflict(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     for (int i = 0; i < 160; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.retrs > 0 && app_state(app)->dock.state == UI_DOCK_DONE)
+        fake_peer_serve(peer);
+        if (fake_peer_retr_count(peer) > 0 &&
+            app_state(app)->dock.state == UI_DOCK_DONE)
             break;
     }
-    CHECK(peer.retrs == 1);
+    CHECK(fake_peer_retr_count(peer) == 1);
     CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -2217,9 +2062,9 @@ static void test_download_final_reply_loses_queue(void)
     static const char *listing =
         "type=file;size=5;modify=20240101000000; A.BIN\r\n"
         "type=file;size=5;modify=20240101000000; B.BIN\r\n";
-    Peer peer;
-    connect_site_listing(app, &peer, listing, "HELLO");
-    peer.hold_final = 1;
+    FakePeer *peer = peer_new();
+    connect_site_listing(app, peer, listing, "HELLO");
+    fake_peer_set_hold_final(peer, 1);
     select_remote(app);
 
     press(app, INPUT_BIT(INPUT_SQUARE)); /* A.BIN is row 0 */
@@ -2231,24 +2076,25 @@ static void test_download_final_reply_loses_queue(void)
 
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
-        if (peer.retrs > 0 && app_state(app)->dock.state == UI_DOCK_ACTIVE)
+        fake_peer_serve(peer);
+        if (fake_peer_retr_count(peer) > 0 &&
+            app_state(app)->dock.state == UI_DOCK_ACTIVE)
             break;
     }
-    CHECK(peer.retrs == 1);
+    CHECK(fake_peer_retr_count(peer) == 1);
 
     /* Let the client read the data EOF and enter DRAINING before the clock
      * jumps; otherwise the stage deadline wins the race. */
-    pump(app, &peer, 10);
+    pump(app, peer, 10);
     fake_clock_advance(10001);
     for (int i = 0; i < 60; ++i) {
         (void)app_tick(app);
-        peer_serve(&peer);
+        fake_peer_serve(peer);
         if (app_state(app)->dock.state == UI_DOCK_FAILED)
             break;
     }
 
-    CHECK(peer.retrs == 1);
+    CHECK(fake_peer_retr_count(peer) == 1);
     CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
     CHECK(app_state(app)->dock.file_kept == 1);
     CHECK(strstr(app_state(app)->dock.message, "FINAL REPLY MISSING") != NULL);
@@ -2266,11 +2112,13 @@ static void test_download_final_reply_loses_queue(void)
 
     static const char *again_listing =
         "type=file;size=5;modify=20240101000000; C.BIN\r\n";
-    Peer again;
-    peer_init(&again, again_listing, "WORLD");
-    pump(app, &again, 120);
+    FakePeer *again = peer_new();
+    fake_peer_set_listing(again, again_listing);
+    fake_peer_set_payload(again, "WORLD");
+    fake_peer_open(again);
+    pump(app, again, 120);
     CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
-    CHECK(again.listings >= 1);
+    CHECK(fake_peer_listing_count(again) >= 1);
 
     if (app_state(app)->active_pane != UI_PANE_REMOTE)
         press(app, INPUT_BIT(INPUT_L1));
@@ -2283,14 +2131,17 @@ static void test_download_final_reply_loses_queue(void)
 
     for (int i = 0; i < 120; ++i) {
         (void)app_tick(app);
-        peer_serve(&again);
-        if (again.retrs > 0 && app_state(app)->dock.state == UI_DOCK_DONE)
+        fake_peer_serve(again);
+        if (fake_peer_retr_count(again) > 0 &&
+            app_state(app)->dock.state == UI_DOCK_DONE)
             break;
     }
-    CHECK(again.retrs == 1);
+    CHECK(fake_peer_retr_count(again) == 1);
     CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
     CHECK(content_is("ux0:data/C.BIN", "WORLD"));
 
+    fake_peer_destroy(again);
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -2426,6 +2277,36 @@ static void test_server_port_ceiling(void)
     CHECK(app_state(app)->server.port == 65531);
     CHECK(fake_net_listener_count() == 1);
     CHECK(fake_net_listener_addr(0).port == 65531);
+
+    app_destroy(app);
+}
+
+/* The SERVER port field opens text entry: the typed value reaches the worker,
+ * and a refused value leaves the saved port alone. */
+static void test_server_port_editor(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    fake_net_set_link(1, 1, PEER_ADDR, 0);
+    press(app, INPUT_BIT(INPUT_START));
+    CHECK(app_state(app)->screen == UI_SCREEN_SERVER);
+    press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->server.focus_start == 0);
+
+    fake_ime_queue_text("1338");
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 20);
+    CHECK(worker_settings(app_worker(app))->server_port == 1338);
+    CHECK(app_state(app)->server.port == 1338);
+
+    fake_ime_queue_text("65532");
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 20);
+    CHECK(worker_settings(app_worker(app))->server_port == 1338);
+    CHECK(strstr(app_state(app)->panes[UI_PANE_REMOTE].error,
+                 "PORT MUST BE 1024-65531") != NULL);
 
     app_destroy(app);
 }
@@ -2640,10 +2521,10 @@ static void test_deferred_worker_confirmation(void)
     if (app == NULL)
         return;
 
-    Peer peer;
-    connect_site(app, &peer);
-    peer.exists_path = "/UP.TXT";
-    peer.exists_size = 2;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_exists_path(peer, "/UP.TXT");
+    fake_peer_set_exists_size(peer, 2);
 
     enter_ux0_data(app);
     select_local_named(app, "DEL.TXT");
@@ -2665,7 +2546,7 @@ static void test_deferred_worker_confirmation(void)
     up.total = 2;
     up.total_known = 1;
     CHECK(handoff_command_push(app_handoff(app), &up) == 1);
-    pump(app, &peer, 80);
+    pump(app, peer, 80);
 
     /* The worker prompt waits; the local dialog still owns the screen. */
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
@@ -2673,15 +2554,16 @@ static void test_deferred_worker_confirmation(void)
 
     /* Answer the local dialog with CANCEL; the deferred prompt appears. */
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 80);
+    pump(app, peer, 80);
     CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
     CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
 
     press(app, INPUT_BIT(INPUT_RIGHT)); /* SKIP */
     press(app, INPUT_BIT(INPUT_CROSS));
-    pump(app, &peer, 40);
-    CHECK(peer.stors == 0);
+    pump(app, peer, 40);
+    CHECK(fake_peer_stor_count(peer) == 0);
 
+    fake_peer_destroy(peer);
     app_destroy(app);
 }
 
@@ -2783,6 +2665,7 @@ int main(void)
     test_shutdown_cancels();
     test_quit_with_server();
     test_server_port_ceiling();
+    test_server_port_editor();
     test_server_start_refused_port();
 
     if (s_failures != 0) {
