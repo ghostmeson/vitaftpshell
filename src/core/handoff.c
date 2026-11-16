@@ -67,20 +67,25 @@ int handoff_command_push(Handoff *handoff, const UiCommand *command)
 
 int handoff_cancel_type(const Handoff *handoff, HandoffCancelLane lane)
 {
-    if (handoff == NULL || lane < HANDOFF_CANCEL_NETWORK ||
-        lane > HANDOFF_CANCEL_LOCAL)
+    if (handoff == NULL || lane > HANDOFF_CANCEL_LOCAL)
         return UI_CMD_NONE;
     if (LOAD_ACQ(&handoff->critical_cancel_lane_valid[lane]))
         return (int)handoff->critical_cancel_lane[lane].command.type;
-    if (LOAD_ACQ(&handoff->critical_cancel_any_valid))
-        return (int)handoff->critical_cancel_any.command.type;
+    if (LOAD_ACQ(&handoff->critical_cancel_any_valid)) {
+        /* The single-lane answer is ambiguous while the other lane has its
+         * own pending cancel; that lane's explicit command owns the press. */
+        HandoffCancelLane other = lane == HANDOFF_CANCEL_NETWORK
+                                      ? HANDOFF_CANCEL_LOCAL
+                                      : HANDOFF_CANCEL_NETWORK;
+        if (!LOAD_ACQ(&handoff->critical_cancel_lane_valid[other]))
+            return (int)handoff->critical_cancel_any.command.type;
+    }
     return UI_CMD_NONE;
 }
 
 int handoff_cancel_consume(Handoff *handoff, HandoffCancelLane lane)
 {
-    if (handoff == NULL || lane < HANDOFF_CANCEL_NETWORK ||
-        lane > HANDOFF_CANCEL_LOCAL)
+    if (handoff == NULL || lane > HANDOFF_CANCEL_LOCAL)
         return 0;
     if (LOAD_ACQ(&handoff->critical_cancel_lane_valid[lane])) {
         STORE_REL(&handoff->critical_cancel_lane_valid[lane], 0);
@@ -103,24 +108,26 @@ int handoff_cancel_consume(Handoff *handoff, HandoffCancelLane lane)
 static int take_oldest_cancel(Handoff *handoff, UiCommand *out)
 {
     int chosen = -1;
+    int chosen_any = 0;
     uint32_t oldest = UINT32_MAX;
 
     if (LOAD_ACQ(&handoff->critical_cancel_any_valid) &&
         handoff->critical_cancel_any.seq < oldest) {
         oldest = handoff->critical_cancel_any.seq;
-        chosen = 2;
+        chosen_any = 1;
     }
-    for (int lane = 0; lane < 2; ++lane) {
+    for (int lane = 0; lane < HANDOFF_CANCEL_LANE_COUNT; ++lane) {
         if (LOAD_ACQ(&handoff->critical_cancel_lane_valid[lane]) &&
             handoff->critical_cancel_lane[lane].seq < oldest) {
             oldest = handoff->critical_cancel_lane[lane].seq;
             chosen = lane;
+            chosen_any = 0;
         }
     }
-    if (chosen < 0)
+    if (!chosen_any && chosen < 0)
         return 0;
 
-    if (chosen == 2) {
+    if (chosen_any) {
         if (out != NULL)
             *out = handoff->critical_cancel_any.command;
         STORE_REL(&handoff->critical_cancel_any_valid, 0);

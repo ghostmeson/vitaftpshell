@@ -2201,6 +2201,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
         set_transfer_dock(lane, event, UI_DOCK_FAILED);
+        lane->notice = 0;
         lane->file_kept = event->file_kept;
         lane_terminal(state, lane);
         break;
@@ -2220,6 +2221,8 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->skipped = event->batch_skipped;
         lane->failed = event->batch_failed;
         lane->cancelled = event->batch_cancelled;
+        /* The last item's done event owns the notice flag; a batch started
+         * later clears it. */
         lane->rate = event->rate;
         lane->rate_known = event->rate_known;
         lane->elapsed_ms = event->elapsed_ms;

@@ -1598,6 +1598,21 @@ static void test_size_stat(void)
     tick(client);
     CHECK(cap.done == 1 && cap.ok == 1 && cap.unsupported == 1);
 
+    cap.done = 0;
+    CHECK(ftp_client_size(client, "/ODD") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /ODD");
+    reply(&server, 504, "Not implemented for that parameter.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.unsupported == 1);
+
+    cap.done = 0;
+    CHECK(ftp_client_size(client, "/JUNK") == FTP_CLIENT_OK);
+    expect_cmd(&server, "SIZE /JUNK");
+    reply(&server, 213, "not-a-number");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.unsupported == 1 &&
+          cap.exists == 0);
+
     ftp_client_destroy(client);
 }
 

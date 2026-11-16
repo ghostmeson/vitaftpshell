@@ -41,6 +41,8 @@ typedef enum {
     HANDOFF_CANCEL_LOCAL = 1
 } HandoffCancelLane;
 
+#define HANDOFF_CANCEL_LANE_COUNT 2
+
 typedef enum {
     HANDOFF_EVT_PROGRESS = 0,
     HANDOFF_EVT_STATE,
@@ -180,8 +182,8 @@ typedef struct {
     HandoffCommand critical_stop;
     int critical_cancel_any_valid;
     HandoffCommand critical_cancel_any;
-    int critical_cancel_lane_valid[2];
-    HandoffCommand critical_cancel_lane[2];
+    int critical_cancel_lane_valid[HANDOFF_CANCEL_LANE_COUNT];
+    HandoffCommand critical_cancel_lane[HANDOFF_CANCEL_LANE_COUNT];
 
     HandoffEvent events[HANDOFF_EVT_CAP];
     uint32_t evt_head;

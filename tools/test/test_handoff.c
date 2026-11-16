@@ -158,6 +158,7 @@ static void test_cancel_slots(void)
      * network lane has its own pending cancel. */
     CHECK(handoff_command_push(&s_handoff, &net) == 1);
     CHECK(handoff_command_push(&s_handoff, &all) == 1);
+    CHECK(handoff_cancel_type(&s_handoff, HANDOFF_CANCEL_LOCAL) == UI_CMD_NONE);
     CHECK(handoff_cancel_consume(&s_handoff, HANDOFF_CANCEL_LOCAL) == 0);
     CHECK(handoff_cancel_consume(&s_handoff, HANDOFF_CANCEL_NETWORK) == 1);
     CHECK(handoff_cancel_consume(&s_handoff, HANDOFF_CANCEL_LOCAL) == 1);

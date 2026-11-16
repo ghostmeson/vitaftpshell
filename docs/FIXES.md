@@ -8,7 +8,7 @@ This file is an **index**, not the full evidence record:
 - [`VERIFICATION.md`](VERIFICATION.md) owns the hardware matrix, the logs, the
   core-dump analysis, and the host-test evidence.
 - [`DECISIONS.md`](DECISIONS.md) owns the numbered product and architecture
-  choices (D53–D90 for this period).
+  choices (D53–D91 for this period).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the layering and port rules.
 - [`DESIGN.md`](DESIGN.md) owns the settled layout, states, and input.
 
@@ -27,8 +27,8 @@ matrix passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b68.vpk`, 263,802 bytes,
-  SHA-256 `074a1421e345e4a3532a9bf58ab8a1ee26cbdc6fa7560e7926ba97cb9cd1e251`.
+- **Current artifact:** `vitaftpshell-v01.00-b72.vpk`, 265,072 bytes,
+  SHA-256 `9bb0ae6c7109be44c75a1fc89c7119aef4fdb8e211ff46ae9211702e4316888f`.
 - **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
   FileZilla upload and download work with two sessions; the app-local client
   transfers on all three volumes. The session log is `logs/session-b60.log`.
@@ -45,10 +45,35 @@ matrix passes.
 - **Matrix:** the b58 self-connection upload and download pass on hardware.
   b60 accepts up to four clients with one data transfer at a time (D86);
   FileZilla's browse and transfer connections both connect, and its upload and
-  download pass. b61–b63 are contained in b66, which is the current artifact;
-  none of them has run on hardware. M5 remains PART only for a FileZilla
-  rename/delete and the full three-volume browse. M10 and M13 are partly
-  observed; M1–M9, M11, and M12 are pending.
+  download pass. b61–b63 are contained in b66, and b66–b72 are the current
+  line; none of them has run on hardware since b60. M5 remains PART only for a
+  FileZilla rename/delete and the full three-volume browse. M10 and M13 are
+  partly observed; M1–M9, M11, and M12 await the b72 console run.
+
+## Residual open-issues sweep (b72)
+
+| Build | Symptom | Cause and fix | Evidence | Status |
+|---|---|---|---|---|
+| b72 | **Nothing proved the app held the listing the UI rendered.** | The handoff adopt mechanism had a unit test but no app-level one. `test_app_listing_slot_held` drives the real App: an idle frame keeps the slot held, and a REFRESH publishes a newer generation that is adopted while the old slot is released. | `test_app_listing_slot_held`; host run | `HOST b72` |
+| b72 | **The queue lane stopped at the lost-reply terminal.** | `test_download_final_reply_loses_queue` now reconnects the saved site after the kept terminal and downloads one more file, asserting the RETR, the arrival, and a done dock. | `test_download_final_reply_loses_queue`; host run | `HOST b72` |
+| b72 | **The reply-backlog PASS mask rested on inspection.** | `fake_net_block_sends` wedges a control socket so the server's 16 KiB reply buffer fills. `test_trace_drops_password` drops `PASS`, `pass`, `PASS<TAB>`, and bare `PASS`: every spelling traces `DROPPED PASS ****`, no argument reaches the trace, and a dropped NOOP proves the branch ran. The multiline raw-append paths now enter the same backlog state. | `test_trace_drops_password`; host run | `HOST b72` |
+| b72 | **The owner RETR exemption was proven only while the data accept was pending.** | The fake filesystem now holds 16 KiB, so a RETR stays ACTIVE with the data socket undrained. `test_owner_size_while_active` reads SIZE mid-transfer: the owner gets 213 with the real size, the other session 450. | `test_owner_size_while_active`; host run | `HOST b72` |
+| b72 | **The cancel dialog called a complete download partial.** | The single-lane cancel says the transferred file is removed and that KEEP leaves it running; the two-lane cancel says cancelled transfers remove their files. An explicit cancel still discards (D89). | `test_render_screens`, `test_uistate`; host run | `HOST b72` |
+| b72 | **`FEAT` advertised a `perm` fact MLST never emitted.** | The feature list is now `MLST type*;size*;modify*;`; `test_feat_matches_mlst` compares it with the MLST body. | `test_feat_matches_mlst`; host run | `HOST b72` |
+| b72 | **A DHCP change left a stale `227` endpoint.** | The one-second link check adopts a known, non-zero address when it changes; an unknown address keeps the last usable one. The listener stays wildcard-bound and the data port stays fixed (D59). | `test_pasv_follows_link_address`; host run | `HOST b72` |
+| b72 | **A second cancel could overwrite the first before the worker read it.** | Each lane has its own critical slot plus a single-lane slot; the oldest press pops first. The local executor consumes the press it peeked, and a lane never takes the single-lane answer while the other lane has its own cancel. | `test_cancel_slots`, `test_two_cancel_presses`; host run | `HOST b72` |
+| b72 | **A kept `.vftp.old` was visible but unmarked.** | `UiRow.debris` is set from the sidecar kind in both panes and draws `ASIDE` in yellow in the value column; the `.part` stays unlisted (D81). | `test_aside_debris_mark`, `test_aside_debris_row`; host run | `HOST b72` |
+| b72 | **A successful rename with a failed aside cleanup reported a failed commit.** | `FsOpProgress.notice` records `ASIDE CLEANUP FAILED - OLD COPY KEPT AS ...`; the step counts as done, the worker carries the notice on the done event, and the dock keeps the green word and shows the notice on line three. | `test_aside_cleanup_failure`, `test_local_rename_aside_notice`, `test_aside_notice_done`; host run | `HOST b72` |
+| b72 | **The queue's terminal and conflict latches had no production reader.** | Remove `xfer_take_terminal`, `xfer_set_conflict`, `xfer_conflict`, their fields, and the dead outcome arguments. The worker owns the batch conflict and logs each terminal. | `test_xfer`; host run | `HOST b72` |
+| b72 | **The confirm answer was resolved twice.** | One `resolve_confirm_answer` serves Cross and Circle, preserving the prompt-id echo, the KEEP close, and the PATH BUSY waiting effects. | `test_uistate`; host run | `HOST b72` |
+| b72 | **TSan reported a race in the fake clock, not the app.** | The fake clock's shared time is atomic. `tools/test/tsan.sh` probes TSan, keeps the negative handoff ordering check, and runs the real app thread with the fakes included; a source failure now fails the gate. | `tools/test/tsan.sh`; host run | `HOST b72` |
+| b72 | **An upload to a server without MLST kept the stale-overwrite behavior.** | The preflight prefers MLST and falls back to SIZE (213 exists, 550 missing, 5xx unsupported). A destination the current remote listing shows as a folder is still refused; a stale probe answer is discarded when its item is gone. D91 supersedes D65 section 4. | `test_size_stat`, `test_upload_preflight_size_fallback`, `test_upload_preflight_size_folder`; host run | `HOST b72` |
+
+**Accepted residuals.** The fixed data port still cannot distinguish two
+sessions on one host (U4). `path_canonicalize` still does not fold trailing dots
+or spaces; the Vita filesystem's own folding remains `[C]` and needs the
+console. A SIZE-only probe cannot report a type for a destination outside the
+current remote listing; the server's STOR refusal is the remaining signal.
 
 ## Open-issues pass (b68)
 
@@ -83,11 +108,7 @@ matrix passes.
 **Still open from the b63 review, recorded rather than built** (U7):
 
 - The data-connection accept cannot distinguish two sessions on one host; the fixed port is kept and the limitation is accepted (U4).
-- Cancellation during the final-reply wait discards a complete download by design (D89, KTD8); the cancel dialog says the partial is removed.
-- `FEAT` advertises a `perm` fact that `MLSD`/`MLST` never emits.
-- A PASV reply captures the LAN address at start; a DHCP change leaves a stale `227` endpoint.
-- A second cancel can overwrite the first in the single critical-cancel slot.
-- `path_canonicalize` does not fold trailing dots or spaces; the Vita filesystem's own folding is unverified `[C]`.
+- `path_canonicalize` does not fold trailing dots or spaces; the Vita filesystem's own folding is unverified `[C]` and needs a console test.
 
 ## Upload defect (b57 → b58)
 
@@ -200,11 +221,11 @@ here so they do not live only in a review report.
 | Item | Why it waited | Status |
 |---|---|---|
 | The `UiState` row pointer can outlive a released listing generation | Fixed in b67: the app holds the slot and adopts a newer generation in one step | `test_app_listing_slot_held`; `HOST b68` |
-| A kept `.vftp.old` is visible but not marked as debris | The row flag and render case are their own UI change (D81) | `PENDING` |
-| A failed aside cleanup still reports a failed commit | The honest notice needs a notice field on the progress record; the rename did happen | `PENDING` |
-| The queue's terminal and conflict latches have no production reader | The queue tests depend on them; removing them is a focused follow-up to D82's one-owner rule | `PENDING` |
-| Confirm resolution is duplicated across the two key branches | The prompt-id fix closed the behavior; the shared resolver is a cleanup | `PENDING` |
-| TSan over the threaded app test | The singleton fakes race; the app is clean under ASan/UBSan | `PENDING` |
+| A kept `.vftp.old` is visible but not marked as debris | Fixed in b72: `UiRow.debris` and the yellow `ASIDE` token (D81) | `test_aside_debris_mark`, `test_aside_debris_row`; `HOST b72` |
+| A failed aside cleanup still reports a failed commit | Fixed in b72: `FsOpProgress.notice` and the yellow dock notice | `test_aside_cleanup_failure`, `test_local_rename_aside_notice`; `HOST b72` |
+| The queue's terminal and conflict latches have no production reader | Fixed in b72: the latches and dead outcome arguments are removed | `test_xfer`; `HOST b72` |
+| Confirm resolution is duplicated across the two key branches | Fixed in b72: one `resolve_confirm_answer` serves both keys | `test_uistate`; `HOST b72` |
+| TSan over the threaded app test | Fixed in b72: the fake clock is atomic and the script runs the app with the fakes included | `tools/test/tsan.sh`; `HOST b72` |
 | M1-M13 on b55 | Superseded by the b66 console run | `PENDING` |
 
 ## b55 review remediation
@@ -221,7 +242,7 @@ here so they do not live only in a review report.
 | b55 | The transfer sidecar has one owner; a failed restore names the kept copy; `.part` is hidden | `test_path`, `test_reserve`, `test_fsop_run` | `HOST b55` |
 | b55 | Dead exports removed, sites seeded by events, protected-root flag, action context, rename SKIP and capacity wording | suites; `test_fsop_plan` | `HOST b55` |
 | b55 | The real worker pthread is exercised on the host: listing through the handoff, quit, join, ASan/UBSan clean | `test_app_thread`, `tools/test/asan.sh` | `HOST b55` |
-| b55 | TSan reports a race in the singleton fake clock, not the app | `test_app_thread` under TSan | `PENDING` |
+| b55 | TSan reports a race in the singleton fake clock, not the app | `test_app_thread` under TSan after the atomic clock; `tools/test/tsan.sh` | `HOST b72` |
 
 ## b41 parallel lanes (b49)
 
@@ -358,14 +379,15 @@ here so they do not live only in a review report.
 - **R22/R23 recursive transfers:** deferred by the user's choice. A folder is
   now refused with `FOLDER NOT SUPPORTED` instead of sent as one RETR/STOR.
   This remains a plan gap.
-- **Upload conflict detection is MLST-only.** A server that does not advertise
-  MLST is not probed and keeps the prior overwrite behavior. A server that
-  advertises it but returns 502 is treated as unsupported.
+- **Upload conflict detection falls back to SIZE.** A server that does not
+  advertise MLST is probed with SIZE (D91); a server that offers neither is not
+  probed and keeps the prior overwrite behavior. A destination outside the
+  current remote listing cannot be typed by SIZE alone.
 - **Download totals trust the listing.** A server that reports a wrong size
   makes the dock total wrong; the bytes-done count remains correct.
 - **M1–M13:** none is fully passed. M5 is PART (FileZilla rename/delete and
   the three-volume browse unobserved); M10 and M13 are partly observed; the
-  rest await the b66 console run.
+  rest await the b72 console run.
 - **Remaining `[C]` claims:** `select` over SceNet, IME masked text, the
   128 KiB pthread stack acceptance, `ur0:`/`uma0:` free space (now reported
   unknown), the fixed `control+1` PASV data port, and the reply-line cap.

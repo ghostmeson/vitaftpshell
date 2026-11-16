@@ -1,15 +1,41 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b68.vpk
-**SHA-256:** 074a1421e345e4a3532a9bf58ab8a1ee26cbdc6fa7560e7926ba97cb9cd1e251
-**ELF:** build/vitaftpshell, 531,560 bytes
+**Build:** vitaftpshell-v01.00-b72.vpk
+**SHA-256:** 9bb0ae6c7109be44c75a1fc89c7119aef4fdb8e211ff46ae9211702e4316888f
+**ELF:** build/vitaftpshell, 535,976 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
-**Date:** 2026-11-15
-**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy, b62 trims the warning text, b63 removes the warning panel (D88), b66 carries the b63 review remediation, and b68 closes its deferred preflight, sidecar, and listing-lifetime items; the b68 hardware retry is pending; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
+**Date:** 2026-11-16
+**Status:** b43 hardware-tested (operator report, 2026-11-14); b60 runs on the console with FileZilla and app-local transfers; b61 applies the D87 access policy, b62 trims the warning text, b63 removes the warning panel (D88), b66 carries the b63 review remediation, b68 closes its deferred preflight, sidecar, and listing-lifetime items, and b72 closes the non-hardware residual sweep; the b72 hardware retry is pending; b57 traced the upload defect, b58 fixed the app-local transfer; b56 carries the b55 review remediation and the settled icon; b40 crashed (four dumps analysed below); M13 and M10 partly observed, M1–M9, M11, and M12 row transcription pending
 
 This file is the U14 evidence record. A row is PASS only when the observed
 result matches its pass condition and the evidence is recorded here. A row that
 cannot be run is BLOCKED, never PASS. `verified` requires every row PASS.
+
+## Residual open-issues sweep (b72, host)
+
+**Date:** 2026-11-16
+**Build:** `vitaftpshell-v01.00-b72.vpk`
+**SHA-256:** `9bb0ae6c7109be44c75a1fc89c7119aef4fdb8e211ff46ae9211702e4316888f`
+**Scope:** the non-hardware items left by the b66 review and the b63/b55
+residual lists.
+
+Host evidence: `test_app_listing_slot_held`, the extended
+`test_download_final_reply_loses_queue`, `test_trace_drops_password`,
+`test_owner_size_while_active`, the cancel/FEAT render and reducer cases,
+`test_pasv_follows_link_address`, `test_cancel_slots` and
+`test_two_cancel_presses`, `test_aside_debris_mark`/`test_aside_debris_row`,
+`test_aside_cleanup_failure`/`test_local_rename_aside_notice`/
+`test_aside_notice_done`, `test_xfer`, the confirm reducer cases,
+`tools/test/tsan.sh`, and `test_size_stat`/`test_upload_preflight_size_fallback`/
+`test_upload_preflight_size_folder`. D91 records the SIZE fallback. The fixed
+data-port identity and the trailing-dot/space folding remain accepted residuals;
+neither is a console PASS. No console row is claimed.
+
+Review: `ce-code-review` (full, `mode:agent`, base `dd7aad3`, run
+`20261116-002414-b4c0cc07`) returned `Ready with fixes`; its confirmed P1/P2
+findings (stale upload verdict after a cancel, the TSan gate's vacuous skip, the
+missing D91 entry, the folder destination on the SIZE path, the lane count, the
+notice lifetime, and the header contract) were applied before this build.
 
 ## Open-issues pass (b68, host)
 
@@ -311,7 +337,7 @@ and a refused sync no longer fails or discards a completed file.
 
 **Date:** 2026-11-14
 **Build:** `vitaftpshell-v01.00-b40.vpk`
-**SHA-256:** `6e2b8149489101df5aba7915fbfe2d41452869a9835b713c8ba2b7b4b02d88f2`
+**SHA-256:** `6e2b8149489101df5aba7915fbfe2d41452869a9835b723c8ba2b7b4b02d88f2`
 
 The correction pass is implemented and verified on the host, not yet on the
 console. Twenty host suites pass with zero warnings, the preview renders 36

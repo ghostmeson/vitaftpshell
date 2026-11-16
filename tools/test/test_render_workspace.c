@@ -122,7 +122,7 @@ static void test_aside_debris_mark(void)
     ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_rows, 3, 0);
     render();
     CHECK(trace_has_text("K.BIN.VFTP.OLD"));
-    CHECK(trace_has_text("ASIDE"));
+    CHECK(trace_has_text_color("ASIDE", C_YELLOW));
     CHECK(!trace_has_text("5 B"));
 }
 
@@ -486,7 +486,7 @@ static void test_aside_notice_done(void)
     render();
     CHECK(trace_text_at_color("RENAMED", 32.0f, 450.0f, C_GREEN));
     /* The dock fits the line, so only the prefix is guaranteed. */
-    CHECK(trace_has_text_prefix("ASIDE CLEANUP FAILED"));
+    CHECK(trace_has_text_prefix_color("ASIDE CLEANUP FAILED", C_YELLOW));
 }
 
 int main(void)

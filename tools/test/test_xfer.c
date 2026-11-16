@@ -61,19 +61,17 @@ static void test_order_and_slot(void)
     CHECK(queue.count == 3);
 
     XferItem next;
-    CHECK(xfer_release(&queue, XFER_ITEM_DONE, OP_CAUSE_APP, OP_STAGE_TRANSFER,
-                       &next) == 1);
+    CHECK(xfer_release(&queue, &next) == 1);
     CHECK(strcmp(next.source.text, "b") == 0);
     CHECK(next.state == XFER_ITEM_ACTIVE);
     CHECK(xfer_busy(&queue));
     CHECK(xfer_depth(&queue) == 1);
 
-    CHECK(xfer_cancel_active(&queue, OP_CAUSE_USER, OP_STAGE_TRANSFER, &next) ==
+    CHECK(xfer_cancel_active(&queue, &next) ==
           1);
     CHECK(strcmp(next.source.text, "c") == 0);
 
-    CHECK(xfer_release(&queue, XFER_ITEM_DONE, OP_CAUSE_APP, OP_STAGE_TRANSFER,
-                       &next) == 1);
+    CHECK(xfer_release(&queue, &next) == 1);
     CHECK(!xfer_busy(&queue));
     CHECK(queue.count == 0);
     CHECK(xfer_depth(&queue) == 0);
@@ -89,8 +87,7 @@ static void test_clear_queued(void)
     xfer_clear_queued(&queue);
     CHECK(queue.count == 1);
     CHECK(xfer_busy(&queue));
-    CHECK(xfer_release(&queue, XFER_ITEM_DONE, OP_CAUSE_APP, OP_STAGE_TRANSFER,
-                       NULL) == 1);
+    CHECK(xfer_release(&queue, NULL) == 1);
     CHECK(queue.count == 0);
 }
 

@@ -5,7 +5,6 @@
 
 #include <stdint.h>
 
-#include "core/cause.h"
 #include "core/path.h"
 
 /*
@@ -38,10 +37,7 @@ typedef enum {
 
 typedef enum {
     XFER_ITEM_QUEUED = 0,
-    XFER_ITEM_ACTIVE,
-    XFER_ITEM_DONE,
-    XFER_ITEM_FAILED,
-    XFER_ITEM_CANCELLED
+    XFER_ITEM_ACTIVE
 } XferItemState;
 
 typedef struct {
@@ -75,14 +71,14 @@ int xfer_claim(XferQueue *queue, XferItem *out);
 
 /*
  * Finish the active item. The next queued item starts immediately and is
- * returned through `next` when present.
+ * returned through `next` when present. The caller owns the outcome: the
+ * worker logs it and the batch counters record it, so the queue stores no
+ * terminal copy.
  */
-int xfer_release(XferQueue *queue, XferItemState outcome, OpCause cause,
-                 OpStage stage, XferItem *next);
+int xfer_release(XferQueue *queue, XferItem *next);
 
 /* Cancel the active item. Queued items keep their order. */
-int xfer_cancel_active(XferQueue *queue, OpCause cause, OpStage stage,
-                       XferItem *next);
+int xfer_cancel_active(XferQueue *queue, XferItem *next);
 
 /* R40: clear every queued item, keeping an active transfer. */
 void xfer_clear_queued(XferQueue *queue);

@@ -388,6 +388,7 @@ static void test_download_destination_failure(void)
 
 static void select_local_named(App *app, const char *name);
 static void enter_ux0_data(App *app);
+static void start_upload(App *app, Peer *peer);
 static void enter_local_named(App *app, const char *name, const char *path);
 
 /* A local job starts beside a held download (D72), and a lane cancel never
@@ -580,9 +581,6 @@ static void test_wait_resume_rechecks(void)
     app_destroy(app);
 }
 
-/* The app holds the listing slot its rows point at across frames. A refresh
- * publishes a newer generation; the app adopts it and releases the old slot in
- * the same step, so the worker can never rewrite a visible row. */
 /* A kept `.vftp.old` is visible and marked; the never-valid `.part` is not
  * listed at all (D81). */
 static void test_aside_debris_row(void)
@@ -611,6 +609,9 @@ static void test_aside_debris_row(void)
     app_destroy(app);
 }
 
+/* The app holds the listing slot its rows point at across frames. A refresh
+ * publishes a newer generation; the app adopts it and releases the old slot in
+ * the same step, so the worker can never rewrite a visible row. */
 static void test_app_listing_slot_held(void)
 {
     App *app = make_app();
@@ -669,6 +670,78 @@ static void test_app_listing_slot_held(void)
     CHECK(listings->slots[next].generation > generation);
     CHECK(listings->slots[held].held == 0);
     CHECK(pane->rows == (const UiRow *)listings->slots[next].rows);
+
+    app_destroy(app);
+}
+
+/* A successful local rename whose aside cleanup fails keeps the operation
+ * green and names the kept copy (the end-to-end notice path). */
+static void test_local_rename_aside_notice(void)
+{
+    App *app = make_app_ex("ux0:data/OLD.TXT", "NEW", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/NEW.TXT", "OLD", 3);
+    fake_fs_set_rename_replaces(0);
+    fake_fs_fail_remove_from(0);
+
+    enter_ux0_data(app);
+    select_local_named(app, "OLD.TXT");
+    fake_ime_queue_text("NEW.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    for (int i = 0; i < 4; ++i)
+        press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_RENAME);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 20);
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_RIGHT)); /* OVERWRITE */
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        if (app_state(app)->local_dock.state == UI_DOCK_DONE &&
+            app_state(app)->local_dock.notice)
+            break;
+    }
+    CHECK(app_state(app)->local_dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->local_dock.notice == 1);
+    CHECK(strstr(app_state(app)->local_dock.message, "ASIDE CLEANUP FAILED") !=
+          NULL);
+    CHECK(content_is("ux0:data/NEW.TXT", "NEW"));
+    CHECK(fake_fs_exists("ux0:data/NEW.TXT.vftp.old"));
+
+    app_destroy(app);
+}
+
+/* A SIZE-only preflight still refuses a destination the current remote
+ * listing shows as a folder. */
+static void test_upload_preflight_size_folder(void)
+{
+    App *app = make_app_ex("ux0:data/DEST", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "DEST");
+
+    static const char *listing =
+        "type=dir;modify=20240101000000; DEST\r\n"
+        "type=file;size=5;modify=20240101000000; F.BIN\r\n";
+    Peer peer;
+    connect_site_listing(app, &peer, listing, "HELLO");
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/DEST";
+    peer.exists_size = 0;
+
+    start_upload(app, &peer);
+    CHECK(peer.sizes == 1);
+    CHECK(peer.stors == 0);
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+    CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
 
     app_destroy(app);
 }
@@ -2199,6 +2272,8 @@ int main(void)
     test_local_batch_terminal();
     test_local_conflict_prompt();
     test_local_rename_conflict();
+    test_local_rename_aside_notice();
+    test_upload_preflight_size_folder();
     test_deferred_worker_confirmation();
     test_local_batch_preflight();
     test_local_batch_refused_item();

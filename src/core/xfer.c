@@ -71,16 +71,10 @@ int xfer_claim(XferQueue *queue, XferItem *out)
     return 1;
 }
 
-int xfer_release(XferQueue *queue, XferItemState outcome, OpCause cause,
-                 OpStage stage, XferItem *next)
+int xfer_release(XferQueue *queue, XferItem *next)
 {
     if (queue == NULL || !queue->active || queue->count == 0)
         return 0;
-    if (outcome == XFER_ITEM_QUEUED || outcome == XFER_ITEM_ACTIVE)
-        outcome = XFER_ITEM_DONE;
-
-    (void)cause;
-    (void)stage;
     drop_first(queue);
 
     if (next != NULL)
@@ -90,14 +84,10 @@ int xfer_release(XferQueue *queue, XferItemState outcome, OpCause cause,
     return 1;
 }
 
-int xfer_cancel_active(XferQueue *queue, OpCause cause, OpStage stage,
-                       XferItem *next)
+int xfer_cancel_active(XferQueue *queue, XferItem *next)
 {
     if (queue == NULL || !queue->active || queue->count == 0)
         return 0;
-
-    (void)cause;
-    (void)stage;
     drop_first(queue);
 
     if (next != NULL)
