@@ -63,7 +63,7 @@ stateDiagram-v2
 
 **Volumes**
 
-- R1. ALL DRIVES lists `ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, and `app0:` when mounted; an absent mount is absent, not an error row, and no system-only mount appears.
+- R1. ALL DRIVES lists `ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, and `app0:` when mounted; an absent mount is absent, not an error row, and neither a protected system partition (`vs0:`, `os0:`) nor a save-data mount (`savedata0:`) appears.
 - R2. `app0:` and `gro0:` are read-only: the row carries a read-only mark, and a write, rename, move, or delete there is refused with a reason and changes nothing.
 - R3. Every listed volume root is protected: a rename, move, or delete of the root is refused by name. The system data root of a listed volume, at minimum `imc0:data`, is protected like `ur0:data` and `ux0:data`.
 - R4. Free space follows the volume; a value the platform cannot report renders `--`.
@@ -231,6 +231,7 @@ This plan covers the local workspace. The broader breakdown is the current under
 ### Dependencies / Assumptions
 
 - The mount set is runtime: `imc0:` exists on PCH-2000 only, `gro0:` and `grw0:` need a game card, and `uma0:` needs USB storage; `app0:` is always present.
+- The test console is a PCH-1000, so `imc0:` cannot be mounted; its matrix row is BLOCKED, not PASS, and the host fakes are its only coverage.
 - `app0:` and `gro0:` are read-only; `grw0:` is expected writable but unconfirmed, so a refused write there surfaces the platform reason rather than a read-only promise.
 - The ACTIONS panel can grow to seven rows, and the design update belongs to this work.
 - The v1 plan's stick and binding text is stale; the code and `DESIGN.md` already describe the behavior this plan requires.
