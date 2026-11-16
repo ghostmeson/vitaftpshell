@@ -31,6 +31,8 @@ static NetAddress s_peer;
 static uint32_t s_resolve_addr;
 static int s_resolve_fail;
 static NetResult s_fail_next;
+static uint16_t s_fail_listen_port;
+static int s_fail_listen;
 static NetResult s_connect_result;
 static NetResult s_send_result;
 static unsigned s_overflow;
@@ -167,6 +169,11 @@ static NetResult fake_listen(void *ctx, const NetAddress *addr,
                              NetSocket **out)
 {
     (void)ctx;
+    /* One named port can be made to fail while every other bind succeeds: the
+     * control listener has to survive so the 425 path is the only failure. */
+    if (s_fail_listen && addr != NULL && addr->port == s_fail_listen_port)
+        return NET_ERROR;
+
     NetResult failure = take_failure();
     if (failure != NET_OK)
         return failure;
@@ -259,6 +266,8 @@ void fake_net_reset(void)
     s_resolve_addr = 0xC0A8012Au;
     s_resolve_fail = 0;
     s_fail_next = NET_OK;
+    s_fail_listen = 0;
+    s_fail_listen_port = 0;
     s_connect_result = NET_OK;
     s_send_result = NET_OK;
     s_overflow = 0;
@@ -335,6 +344,12 @@ void fake_net_set_link(int up, int known, uint32_t addr, uint16_t port)
 void fake_net_fail_next(NetResult result)
 {
     s_fail_next = result;
+}
+
+void fake_net_fail_listen_port(uint16_t port, int fail)
+{
+    s_fail_listen_port = port;
+    s_fail_listen = fail;
 }
 
 NetSocket *fake_net_last_connected(void)

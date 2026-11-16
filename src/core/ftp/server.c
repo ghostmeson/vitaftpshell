@@ -23,6 +23,10 @@
 #define SERVER_ACCEPT_BATCH 4
 #define SERVER_TX_HIGH_WATER (SERVER_TX_MAX * 3 / 4)
 #define SERVER_LINK_CHECK_MS 1000
+/* Four data ports follow the control port, so 65531 is the highest control
+ * port whose last slot port (control+4) still fits uint16_t (R6). */
+#define SERVER_PORT_MIN 1024
+#define SERVER_PORT_MAX 65531
 
 typedef enum {
     SDATA_LIST = 0,
@@ -2202,7 +2206,7 @@ FtpServerResult ftp_server_start(FtpServer *server, uint16_t control_port)
         return FTP_SERVER_INVALID;
     if (server->state != FTP_SERVER_OFF)
         return FTP_SERVER_BUSY;
-    if (control_port < 1024 || control_port > 65534)
+    if (control_port < SERVER_PORT_MIN || control_port > SERVER_PORT_MAX)
         return FTP_SERVER_INVALID;
 
     NetLink link;

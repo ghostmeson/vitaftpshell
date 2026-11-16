@@ -577,7 +577,93 @@ static void test_start_and_bind(void)
     CHECK(ftp_server_state(server) == FTP_SERVER_OFF);
     CHECK(fake_net_listener_count() == 0);
     CHECK(cap.errors == 1);
-    CHECK(strstr(cap.detail, "BIND FAILED") != NULL);
+    /* Start binds the control listener alone, so the failure it reports names
+     * that port and no data port. */
+    CHECK(strstr(cap.detail, "BIND FAILED ON 1337") != NULL);
+    CHECK(strstr(cap.detail, "1338") == NULL);
+    CHECK(strstr(cap.detail, "1339") == NULL);
+    CHECK(strstr(cap.detail, "1340") == NULL);
+    CHECK(strstr(cap.detail, "1341") == NULL);
+    ftp_server_destroy(server);
+}
+
+/* AE3: 65531 is the highest control port that still leaves four data ports
+ * inside uint16_t; one above it is refused before anything binds. */
+static void test_control_port_ceiling(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = ftp_server_create(fake_net_port(), fake_fs_port(),
+                                          fake_clock_port(), capture_event,
+                                          &cap);
+    CHECK(ftp_server_start(server, 65531) == FTP_SERVER_OK);
+    CHECK(ftp_server_state(server) == FTP_SERVER_ON);
+    CHECK(ftp_server_data_port(server, 0) == 65532);
+    CHECK(ftp_server_data_port(server, 3) == 65535);
+    CHECK(fake_net_listener_count() == 1);
+    CHECK(fake_net_listener_addr(0).port == 65531);
+    ftp_server_destroy(server);
+
+    setup();
+    memset(&cap, 0, sizeof(cap));
+    server = ftp_server_create(fake_net_port(), fake_fs_port(),
+                               fake_clock_port(), capture_event, &cap);
+    CHECK(ftp_server_start(server, 65532) == FTP_SERVER_INVALID);
+    CHECK(ftp_server_state(server) == FTP_SERVER_OFF);
+    /* A refused start never reaches BINDING or ON, and binds nothing. */
+    CHECK(cap.state_changes == 0);
+    CHECK(cap.errors == 0);
+    CHECK(fake_net_listener_count() == 0);
+    ftp_server_destroy(server);
+}
+
+/* AE2: an occupied slot port costs that PASV and nothing more. Slot 1 answers
+ * 425, the server stays ON with no session armed, slot 0 still transfers, and
+ * slot 1 binds and transfers once the port is free. */
+static void test_data_port_bind_failure(void)
+{
+    setup();
+    SCapture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpServer *server = start_server(&cap);
+    FakeFtpClient a;
+    FakeFtpClient b;
+    connect_session(server, &a);
+    connect_second_session(server, &b, PEER_ADDR, PEER_PORT + 20);
+    CHECK(ftp_server_clients(server) == 2);
+
+    fake_net_fail_listen_port(1339, 1);
+    command(server, &b, "PASV", 425);
+    /* With live sessions the state is SESSION; R4's "stays ON" means the server
+     * never falls to OFF. */
+    CHECK(ftp_server_state(server) != FTP_SERVER_OFF);
+    CHECK(ftp_server_clients(server) == 2);
+    CHECK(!ftp_server_busy(server));
+    CHECK(cap.errors == 0);
+    CHECK(listener_for_port(1339) == NULL);
+
+    /* The other slot is unaffected. Its PASV is answered rather than refused
+     * with 450, which is also the proof that the failed bind armed nothing. */
+    pasv(server, &a);
+    CHECK(s_data_port == 1338);
+    queue_data_peer();
+    NetSocket *data = data_command(server, &a, "MLSD /UX0:", 150);
+    CHECK(data != NULL);
+    finish_data(server, &a, 226);
+
+    /* The failure is per-attempt: the same session's next PASV binds once the
+     * port is free. */
+    fake_net_fail_listen_port(1339, 0);
+    pasv(server, &b);
+    CHECK(s_data_port == 1339);
+    CHECK(listener_for_port(1339) != NULL);
+    queue_data_peer_for(PEER_ADDR, PEER_PORT + 30);
+    data = data_command(server, &b, "MLSD /UX0:", 150);
+    CHECK(data != NULL);
+    finish_data(server, &b, 226);
+    CHECK(ftp_server_state(server) != FTP_SERVER_OFF);
+
     ftp_server_destroy(server);
 }
 
@@ -1931,6 +2017,8 @@ static void test_rearm_drains_stale_peer(void)
 int main(void)
 {
     test_start_and_bind();
+    test_control_port_ceiling();
+    test_data_port_bind_failure();
     test_login();
     test_list_mlsd_nlst();
     test_pasv_follows_link_address();

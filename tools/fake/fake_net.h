@@ -32,6 +32,9 @@ unsigned fake_net_overflow_count(void);
 unsigned fake_net_last_wait_count(void);
 void fake_net_set_link(int up, int known, uint32_t addr, uint16_t port);
 void fake_net_fail_next(NetResult result);
+/* Fail listen() on one named port until cleared, so a slot's data-port bind can
+ * fail while the control listener still binds (R4's 425 case). */
+void fake_net_fail_listen_port(uint16_t port, int fail);
 
 NetSocket *fake_net_last_connected(void);
 /* The address a socket actually dialed; 0 when it never connected. */

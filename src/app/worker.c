@@ -31,6 +31,10 @@
 #define WORKER_LOCAL_SLICE_MS 6
 #define WORKER_LOCAL_STEPS_MAX 16
 #define WORKER_CONFIRM_ITEMS HANDOFF_CONFIRM_ITEMS
+/* Four data ports follow the control port, so 65531 is the highest startable
+ * port; the editor and the start path use the same ceiling (R6). */
+#define WORKER_SERVER_PORT_MIN 1024
+#define WORKER_SERVER_PORT_MAX 65531
 
 /* Which prompt owns the answer. A bare int let the local-action arm vanish
  * without a compiler warning; the enum makes a missing case loud. */
@@ -3524,6 +3528,16 @@ static void handle_command(Worker *worker, const UiCommand *command)
             emit_error(worker, UI_PANE_REMOTE, text, OP_CAUSE_APP,
                        OP_STAGE_CONNECT);
             emit_server_state(worker, UI_SERVER_OFF, 0);
+        } else if (result == FTP_SERVER_INVALID) {
+            /* The editor and the settings loader refuse this range, so the
+             * answer is a backstop: say why, and leave the server OFF. */
+            char text[96];
+            snprintf(text, sizeof(text), "PORT %d MUST BE %d-%d",
+                     (int)worker->settings.server_port,
+                     WORKER_SERVER_PORT_MIN, WORKER_SERVER_PORT_MAX);
+            emit_error(worker, UI_PANE_REMOTE, text, OP_CAUSE_APP,
+                       OP_STAGE_CONNECT);
+            emit_server_state(worker, UI_SERVER_OFF, 0);
         } else {
             /* ftp_server_start already emitted BINDING and ON. Do not emit a
              * second STARTING here: it would arrive after ON and overwrite it,
@@ -3558,9 +3572,13 @@ static void handle_command(Worker *worker, const UiCommand *command)
                   0);
         break;
     case UI_CMD_EDIT_PORT:
-        if (command->value < 1024 || command->value > 65534) {
-            emit_error(worker, UI_PANE_REMOTE, "PORT MUST BE 1024-65534",
-                       OP_CAUSE_APP, OP_STAGE_PLAN);
+        if (command->value < WORKER_SERVER_PORT_MIN ||
+            command->value > WORKER_SERVER_PORT_MAX) {
+            char text[64];
+            snprintf(text, sizeof(text), "PORT MUST BE %d-%d",
+                     WORKER_SERVER_PORT_MIN, WORKER_SERVER_PORT_MAX);
+            emit_error(worker, UI_PANE_REMOTE, text, OP_CAUSE_APP,
+                       OP_STAGE_PLAN);
             break;
         }
         if (ftp_server_state(worker->server) != FTP_SERVER_OFF) {
@@ -3720,8 +3738,8 @@ void worker_start(Worker *worker)
                             &worker->settings) != STORE_OK) {
         settings_init(&worker->settings);
     }
-    if (worker->settings.server_port < 1024 ||
-        worker->settings.server_port > 65534)
+    if (worker->settings.server_port < WORKER_SERVER_PORT_MIN ||
+        worker->settings.server_port > WORKER_SERVER_PORT_MAX)
         worker->settings.server_port = 1337;
 
     pick_local_path(worker);

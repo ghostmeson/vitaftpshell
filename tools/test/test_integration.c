@@ -2391,6 +2391,72 @@ static void test_quit_with_server(void)
     app_destroy(app);
 }
 
+/* R6: the SERVER port editor refuses one past the last startable port and
+ * names the range; 65531 itself starts and reaches ON with four data ports
+ * inside uint16_t. */
+static void test_server_port_ceiling(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    fake_net_set_link(1, 1, PEER_ADDR, 0);
+
+    UiCommand edit;
+    memset(&edit, 0, sizeof(edit));
+    edit.type = UI_CMD_EDIT_PORT;
+    edit.value = 65532;
+    CHECK(handoff_command_push(app_handoff(app), &edit) == 1);
+    pump(app, NULL, 10);
+    CHECK(strstr(app_state(app)->panes[UI_PANE_REMOTE].error,
+                 "PORT MUST BE 1024-65531") != NULL);
+    CHECK(worker_settings(app_worker(app))->server_port == 1337);
+
+    edit.value = 65531;
+    CHECK(handoff_command_push(app_handoff(app), &edit) == 1);
+    pump(app, NULL, 10);
+    CHECK(worker_settings(app_worker(app))->server_port == 65531);
+
+    press(app, INPUT_BIT(INPUT_START));
+    CHECK(app_state(app)->screen == UI_SCREEN_SERVER);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 20);
+
+    CHECK(app_state(app)->server.run == UI_SERVER_ON);
+    CHECK(app_state(app)->server.port == 65531);
+    CHECK(fake_net_listener_count() == 1);
+    CHECK(fake_net_listener_addr(0).port == 65531);
+
+    app_destroy(app);
+}
+
+/* The start path refuses a port the editor and the settings loader would never
+ * let through, so that branch is a backstop: the test plants the value through
+ * the read-only accessor (the harness drives the worker inline). A refused start
+ * reports one error and never reaches ON. */
+static void test_server_start_refused_port(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    fake_net_set_link(1, 1, PEER_ADDR, 0);
+    Settings *settings = (Settings *)worker_settings(app_worker(app));
+    settings->server_port = 65532;
+
+    press(app, INPUT_BIT(INPUT_START));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 20);
+
+    CHECK(app_state(app)->server.run == UI_SERVER_OFF);
+    CHECK(fake_net_listener_count() == 0);
+    CHECK(strstr(app_state(app)->panes[UI_PANE_REMOTE].error, "65532") != NULL);
+    CHECK(log_count("PORT%2065532") == 1);
+    CHECK(!log_has("server_start"));
+
+    app_destroy(app);
+}
+
 static void test_local_batch_terminal(void)
 {
     App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
@@ -2716,6 +2782,8 @@ int main(void)
     test_log_never_contains_a_password();
     test_shutdown_cancels();
     test_quit_with_server();
+    test_server_port_ceiling();
+    test_server_start_refused_port();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_integration: %d failure(s)\n", s_failures);
