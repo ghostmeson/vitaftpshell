@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-16 — the local-workspace plan landed on `feat-dual-local-panes` and passed a six-persona review with 16 fixes: the right pane becomes a second local view, ALL DRIVES lists every user-accessible mount, SITES returns to the workspace on success, and the stick and lists navigate like a file manager | Build the local-workspace plan, then R22/R23 remote recursion, then the sleep/resume plan | GPLv3. One UNSAFE eboot. b74 (265,736 bytes, SHA-256 `b25a5af7…`) is host-tested only. The test console is a PCH-1000, so `imc0:` is a BLOCKED matrix row. M16 probes name folding. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-17 — the local workspace is host-complete in nine units on `feat-dual-local-panes`: the three-view model with the right pane's local view, the seven-mount ALL DRIVES with read-only mounts, reducer-only switching and a 360 px ACTIONS panel, the SITES connect return with every failure reason, deflection-scaled stick movement with wrapping lists and the site book, the same-folder duplicate prompt and mixed-batch rule, and the cross-view reload; the host suites, ASan/UBSan, TSan, preview, and docs gate pass | Run the code review on the local-workspace diff; the console matrix runs at code freeze | GPLv3. One UNSAFE eboot. b76 (269,775 bytes, SHA-256 `00ec61bb…`) is host-tested only. M24-M27 are pending; `imc0:` is BLOCKED on the PCH-1000. R22/R23 remain unbuilt. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 

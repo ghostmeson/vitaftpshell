@@ -147,7 +147,7 @@ static const VolumeDef VOLUMES[VOLUME_COUNT] = {
 
 static unsigned volume_flags(Volume volume)
 {
-    if ((int)volume < 0 || (int)volume >= VOLUME_COUNT)
+    if ((unsigned)volume >= (unsigned)VOLUME_COUNT)
         return 0;
     return VOLUMES[volume].flags;
 }
@@ -192,7 +192,7 @@ static int volume_from_token(const char *token, size_t len, Volume *out)
 
 const char *path_volume_name(Volume volume)
 {
-    if ((int)volume < 0 || (int)volume >= VOLUME_COUNT)
+    if ((unsigned)volume >= (unsigned)VOLUME_COUNT)
         return "";
     return VOLUMES[volume].name;
 }

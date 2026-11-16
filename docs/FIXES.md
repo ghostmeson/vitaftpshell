@@ -50,19 +50,19 @@ passes.
   the full three-volume browse; M10 and M13 are partly observed; every other
   row awaits the code-freeze pass (D95).
 
-## Local workspace (b75, host)
+## Local workspace (b76, host)
 
 The volume table, the seven-mount `ALL DRIVES`, the right pane's local view, the
 connect return, the stick and wrap, the same-folder prompt, and the cross-view
-reload. The artifact is `vitaftpshell-v01.00-b75.vpk`, to be produced. The
+reload. The artifact is `vitaftpshell-v01.00-b76.vpk` (269,775 bytes, SHA-256 `00ec61bb…`). The
 same-folder prompt is a superseding decision (D98), not a defect; the three rows
 below are defects this pass fixed.
 
 | Build | Symptom | Cause and fix | Evidence | Status |
 |---|---|---|---|---|
-| b75 | **The stick scrolled the view while the cursor stayed behind.** | The input layer reduced the stick to a sign and the reducer moved only the scroll, so the next D-pad press jumped the view back to the cursor. The input now carries a signed 1-5 step computed from the deflection, the reducer moves the selection and scrolls to keep it visible, and the workspace and the site book wrap at both ends (D97). | `test_input`, `test_uistate`, `test_integration`; host run | `HOST b75 (to be produced)` |
-| b75 | **A same-folder paste never reached the duplicate question, and the copy-name rule lived in two places.** | The preflight compared the source's parent with the destination by `strcmp`, so a same-folder item was treated as a non-replacement and skipped before the prompt; the planner also built `A copy.TXT` from a private rule that could disagree with the worker's candidate list. The preflight now uses the canonical same-path identity, one exported copy-name function serves the prompt, the preflight, and the plan, and a self-copy step is never planned (D98). | `test_fsop_plan`, `test_integration`, `test_uistate`; host run | `HOST b75 (to be produced)` |
-| b75 | **A lost remote view swallowed the keys that reach the switch.** | The session-lost interception ran before the screen keys, so ACTIONS, Select, and Start were consumed and the right pane's `SWITCH TO LOCAL` row could not be reached from a lost session. The screen keys now run first (D97). | `test_uistate`, `test_integration`; host run | `HOST b75 (to be produced)` |
+| b76 | **The stick scrolled the view while the cursor stayed behind.** | The input layer reduced the stick to a sign and the reducer moved only the scroll, so the next D-pad press jumped the view back to the cursor. The input now carries a signed 1-5 step computed from the deflection, the reducer moves the selection and scrolls to keep it visible, and the workspace and the site book wrap at both ends (D97). | `test_input`, `test_uistate`, `test_integration`; host run | `HOST b76` |
+| b76 | **A same-folder paste never reached the duplicate question, and the copy-name rule lived in two places.** | The preflight compared the source's parent with the destination by `strcmp`, so a same-folder item was treated as a non-replacement and skipped before the prompt; the planner also built `A copy.TXT` from a private rule that could disagree with the worker's candidate list. The preflight now uses the canonical same-path identity, one exported copy-name function serves the prompt, the preflight, and the plan, and a self-copy step is never planned (D98). | `test_fsop_plan`, `test_integration`, `test_uistate`; host run | `HOST b76` |
+| b76 | **A lost remote view swallowed the keys that reach the switch.** | The session-lost interception ran before the screen keys, so ACTIONS, Select, and Start were consumed and the right pane's `SWITCH TO LOCAL` row could not be reached from a lost session. The screen keys now run first (D97). | `test_uistate`, `test_integration`; host run | `HOST b76` |
 
 ## Network closure (b73-b74, host)
 
