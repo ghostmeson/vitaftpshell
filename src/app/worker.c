@@ -112,6 +112,7 @@ struct Worker {
     int collecting;
     int collect_slot;
     int collect_count;
+    int remote_row_count;
     int collect_truncated;
 
     FsOpFact facts[WORKER_FACTS_MAX];
@@ -176,8 +177,12 @@ struct Worker {
     int upload_stat_unsupported;
     /* The preflight has used SIZE for this session (MLST was refused). */
     int upload_stat_used_size;
-    /* Neither MLST nor SIZE is available; the batch goes straight to STOR. */
+    /* Neither MLST nor SIZE is available; the session goes straight to STOR. */
     int upload_stat_disabled;
+    /* The destination the pending STAT result belongs to. A cancel can drop
+     * the active item before pump_queue reads the result; the path check stops
+     * that answer from deciding the next item's conflict. */
+    char upload_stat_path[PATH_MAX_LEN];
 
     int server_transfer_active;
     XferDirection server_direction;
@@ -463,6 +468,9 @@ static int local_cancel_requested(void *ctx)
     if (type != UI_CMD_CANCEL_TRANSFER && type != UI_CMD_CANCEL_LOCAL)
         return 0;
     worker->local_cancel_seen = 1;
+    /* Consume the press the executor just observed, so it cannot be replayed
+     * against another lane or another run. */
+    handoff_cancel_consume(worker->handoff, HANDOFF_CANCEL_LOCAL);
     return 1;
 }
 
@@ -1114,6 +1122,7 @@ static void remote_listing_begin(Worker *worker, const char *path)
     worker->collecting = 1;
     worker->collect_slot = slot;
     worker->collect_count = 0;
+    worker->remote_row_count = 0;
     worker->collect_truncated = 0;
     fmt_copy(worker->remote_path, sizeof(worker->remote_path), path != NULL ? path : "/");
     emit_listing_begin(worker, UI_PANE_REMOTE, worker->remote_path);
@@ -1165,6 +1174,7 @@ static void remote_listing_end(Worker *worker, int ok)
     }
 
     sort_rows(rows, count, start);
+    worker->remote_row_count = count;
     handoff_listing_publish(worker->handoff, UI_PANE_REMOTE,
                             worker->collect_slot, rows, count);
     log_event(worker, LOGEV_LIST, NULL, NULL, worker->remote_path,
@@ -1175,6 +1185,23 @@ static void remote_listing_end(Worker *worker, int ok)
                      ok ? "" : "REMOTE LISTING FAILED");
     worker->collecting = 0;
     worker->collect_count = 0;
+}
+
+/* SIZE cannot report a type. When the destination is in the listing the
+ * worker just published, its row says whether it is a folder; a destination
+ * outside that folder still relies on the server's STOR refusal. */
+static int remote_listing_is_dir(Worker *worker, const char *destination)
+{
+    if (worker->remote_row_count <= 0)
+        return 0;
+    const char *name = last_name(destination);
+    const UiRow *rows =
+        rows_for(worker, UI_PANE_REMOTE, worker->collect_slot);
+    for (int i = 0; i < worker->remote_row_count; ++i) {
+        if (strcmp(rows[i].name, name) == 0)
+            return rows[i].type == UI_ROW_DIR;
+    }
+    return 0;
 }
 
 /* Release a reserved listing generation when the session dies mid-listing.
@@ -1637,12 +1664,6 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
         local_batch_emit_done(worker);
     }
 
-    if (result == FSOP_RUN_CANCELLED) {
-        int type = handoff_cancel_type(worker->handoff, HANDOFF_CANCEL_LOCAL);
-        if (type == UI_CMD_CANCEL_TRANSFER || type == UI_CMD_CANCEL_LOCAL)
-            handoff_cancel_consume(worker->handoff, HANDOFF_CANCEL_LOCAL);
-    }
-
     release_local_reservations(worker);
     fsop_run_destroy(worker->local_run);
     worker->local_run = NULL;
@@ -2043,6 +2064,10 @@ static void batch_reset(Worker *worker)
     worker->batch_done = 0;
     worker->batch_conflict_decided = 0;
     worker->batch_conflict = XFER_CONFLICT_NONE;
+    /* A probe belongs to one batch; a result that arrives after its batch
+     * ended must not decide the next one. */
+    worker->upload_stat_active = 0;
+    worker->upload_stat_ready = 0;
 }
 
 /*
@@ -2060,6 +2085,7 @@ static void reset_remote_session(Worker *worker)
     worker->upload_stat_failed = 0;
     worker->upload_stat_used_size = 0;
     worker->upload_stat_disabled = 0;
+    worker->remote_row_count = 0;
     remote_listing_abort(worker);
     xfer_init(&worker->queue);
     batch_reset(worker);
@@ -2339,8 +2365,7 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
     if (!reserve_add(worker->reserve, RESERVE_LANE_NETWORK, kind, local)) {
         emit_error(worker, UI_PANE_REMOTE, "TOO MANY FILES TO TRACK", OP_CAUSE_APP,
                    OP_STAGE_PLAN);
-        xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
-                     OP_STAGE_TRANSFER, NULL);
+        xfer_release(&worker->queue, NULL);
         worker->batch_done++;
         batch_finish(worker);
         return;
@@ -2374,8 +2399,7 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
                                           : "TRANSFER REFUSED";
         XferItem next;
         memset(&next, 0, sizeof(next));
-        xfer_release(&worker->queue, XFER_ITEM_FAILED, cause,
-                     OP_STAGE_TRANSFER, &next);
+        xfer_release(&worker->queue, &next);
         reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
         worker->batch_done++;
         emit_transfer_done(worker, item->direction, item->source.text, 0, 0, 0,
@@ -2443,15 +2467,14 @@ static void pump_queue(Worker *worker)
         }
 
         /* The MLST check for this upload finished on the previous step. */
-        if (worker->upload_stat_ready) {
+        if (worker->upload_stat_ready &&
+            strcmp(worker->upload_stat_path, item.destination.text) == 0) {
             worker->upload_stat_ready = 0;
             if (worker->upload_stat_failed) {
                 emit_error(worker, UI_PANE_REMOTE, "REMOTE CHECK FAILED",
                            worker->upload_stat_cause,
                            worker->upload_stat_stage);
-                xfer_release(&worker->queue, XFER_ITEM_FAILED,
-                             worker->upload_stat_cause,
-                             worker->upload_stat_stage, NULL);
+                xfer_release(&worker->queue, NULL);
                 worker->batch_done++;
                 batch_finish(worker);
                 continue;
@@ -2467,14 +2490,16 @@ static void pump_queue(Worker *worker)
                     if (size == FTP_CLIENT_OK) {
                         worker->upload_stat_used_size = 1;
                         worker->upload_stat_active = 1;
+                        fmt_copy(worker->upload_stat_path,
+                                 sizeof(worker->upload_stat_path),
+                                 item.destination.text);
                         return;
                     }
                     if (size == FTP_CLIENT_BUSY)
                         return;
                     emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED",
                                OP_CAUSE_APP, OP_STAGE_CONNECT);
-                    xfer_release(&worker->queue, XFER_ITEM_FAILED,
-                                 OP_CAUSE_APP, OP_STAGE_CONNECT, NULL);
+                    xfer_release(&worker->queue, NULL);
                     worker->batch_done++;
                     batch_finish(worker);
                     continue;
@@ -2486,18 +2511,19 @@ static void pump_queue(Worker *worker)
                 start_transfer_item(worker, &item);
                 return;
             }
+            if (!worker->upload_stat_is_dir && worker->upload_stat_used_size)
+                worker->upload_stat_is_dir =
+                    remote_listing_is_dir(worker, item.destination.text);
             if (worker->upload_stat_is_dir) {
                 emit_error(worker, UI_PANE_REMOTE, "DESTINATION IS A FOLDER",
                            OP_CAUSE_APP, OP_STAGE_TRANSFER);
-                xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
-                             OP_STAGE_TRANSFER, NULL);
+                xfer_release(&worker->queue, NULL);
                 worker->batch_done++;
                 batch_finish(worker);
                 continue;
             }
             if (worker->batch_conflict == XFER_CONFLICT_SKIP_EXISTING) {
-                xfer_release(&worker->queue, XFER_ITEM_DONE, OP_CAUSE_APP,
-                             OP_STAGE_TRANSFER, NULL);
+                xfer_release(&worker->queue, NULL);
                 worker->batch_done++;
                 batch_finish(worker);
                 continue;
@@ -2509,11 +2535,16 @@ static void pump_queue(Worker *worker)
             start_transfer_item(worker, &item);
             return;
         }
+        if (worker->upload_stat_ready) {
+            /* The answer belongs to an item a cancel removed; discard it
+             * instead of deciding this item's conflict. */
+            worker->upload_stat_ready = 0;
+            worker->upload_stat_active = 0;
+        }
 
         if (item.direction == XFER_DIR_DOWNLOAD) {
             if (local_destination_is_dir(worker, &item)) {
-                xfer_release(&worker->queue, XFER_ITEM_FAILED,
-                             OP_CAUSE_STORAGE, OP_STAGE_TRANSFER, NULL);
+                xfer_release(&worker->queue, NULL);
                 worker->batch_done++;
                 emit_transfer_done(worker, item.direction, item.source.text, 0, 0,
                                    0, item.total, item.total_known,
@@ -2531,8 +2562,7 @@ static void pump_queue(Worker *worker)
             }
             if (local_destination_exists(worker, &item) &&
                 worker->batch_conflict == XFER_CONFLICT_SKIP_EXISTING) {
-                xfer_release(&worker->queue, XFER_ITEM_DONE, OP_CAUSE_APP,
-                             OP_STAGE_TRANSFER, NULL);
+                xfer_release(&worker->queue, NULL);
                 worker->batch_done++;
                 batch_finish(worker);
                 continue;
@@ -2557,14 +2587,16 @@ static void pump_queue(Worker *worker)
             if (check == FTP_CLIENT_OK) {
                 worker->upload_stat_active = 1;
                 worker->upload_stat_used_size = use_size;
+                fmt_copy(worker->upload_stat_path,
+                         sizeof(worker->upload_stat_path),
+                         item.destination.text);
                 return;
             }
             if (check == FTP_CLIENT_BUSY)
                 return; /* a keepalive is in flight; retry on the next step */
             emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
                        OP_STAGE_CONNECT);
-            xfer_release(&worker->queue, XFER_ITEM_FAILED, OP_CAUSE_APP,
-                         OP_STAGE_CONNECT, NULL);
+            xfer_release(&worker->queue, NULL);
             worker->batch_done++;
             batch_finish(worker);
             continue;
@@ -2749,13 +2781,7 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
     memset(&finished, 0, sizeof(finished));
     (void)xfer_active(&worker->queue, &finished);
 
-    XferItemState outcome = XFER_ITEM_DONE;
-    if (cancelled)
-        outcome = XFER_ITEM_CANCELLED;
-    else if (!ok)
-        outcome = XFER_ITEM_FAILED;
-
-    xfer_release(&worker->queue, outcome, event->cause, event->stage, NULL);
+    xfer_release(&worker->queue, NULL);
     reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
     worker->transfer_active = 0;
     worker->transfer_cancelled = 0;
@@ -2870,8 +2896,7 @@ static void client_event(void *ctx, const FtpClientEvent *event)
                 XferItem item;
                 memset(&item, 0, sizeof(item));
                 (void)xfer_active(&worker->queue, &item);
-                xfer_release(&worker->queue, XFER_ITEM_FAILED,
-                             event->cause, event->stage, NULL);
+                xfer_release(&worker->queue, NULL);
                 reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
                 worker->transfer_active = 0;
                 /* The queue cannot survive the session, so the one terminal
@@ -3096,8 +3121,11 @@ static void cancel_network_transfer(Worker *worker)
         return;
     }
     if (xfer_busy(&worker->queue)) {
-        (void)xfer_cancel_active(&worker->queue, OP_CAUSE_USER,
-                                 OP_STAGE_TRANSFER, NULL);
+        /* A preflight answer that outlived its item must not decide the next
+         * one (the client op, if still active, is ignored on arrival). */
+        worker->upload_stat_ready = 0;
+        worker->upload_stat_active = 0;
+        (void)xfer_cancel_active(&worker->queue, NULL);
         worker->batch_done++;
         batch_finish(worker);
         HandoffEvent cancelled;
@@ -3207,6 +3235,8 @@ static void handle_command(Worker *worker, const UiCommand *command)
         cancel_local_lane(worker);
         break;
     case UI_CMD_CLEAR_QUEUE:
+        worker->upload_stat_ready = 0;
+        worker->upload_stat_active = 0;
         xfer_clear_queued(&worker->queue);
         if (worker->batch_total > 0)
             worker->batch_total = worker->batch_done > 0 ? worker->batch_done : 0;
@@ -3255,8 +3285,7 @@ static void handle_command(Worker *worker, const UiCommand *command)
                 } else if (command->choice == UI_CHOICE_SKIP) {
                     worker->batch_conflict_decided = 1;
                     worker->batch_conflict = XFER_CONFLICT_SKIP_EXISTING;
-                    xfer_release(&worker->queue, XFER_ITEM_DONE,
-                                 OP_CAUSE_APP, OP_STAGE_TRANSFER, NULL);
+                    xfer_release(&worker->queue, NULL);
                     worker->batch_done++;
                     batch_finish(worker);
                     pump_queue(worker);
@@ -3303,8 +3332,7 @@ static void handle_command(Worker *worker, const UiCommand *command)
                 if (command->choice == UI_CHOICE_WAIT) {
                     worker->network_waiting = 1;
                 } else if (command->choice == UI_CHOICE_SKIP) {
-                    xfer_release(&worker->queue, XFER_ITEM_DONE, OP_CAUSE_APP,
-                                 OP_STAGE_TRANSFER, NULL);
+                    xfer_release(&worker->queue, NULL);
                     worker->batch_done++;
                     batch_finish(worker);
                     pump_queue(worker);

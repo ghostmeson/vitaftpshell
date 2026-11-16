@@ -1998,3 +1998,30 @@ exclusion is the server's job.
 
 **Consequences:** FileZilla can probe its own upload without a false busy. A
 foreign session still gets 450, and no cross-session read is opened.
+
+## D91. The upload preflight falls back from MLST to SIZE
+
+**Date:** 2026-11-16
+**Status:** accepted; host-tested; console pending. Supersedes D65 section 4.
+
+**Context:** D65 section 4 and R41 said a server without MLST is never probed,
+so an upload to such a server kept the stale-overwrite behavior. Servers that
+do not advertise MLST often still answer SIZE, which is enough to detect an
+existing destination and to report its size. The user asked this pass to close
+that gap without changing D86-D90.
+
+**Decision:** The upload preflight prefers MLST when the server advertises it.
+If MLST is refused with 500/501/502/504, the worker asks SIZE once for the same
+destination; 213 means the file exists (and carries its size), 550 means it is
+missing, and 500/501/502/504 means the server cannot report it. A server that
+offers neither probe starts the STOR directly, as before. The probe choice
+sticks for the session and resets with the session; a result whose destination
+no longer matches the active item is discarded. A SIZE-only probe cannot report
+a type, so a destination the current remote listing shows as a folder is still
+refused with `DESTINATION IS A FOLDER`; a destination outside that listing
+relies on the server's STOR refusal.
+
+**Consequences:** A PC or NAS server with SIZE but no MLST now gets the
+one-per-batch overwrite prompt instead of a silent replace. D65 section 4 is
+superseded; D65's other clauses and D41's server-side overwrite stay in force.
+R41 is amended to name both probes.

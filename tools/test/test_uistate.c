@@ -932,6 +932,16 @@ static void test_two_lane_dock(void)
     CHECK(s_state.local_dock.notice == 1);
     CHECK(strstr(s_state.local_dock.message, "ASIDE CLEANUP FAILED") != NULL);
 
+    /* The next failure must not wear the old notice. */
+    memset(&done, 0, sizeof(done));
+    done.kind = UI_EVT_TRANSFER_FAILED;
+    done.direction = XFER_DIR_LOCAL_RENAME;
+    done.direction_known = 1;
+    snprintf(done.text, sizeof(done.text), "RENAME FAILED");
+    send_event(&done);
+    CHECK(s_state.local_dock.notice == 0);
+    CHECK(s_state.local_dock.state == UI_DOCK_FAILED);
+
     /* Both active again: the dock prompt offers two lanes. */
     s_state.dock.active = 1;
     s_state.dock.state = UI_DOCK_ACTIVE;

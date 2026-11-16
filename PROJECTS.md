@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-15 — b60 proved FileZilla and app-local transfers on hardware. b61 applies D87: the FTP server and local manager can write app data and `tai`; `ur0:tai/boot_config.txt` and system roots stay hard-denied. b63 removes the SERVER warning panel and gives the client panel the full right column (D88); the status panel keeps ACCESS READ-WRITE, ON/OFF, and client count | Install b63 and verify the reflowed SERVER screen plus the app-data/`tai` writes and `boot_config.txt` refusal | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b63.vpk` (263,843 bytes). M5 PART; b63 policy pending hardware; not yet `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-16 — b72 closes the non-hardware residual sweep: app listing-slot hold, queue reconnect, dropped-PASS and owner-RETR tests, truthful cancel and FEAT wording, PASV address refresh, per-lane cancel slots, `ASIDE` debris and aside-cleanup notice, dead queue latches removed, shared confirm resolver, TSan app run, and the SIZE upload-preflight fallback (D91) | Install `vitaftpshell-v01.00-b72.vpk` and run the M1-M13 matrix | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b72.vpk` (265,072 bytes, SHA-256 `9bb0ae6c…`). M5 PART; b72 host-tested, console pending; not yet `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
@@ -27,7 +27,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 3. Protocol engines | done | Client and server machines against scripted peers |
 | 4. Operations and state | done | Queue, planner, executor, reducer, handoff |
 | 5. Screens and composition | done | Seven surfaces, adapters, runtime, host integration test |
-| 6. Hardware verification | in progress | b60 proved FileZilla and app-local transfers; the b63 review remediation is host-tested; M1-M13 transcription is the open row |
+| 6. Hardware verification | in progress | b60 proved FileZilla and app-local transfers; b66–b72 are host-tested; M1-M13 transcription on b72 is the open row |
 
 ## Current state
 
@@ -39,16 +39,21 @@ target console with evidence. Host tests alone cannot promote it.
   the module contract.
 - **Build:** Phases 1-5 are done. `./build.sh` emits one
   `vitaftpshell-v01.00-b<build>.vpk` with the real app linked and keeps the
-  unstripped ELF; the current artifact is `vitaftpshell-v01.00-b68.vpk`. `./tools/test/run.sh` runs the layering guard over every
-  `.c`/`.h` under `src/` plus the twenty-one host suites; `./tools/preview/run.sh`
-  renders 40 settled states. `./send.sh <vita-ip>` refuses an artifact whose
-  build number does not match `BUILD_NUMBER`.
-- **Next:** Install `vitaftpshell-v01.00-b68.vpk` and run the M1-M13 matrix. The pass fixes the three confirmed P1s (conflict answer, final-reply
-  deadline, armed-slot release), the foreign ABOR, the owner metadata read, the
-  dropped PASS trace, the local terminal badge, and the CLIENT panel pairing.
-  M5 is the open row; M10's dock words and M13's operations were seen on b43/b60,
-  but the rest of M1-M13 still needs a console pass. The project stays
-  `building`.
+  unstripped ELF; the current artifact is `vitaftpshell-v01.00-b72.vpk`
+  (265,072 bytes, SHA-256 `9bb0ae6c7109be44c75a1fc89c7119aef4fdb8e211ff46ae9211702e4316888f`).
+  `./tools/test/run.sh` runs the layering guard over every `.c`/`.h` under
+  `src/` plus the twenty-one host suites; `./tools/preview/run.sh` renders 40
+  settled states; `./tools/test/asan.sh` and `./tools/test/tsan.sh` cover the
+  sanitizers. `./send.sh <vita-ip>` refuses an artifact whose build number does
+  not match `BUILD_NUMBER`.
+- **Next:** Install `vitaftpshell-v01.00-b72.vpk` and run the M1-M13 matrix.
+  The pass fixes the review P1s and closes the residual list: the listing-slot
+  hold, the queue reconnect, the dropped-PASS mask, the ACTIVE owner RETR, the
+  cancel and FEAT wording, the PASV address refresh, per-lane cancels, the
+  `ASIDE` mark and aside notice, the dead queue latches, the shared confirm
+  resolver, the TSan app run, and the SIZE upload fallback (D91). M5 is the
+  open row; M10's dock words and M13's operations were seen on b43/b60, but the
+  rest of M1-M13 still needs a console pass. The project stays `building`.
 - **Product shape:** two live panes on the Vita — local files and a saved FTP
   site — with a site manager, transfer dock, local file manager, and an
   anonymous FTP server.
@@ -137,6 +142,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 2026-11-13 | Phase 6 — b37 hardware run (U14) | The operator reported the b37 VPK installed and exercised on the console. The b37 fix rows moved from `HOST` to `HW` in `docs/FIXES.md`; row-level M1–M8 observations are still to be transcribed. No log was pulled with the report. The project remains `building`. |
 | 2026-11-13 | Phase 6 — remote volume-root fix (U14) | b38 fixes the b37 regression where the remote pane could not enter its own server's `UX0:`, `UR0:`, or `UMA0:` roots. The unsafe-name guard refused Cross on every row containing `:`, including directories; navigation builds no local path. A directory row now opens, while files still refuse `UNSAFE NAME` and Square still refuses marking. Added reducer and integration `test_remote_volume_root_open`; both were red before the fix. D67. Build `vitaftpshell-v01.00-b38.vpk`; not hardware-tested yet. |
 | 2026-11-14 | Phase 6 — b40 correction pass (U18–U24) | Cursor COPY/MOVE, one batch terminal with past-tense dock words, one conflict prompt per batch, full local cancel, the cyan cursor slab, the active-pane glow, and red failures. `vitaftpshell-v01.00-b40.vpk`; not hardware-tested yet. |
+| 2026-11-16 | Residual sweep (b72) | Closed the non-hardware open issues: app listing-slot hold and reconnect tests, dropped-PASS and ACTIVE owner-RETR tests, truthful cancel/FEAT wording, PASV address refresh, per-lane cancel slots, `ASIDE` debris and aside notice, dead queue latches removed, shared confirm resolver, TSan app run, and the SIZE upload fallback (D91). Twenty-one host suites, ASan/UBSan, TSan, preview 40, zero warnings. `vitaftpshell-v01.00-b72.vpk`; console run pending. |
 | 2026-11-15 | Warning panel removed (b63) | Removed the SERVER warning region; the client panel takes 582,76,360×352, while STATUS keeps ACCESS READ-WRITE, ON/OFF, and the client count (D88). `vitaftpshell-v01.00-b63.vpk`; hardware retry pending. |
 | 2026-11-15 | Warning trim (b62) | Removed the separate app-data/`tai` lines from the SERVER warning; the general anonymous read-write line and `boot_config.txt` denial remain. `vitaftpshell-v01.00-b62.vpk`; hardware retry pending. |
 | 2026-11-15 | Access policy (b61) | D87 removed the local high-risk confirmation and the server's app-data/`tai` denials. The server may read/write its data folder and `tai`; `ur0:tai/boot_config.txt` and system roots remain hard-denied; ordinary delete confirmation stays. `vitaftpshell-v01.00-b61.vpk`; console retry pending. |

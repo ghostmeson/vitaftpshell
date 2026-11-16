@@ -73,6 +73,18 @@ static __attribute__((unused)) int trace_has_text_prefix(const char *prefix)
     return 0;
 }
 
+static __attribute__((unused)) int trace_has_text_prefix_color(const char *prefix,
+                                       uint32_t color)
+{
+    size_t n = strlen(prefix);
+    for (int i = 0; i < s_trace_text_count; ++i) {
+        if (strncmp(s_trace_text[i].text, prefix, n) == 0 &&
+            s_trace_text[i].color == color)
+            return 1;
+    }
+    return 0;
+}
+
 static __attribute__((unused)) int trace_has_text_color(const char *text, uint32_t color)
 {
     for (int i = 0; i < s_trace_text_count; ++i) {

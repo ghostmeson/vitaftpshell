@@ -14,7 +14,7 @@ arbitration, the local operation planner and executor, the input reducer and UI
 state, the cross-thread handoff, the seven screen surfaces, the six Vita
 adapters, and the app/worker runtime all exist. `tools/test/run.sh` passes
 twenty-one host suites, and `tools/preview/run.sh` renders 40 settled states.
-`build.sh` emits `vitaftpshell-v01.00-b68.vpk` with the real app linked. b16,
+`build.sh` emits `vitaftpshell-v01.00-b72.vpk` with the real app linked. b16,
 b18, b20, b21, b22, and b23 have run on the console: b18 proved the drive
 browser; b20 opened the IME but crashed in the worker; b21 fixed the worker
 stack and rename completed; b22 made "no selection" disable every action except
@@ -53,11 +53,17 @@ transfer at a time (D86), and has run on the console: FileZilla held two
 sessions and uploaded and downloaded successfully; the app-local client moved
 files across all three volumes. b61 applies D87; b62 trims the SERVER warning;
 b63 removes the warning panel and gives the client panel the full right column
-(D88). The next pass fixes the three confirmed P1s from the full review (the
-local conflict answer, the final-reply deadline, and the armed-slot release),
-the foreign ABOR, the owner metadata read, the dropped PASS trace, the local
-terminal badge, and the CLIENT panel pairing. M13 and M10 are partly observed;
-M1–M9, M11, and M12 are pending, so the project is `building`, not `verified`. Do not start coding from this file alone: the plan
+(D88). b66 closes the b63 review (the local conflict answer, the final-reply
+deadline, the armed-slot release, the foreign ABOR, the owner metadata read, the
+dropped PASS trace, the local terminal badge, and the CLIENT panel pairing); b68
+adds the size preflight, the sidecar rename denial, the listing-slot hold, and
+the two missing tests; b72 closes the non-hardware residual sweep (the app
+listing-slot proof, queue reconnect, dropped-PASS and ACTIVE owner-RETR tests,
+cancel and FEAT wording, PASV address refresh, per-lane cancels, the `ASIDE`
+debris mark and aside notice, dead queue latches, the shared confirm resolver,
+the TSan app run, and the SIZE upload fallback, D91). M13 and M10 are partly
+observed; M1–M9, M11, and M12 await the b72 console run, so the project is
+`building`, not `verified`. Do not start coding from this file alone: the plan
 is the source of truth for behavior, sequencing, and verification, and
 `docs/DESIGN.md` is the layout authority.
 
@@ -304,7 +310,8 @@ all-drives root, always-on log, action feedback, IME sequence, worker stack,
 the no-selection rule, the server address/free-space policy, the clipboard, the
 destructive-confirmation rules, the FTP-client connect/PASV diagnostics, the
 remote-pane session/action rules, and the remote refresh/name/upload/folder
-rules.
+rules; D85-D91 record the server sessions, access policy, warning removal, kept
+download, owner metadata, and the SIZE upload fallback.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
@@ -355,7 +362,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D90
+    DECISIONS.md       numbered decisions, D1-D91
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     THIRD_PARTY.md     reused code, licenses, protocol references
     plans/             the v1 plan: requirements, decisions, units, verification
