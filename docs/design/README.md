@@ -40,14 +40,14 @@ invent a second alert colour, a new type size, or a decorative icon.
 | 2026-11-08 | [A — two ledgers](2026-11-08-workspace-a.png) | Direction A render, 1920×1088 |
 | 2026-11-08 | [B — one instrument](2026-11-08-workspace-b.png) | Direction B render, 1920×1088 |
 | 2026-11-08 | [C — focus](2026-11-08-workspace-c.png) | Direction C render, 1920×1088 |
-| 2026-11-08 | [A states](2026-11-08-workspace-a-states.html) | Six WORKSPACE states; awaiting approval |
+| 2026-11-08 | [A states](2026-11-08-workspace-a-states.html) | Six WORKSPACE states; direction A, settled |
 | 2026-11-08 | [A idle](2026-11-08-workspace-a-idle.png) | Two marked, dock idle |
 | 2026-11-08 | [A transferring](2026-11-08-workspace-a-transferring.png) | Download at 42% |
 | 2026-11-08 | [A done](2026-11-08-workspace-a-done.png) | Batch complete, destination refreshed |
 | 2026-11-08 | [A failed](2026-11-08-workspace-a-failed.png) | Data channel timed out, session healthy |
 | 2026-11-08 | [A disconnected](2026-11-08-workspace-a-disconnected.png) | Control channel lost, reconnect offered |
 | 2026-11-08 | [A empty and reading](2026-11-08-workspace-a-empty-reading.png) | Empty local folder, remote listing loading |
-| 2026-11-08 | [SITES directions](2026-11-08-sites-directions.html) | Three compositions; awaiting choice |
+| 2026-11-08 | [SITES directions](2026-11-08-sites-directions.html) | Three compositions; direction C chosen, A and B rejected |
 | 2026-11-08 | [SITES A](2026-11-08-sites-a.png) | Ledger + detail + password note |
 | 2026-11-08 | [SITES B](2026-11-08-sites-b.png) | Single ledger + summary strip |
 | 2026-11-08 | [SITES C](2026-11-08-sites-c.png) | Hero site card + full table |
@@ -57,7 +57,7 @@ invent a second alert colour, a new type size, or a decorative icon.
 | 2026-11-08 | [SITES C empty](2026-11-08-sites-c-empty.png) | No sites |
 | 2026-11-08 | [SITES C login failed](2026-11-08-sites-c-login-failed.png) | 530 reply on the card |
 | 2026-11-08 | [SITES C save unavailable](2026-11-08-sites-c-save-unavailable.png) | In-memory list |
-| 2026-11-08 | [SITE EDITOR directions](2026-11-08-site-editor-directions.html) | Three field layouts; awaiting choice |
+| 2026-11-08 | [SITE EDITOR directions](2026-11-08-site-editor-directions.html) | Three field layouts; direction A chosen, B and C rejected |
 | 2026-11-08 | [SITE EDITOR A](2026-11-08-site-editor-a.png) | Preview card + field table |
 | 2026-11-08 | [SITE EDITOR B](2026-11-08-site-editor-b.png) | Single tall form |
 | 2026-11-08 | [SITE EDITOR C](2026-11-08-site-editor-c.png) | Two-column form |
@@ -66,7 +66,7 @@ invent a second alert colour, a new type size, or a decorative icon.
 | 2026-11-08 | [Editor clean edit](2026-11-08-site-editor-a-edit-clean.png) | Existing site, no changes |
 | 2026-11-08 | [Editor invalid](2026-11-08-site-editor-a-invalid.png) | Empty required name |
 | 2026-11-08 | [Editor first save](2026-11-08-site-editor-a-first-save.png) | Password warning before saving |
-| 2026-11-08 | [SERVER directions](2026-11-08-server-directions.html) | Three compositions; awaiting choice |
+| 2026-11-08 | [SERVER directions](2026-11-08-server-directions.html) | Three compositions; direction A chosen, B and C rejected |
 | 2026-11-08 | [SERVER A](2026-11-08-server-a.png) | Console: status, warning, client |
 | 2026-11-08 | [SERVER B](2026-11-08-server-b.png) | Bands: status, warning, client |
 | 2026-11-08 | [SERVER C](2026-11-08-server-c.png) | Instrument: one panel |
@@ -77,7 +77,7 @@ invent a second alert colour, a new type size, or a decorative icon.
 | 2026-11-08 | [Server browsing](2026-11-08-server-a-browsing.png) | One client browsing |
 | 2026-11-08 | [Server transferring](2026-11-08-server-a-transferring.png) | One client uploading |
 | 2026-11-08 | [Server bind failed](2026-11-08-server-a-bind-failed.png) | Port in use |
-| 2026-11-08 | [ACTIONS directions](2026-11-08-actions-directions.html) | Three compositions; awaiting choice |
+| 2026-11-08 | [ACTIONS directions](2026-11-08-actions-directions.html) | Three compositions; direction A chosen, B and C rejected |
 | 2026-11-08 | [ACTIONS A](2026-11-08-actions-a.png) | Action ledger + target |
 | 2026-11-08 | [ACTIONS B](2026-11-08-actions-b.png) | Single action table |
 | 2026-11-08 | [ACTIONS C](2026-11-08-actions-c.png) | Pane-mode actions |
@@ -86,7 +86,7 @@ invent a second alert colour, a new type size, or a decorative icon.
 | 2026-11-08 | [Actions local multi](2026-11-08-actions-a-local-multi.png) | Three marks, copy/move to this folder |
 | 2026-11-08 | [Actions remote single](2026-11-08-actions-a-remote-single.png) | Download to the local pane |
 | 2026-11-08 | [Actions protected](2026-11-08-actions-a-protected.png) | Volume root, destructive actions dim |
-| 2026-11-08 | [CONFIRM directions](2026-11-08-confirm-directions.html) | Three placements; awaiting choice |
+| 2026-11-08 | [CONFIRM directions](2026-11-08-confirm-directions.html) | Three placements; direction A chosen, B and C rejected |
 | 2026-11-08 | [CONFIRM A](2026-11-08-confirm-a.png) | Centered interrupt |
 | 2026-11-08 | [CONFIRM B](2026-11-08-confirm-b.png) | Bottom sheet |
 | 2026-11-08 | [CONFIRM C](2026-11-08-confirm-c.png) | Full screen |

@@ -178,7 +178,7 @@ None. Both open questions are resolved above, and the gate's limit is recorded u
 ### Sources / Research
 
 - `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md` — its U5 record unit is executed here; its console-matrix rows stay open.
-- `docs/plans/2026-11-16-0826-docs-consolidation-plan.md` — the primary input; its ownership table, correction matrix, and drift-guard checks are carried forward, and its superseded claims are corrected here.
+- `docs/plans/archive/2026-11-16-0826-docs-consolidation-plan.md` — the primary input; its ownership table, correction matrix, and drift-guard checks are carried forward, and its superseded claims are corrected here.
 - The documentation audit for this plan: status duplication in `README.md`, `AGENTS.md`, and `docs/PROJECT.md`; reference counts in `AGENTS.md`; the port statements listed under DR10; five "awaiting choice" rows and one "awaiting approval" row in `docs/design/README.md`; the plan, design, retry, and recursion statements mapped file by file.
 - `src/core/ftp/server.h` — the landed per-session port contract and `SERVER_PORT_MAX`.
 - `tools/test/run.sh`, `.github/workflows/ci.yml`, `tools/check_assets.sh`, and the workspace-root link check — what runs today.

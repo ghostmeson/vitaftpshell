@@ -161,7 +161,7 @@ Both are recorded as accepted limits, and neither shows up as a routine failure.
 - `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — R41 (probe order), R50 (four clients, one transfer), R54 (peer-address rule), KTD6 and U7 (the single-port text this plan replaces).
 - `docs/DECISIONS.md` — D39 (the decision that set `control+1` and the 1024–65534 editor bound), D92 (the per-session rule that supersedes it and amends D59's and D63's port clause; the record landed in the documentation truth sweep), D86 (four sessions, one transfer), D91 (MLST then SIZE).
 - `docs/FIXES.md` — the recorded U4 residual and the b72 SIZE-only folder note.
-- `docs/plans/2026-11-15-2311-fix-b67-open-issues-plan.md` — the earlier decision gate that kept the fixed port; this plan reverses its outcome with a different shape (a fixed port per session, not an ephemeral port per PASV).
+- `docs/plans/archive/2026-11-15-2311-fix-b67-open-issues-plan.md` — the earlier decision gate that kept the fixed port; this plan reverses its outcome with a different shape (a fixed port per session, not an ephemeral port per PASV).
 - `src/core/ftp/server.c` — single `data_port`, the address-only accept test, and the 425/450 reply paths.
 - `src/platform/net.h`, `src/platform/psp2_net.c` — the listen contract and the adapter's refusal of port 0.
 - `tools/fake/fake_net.c` — per-peer ports and the listener index used to prove two same-address sessions.

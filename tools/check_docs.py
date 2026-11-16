@@ -258,10 +258,14 @@ def check_code_paths(tree):
     """A backticked docs/ path is a citation, so a missing file is drift.
 
     Globs and ellipses are templates, not citations; flagging them would make
-    the check cry wolf on prose that is deliberately general.
+    the check cry wolf on prose that is deliberately general.  An archived
+    plan's forward-looking paths describe what it proposed, not what exists
+    now; its links, fences, and references stay checked.
     """
     found = []
     for rel in markdown_files(tree):
+        if "/archive/" in "/" + rel:
+            continue
         for number, line in unfenced(tree.lines(rel) or []):
             for match in CODE_RE.finditer(line):
                 token = match.group(1).strip()
@@ -516,6 +520,12 @@ def check_build_tokens(tree):
             continue
         for number, line in unfenced(tree.lines(rel) or []):
             for match in BUILD_RE.finditer(line):
+                # A token inside a kebab-case filename is part of a plan's
+                # name, not a claim about which build carries the code.
+                start, end = match.span()
+                if (start > 0 and line[start - 1] == "-") or (
+                        end < len(line) and line[end] == "-"):
+                    continue
                 token = text_key(match.group(0))
                 found.append(finding(
                     rel, number, "build-token", token,
