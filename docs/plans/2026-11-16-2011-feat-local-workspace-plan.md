@@ -45,7 +45,7 @@ The result is that ordinary file organization feels like a transfer tool with a 
 - **ALL DRIVES becomes volume-complete for user mounts while the server keeps its writable three.** A file manager should reach the console's storage; an anonymous server should not gain new writable surfaces by accident. Governs R1 through R6.
 - **Same-folder paste asks duplicate or cancel; any other existing destination keeps the existing prompt.** Overwrite cannot change a file onto itself, and a batch with both kinds of collision should not stack two prompts. Governs R16 through R20.
 - **Connect success returns to the workspace, but only from SITES.** The connect is the user's request to see the remote, and a failure should keep the list in front for an edit or retry. Governs R21 and R22.
-- **The stick moves the selection and the workspace lists wrap.** The stick is a second navigation control, not a detached scroll; a list that stops at the end forces a trip back through every row. Governs R23 through R25.
+- **The stick moves the selection and the file and site lists wrap.** The stick is a second navigation control, not a detached scroll; a list that stops at the end forces a trip back through every row. Governs R23 through R25.
 - **The local-local mode is session state.** Each launch starts local plus remote, because the remote is half the product; the mode is not persisted. Governs R15.
 - **The v1 plan's stale input text is corrected, not the bindings.** The code and `DESIGN.md` already agree that Triangle opens ACTIONS and Select opens SITES; only the plan text is wrong. Governs R26.
 
@@ -97,9 +97,9 @@ stateDiagram-v2
 
 **List navigation**
 
-- R23. The left stick moves the active pane's selection, and the view scrolls to keep the selection visible; it never scrolls the view independently of the cursor.
-- R24. The workspace row list wraps: Up on the first row selects the last, and Down on the last selects the first, except that Down on the last row focuses the transfer dock when a transfer is active or queued, as it does today.
-- R25. Wrap and stick-following apply to the workspace panes; SITES, ACTIONS, CONFIRM, and the dock's Down entry keep their current behavior.
+- R23. The left stick moves the active pane's selection by its deflection, from one row at the deadzone edge to five at full deflection, at the existing 100 ms cadence; the view scrolls to keep the selection visible, and the stick never scrolls the view independently of the cursor.
+- R24. The workspace row list wraps: Up on the first row selects the last, and Down on the last selects the first, except that Down on the last row focuses the transfer dock when a transfer is active or queued, as it does today. The SITES site book wraps the same way.
+- R25. Wrap and stick-following apply to the workspace panes and the site book; ACTIONS, CONFIRM, and the dock's Down entry keep their current behavior.
 
 **Behavior source**
 
@@ -128,8 +128,8 @@ stateDiagram-v2
   - **Outcome:** The remote view is loading its first listing. A failure stays on SITES with the reason.
   - **Covers:** R13, R21, R22.
 - F5. Navigate with the stick and wrap.
-  - **Trigger:** The stick is held in a workspace list.
-  - **Steps:** The selection moves and the view follows; at the end of the list, the selection wraps.
+  - **Trigger:** The stick is held in a workspace list or the site book.
+  - **Steps:** The selection moves by the deflection, from one row to five, and the view follows; at the end of the list, the selection wraps.
   - **Outcome:** The cursor is always visible and never left behind by a scroll.
   - **Covers:** R23, R24.
 
@@ -170,7 +170,7 @@ stateDiagram-v2
 - AE7. Stick and wrap.
   - **Given:** A 40-row folder with the cursor on the first row.
   - **When:** The stick is held down.
-  - **Then:** The cursor moves with the view; after the last row, the next step selects the first, and Up from the first selects the last.
+  - **Then:** A small deflection moves one row and a full deflection up to five, with the view following; after the last row, the next step selects the first, and Up from the first selects the last.
   - **Covers:** R23, R24.
 - AE8. Upload while both panes are local.
   - **Given:** Both panes show local folders.
@@ -189,13 +189,18 @@ stateDiagram-v2
   - **When:** Cross is pressed on a local file.
   - **Then:** No transfer starts, the status line says `NO REMOTE VIEW`, and the switch row is the way back.
   - **Covers:** R12.
+- AE11. Site book wrap.
+  - **Given:** The site book has more rows than fit and the cursor is on the last site.
+  - **When:** Down is pressed.
+  - **Then:** The first site is selected; Up from the first selects the last.
+  - **Covers:** R24.
 
 ### Success Criteria
 
 - A user can copy or move a file between two local folders without changing the source pane's folder after the copy.
 - Both panes list the same mounted volumes, and a write on a read-only mount changes nothing.
 - A successful connect always lands in the remote view; a failed one stays on SITES with the reason.
-- The cursor is never left behind by a scroll, and a workspace list wraps at both ends except for the dock entry when a transfer can be cancelled.
+- The cursor is never left behind by a scroll, and a file list or the site book wraps at both ends except for the dock entry when a transfer can be cancelled.
 - The existing host suites pass, new coverage proves these requirements, and the hardware matrix gains rows for the volumes, the second pane, the connect return, and list navigation.
 
 ### How This Work Fits Together
