@@ -32,6 +32,8 @@ The app is a console-first workspace, but its local side is narrower than the co
 
 Small frictions make every navigation cost more than it should. Connecting from SITES leaves the user on the site list after the connection already succeeded. The stick scrolls the view while the cursor stays behind, so the next D-pad press jumps the view back to the top. Lists stop dead at the first and last rows.
 
+Copying a file into the folder it came from is the sharpest case: the destination already exists and is the source, so the current overwrite-or-skip prompt has no answer that does not write the file onto itself.
+
 The result is that ordinary file organization feels like a transfer tool with a browser attached, and the console cannot yet be the only workspace for local files. That matters because "the console is the workspace" is the product's reason to exist, not a convenience.
 
 ### Key Decisions
@@ -63,30 +65,30 @@ stateDiagram-v2
 
 - R1. ALL DRIVES lists `ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, and `app0:` when mounted; an absent mount is absent, not an error row, and no system-only mount appears.
 - R2. `app0:` and `gro0:` are read-only: the row carries a read-only mark, and a write, rename, move, or delete there is refused with a reason and changes nothing.
-- R3. Every listed volume root is protected: a rename, move, or delete of the root is refused by name.
+- R3. Every listed volume root is protected: a rename, move, or delete of the root is refused by name. The system data root of a listed volume, at minimum `imc0:data`, is protected like `ur0:data` and `ux0:data`.
 - R4. Free space follows the volume; a value the platform cannot report renders `--`.
 - R5. The FTP server exposes only `ux0:`, `ur0:`, and `uma0:`; a server path on another mount is refused and creates nothing.
-- R6. Path canonicalization accepts the new mount tokens in every role while keeping the same normalization, case rule, and denial table.
+- R6. Path canonicalization accepts the new mount tokens in every role while keeping the same normalization and case rule, and the protected-path table grows to cover the volume roots and data roots R3 names. It also maps `app0:` to its install tree for same-path comparisons, so a copy or move between the two spellings is treated as the same folder.
 
 **Second local pane**
 
 - R7. ACTIONS on the right pane offers `SWITCH TO LOCAL` on the remote view and `SWITCH TO REMOTE` on the local view; the left pane offers no switch.
 - R8. A switch changes only which view the right pane shows. The FTP session, its folder, cursor, scroll, marks, and any running transfer are preserved, and switching back restores the view.
-- R9. Each right-pane view keeps its own folder, cursor, scroll, and marks. The local view opens at ALL DRIVES the first time, then returns to its last folder for the session.
+- R9. Each right-pane view keeps its own folder, cursor, scroll, and marks. The local view opens at ALL DRIVES the first time, then returns to its last folder for the session, or to ALL DRIVES when that folder no longer exists. When a local operation completes, any other local view showing an affected folder reloads, keeps its cursor on the same name where it survives, and prunes marks for names that are gone; a view showing an unaffected folder stays as it is.
 - R10. The right local view is a full local browser: the same actions, marks, free space, protection, and clipboard behavior as the left pane, subject to R12.
 - R11. The clipboard is shared: COPY or MOVE in either pane, a pane switch, and PASTE in the other pane paste into the active pane's folder.
-- R12. While both panes are local, UPLOAD is disabled on both with `NO REMOTE VIEW`; the switch row stays live.
+- R12. While both panes are local, UPLOAD is disabled on both with `NO REMOTE VIEW`, Cross on a file or marked set performs no transfer and reports the same reason, and the idle dock hint does not advertise an upload; the switch row stays live.
 - R13. A successful connection from SITES switches the right pane to remote and makes it active.
-- R14. The ACTIONS panel holds seven rows, with the switch row last, after DELETE on the local view and after DISCONNECT on the remote view.
-- R15. Each launch starts with the left pane local and the right pane remote and disconnected; the pane mode is not persisted.
+- R14. The ACTIONS panel on the right pane holds seven rows, with the switch row last, after DELETE on the local view and after DISCONNECT on the remote view; the left pane keeps six rows. Both panels grow to 360 px tall (bottom 436, 4 px above the dock), keeping the 44 px row pitch and the target panel aligned.
+- R15. Each launch starts with the left pane local and the right pane remote and disconnected; the pane mode is not persisted. With both panes local and no session, the idle dock names the active local pane, its path, and its marks, and never prints `REMOTE`.
 
 **Same-folder paste**
 
 - R16. A paste whose items all already live in the destination folder asks SAVE DUPLICATES or CANCEL; CANCEL changes nothing.
 - R17. SAVE DUPLICATES names each item with the existing copy rule (`A copy.TXT`, then `A copy 2.TXT`) and creates no overwrite.
 - R18. A same-folder MOVE stays refused with `ALREADY IN THIS FOLDER`.
-- R19. Any other paste with at least one existing destination asks the existing OVERWRITE ALL, SKIP EXISTING, and CANCEL prompt once; items already in the folder count as existing, and that batch offers no duplicate choice.
-- R20. The same-folder question also fires when the paste destination is the folder the items came from within one pane.
+- R19. Any other paste with at least one existing destination asks the existing OVERWRITE ALL, SKIP EXISTING, and CANCEL prompt once; items already in the folder count as existing, that batch offers no duplicate choice, and an already-here item in a mixed MOVE stays in place and counts as skipped instead of failing the batch.
+- R20. The same-folder question is decided by the destination path, so it fires in either pane, including when the paste is in the other local pane at the folder the items came from.
 
 **Connect return**
 
@@ -96,12 +98,12 @@ stateDiagram-v2
 **List navigation**
 
 - R23. The left stick moves the active pane's selection, and the view scrolls to keep the selection visible; it never scrolls the view independently of the cursor.
-- R24. The workspace row list wraps: Up on the first row selects the last, and Down on the last selects the first.
-- R25. Wrap and stick-following apply to the workspace panes; SITES, ACTIONS, and CONFIRM keep their current clamping.
+- R24. The workspace row list wraps: Up on the first row selects the last, and Down on the last selects the first, except that Down on the last row focuses the transfer dock when a transfer is active or queued, as it does today.
+- R25. Wrap and stick-following apply to the workspace panes; SITES, ACTIONS, CONFIRM, and the dock's Down entry keep their current behavior.
 
 **Behavior source**
 
-- R26. The implementation corrects the behavior documents: the v1 plan's stick sentence and its Triangle/Select sentence, DESIGN's six-row cap, the local-pane volume sentence, and the settled-scope sentence in `AGENTS.md`, while the server's volume sentence stays as it is.
+- R26. The implementation corrects the behavior documents: the v1 plan's stick sentence and its Triangle/Select sentence; DESIGN's six-row cap, ACTIONS geometry, ALL DRIVES paragraph, and no-session dock state; AGENTS.md's status and settled-scope sentences; README.md; and docs/PROJECT.md. The server's volume sentences stay as they are.
 
 ### Key Flows
 
@@ -154,9 +156,9 @@ stateDiagram-v2
   - **Then:** `A copy.TXT` is created and `A.TXT` is untouched; a second run creates `A copy 2.TXT`.
   - **Covers:** R16, R17, R20.
 - AE5. Mixed paste.
-  - **Given:** The clipboard holds `ux0:data/A.TXT` and `ux0:other/A.TXT`, and the destination is `ux0:data`.
+  - **Given:** The clipboard holds `ux0:data/A.TXT` and `ux0:other/B.TXT`, and `ux0:data/B.TXT` already exists; the destination is `ux0:data`.
   - **When:** PASTE runs.
-  - **Then:** One OVERWRITE ALL, SKIP EXISTING, and CANCEL prompt appears; OVERWRITE leaves the already-here `A.TXT` unchanged and replaces the other one, SKIP leaves both, and no duplicate is created.
+  - **Then:** One OVERWRITE ALL, SKIP EXISTING, and CANCEL prompt appears; OVERWRITE leaves the already-here `A.TXT` unchanged and replaces `B.TXT`, SKIP leaves both, and no duplicate is created.
   - **Covers:** R19.
 - AE6. Connect success and failure.
   - **Given:** SITES holds a good site and a site with a bad password.
@@ -172,16 +174,28 @@ stateDiagram-v2
   - **Covers:** R23, R24.
 - AE8. Upload while both panes are local.
   - **Given:** Both panes show local folders.
-  - **When:** ACTIONS opens on either pane.
-  - **Then:** UPLOAD is dim with `NO REMOTE VIEW`, and the switch row is live.
-  - **Covers:** R12, R14.
+  - **When:** ACTIONS opens on the left pane.
+  - **Then:** The panel keeps six rows, UPLOAD is dim with `NO REMOTE VIEW`, and no switch row appears.
+  - **When:** ACTIONS opens on the right pane.
+  - **Then:** UPLOAD is dim, and `SWITCH TO REMOTE` is the seventh row.
+  - **Covers:** R7, R12, R14.
+- AE9. Wrap with a transfer running.
+  - **Given:** A transfer is active and the cursor is on the last row.
+  - **When:** Down is pressed.
+  - **Then:** The dock takes focus instead of wrapping; Up from the first row still selects the last.
+  - **Covers:** R24, R25.
+- AE10. Cross with both panes local.
+  - **Given:** Both panes are local and a hidden remote session is connected.
+  - **When:** Cross is pressed on a local file.
+  - **Then:** No transfer starts, the status line says `NO REMOTE VIEW`, and the switch row is the way back.
+  - **Covers:** R12.
 
 ### Success Criteria
 
 - A user can copy or move a file between two local folders without changing the source pane's folder after the copy.
 - Both panes list the same mounted volumes, and a write on a read-only mount changes nothing.
 - A successful connect always lands in the remote view; a failed one stays on SITES with the reason.
-- The cursor is never left behind by a scroll, and a workspace list never stops at an end without wrapping.
+- The cursor is never left behind by a scroll, and a workspace list wraps at both ends except for the dock entry when a transfer can be cancelled.
 - The existing host suites pass, new coverage proves these requirements, and the hardware matrix gains rows for the volumes, the second pane, the connect return, and list navigation.
 
 ### How This Work Fits Together
@@ -212,12 +226,12 @@ This plan covers the local workspace. The broader breakdown is the current under
 ### Dependencies / Assumptions
 
 - The mount set is runtime: `imc0:` exists on PCH-2000 only, `gro0:` and `grw0:` need a game card, and `uma0:` needs USB storage; `app0:` is always present.
-- `app0:` and `gro0:` are read-only; `grw0:` is writable when it exists.
+- `app0:` and `gro0:` are read-only; `grw0:` is expected writable but unconfirmed, so a refused write there surfaces the platform reason rather than a read-only promise.
 - The ACTIONS panel can grow to seven rows, and the design update belongs to this work.
 - The v1 plan's stick and binding text is stale; the code and `DESIGN.md` already describe the behavior this plan requires.
 - The settings store keeps one `last_local`; the right local view's folder is session-only.
 - No kernel plugin, daemon, or boot component is added.
-- The implementation records a superseding decision for the volume scope, because the settled v1 scope names three volumes.
+- The implementation records two superseding decisions: one for the volume scope, because the settled v1 scope names three volumes, and one for D60's cross-pane-movement and silent-same-folder-copy clauses, which R11 and R16 replace.
 
 ### Outstanding Questions
 
