@@ -5,17 +5,6 @@ docs/FIXES.md	retired-phrase	control+1
 docs/PROJECT.md	traceability	traceability-table
 docs/VERIFICATION.md	reference	U1-U10
 docs/design/README.md	build-token	b63
-docs/plans/2026-11-16-0826-docs-consolidation-plan.md	code-path	docs/HISTORY.md
-docs/plans/2026-11-16-0826-docs-consolidation-plan.md	code-path	docs/design/archive/
-docs/plans/2026-11-16-0826-docs-consolidation-plan.md	code-path	docs/plans/archive/
-docs/plans/2026-11-16-0826-docs-consolidation-plan.md	code-path	docs/plans/archive/README.md
 docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/HISTORY.md
 docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/design/archive/
 docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/design/archive/README.md
-docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/plans/archive/
-docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/plans/archive/README.md
-docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	inventory	docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md
-docs/plans/README.md	build-token	b40
-docs/plans/README.md	build-token	b41
-docs/plans/README.md	build-token	b50
-docs/plans/README.md	build-token	b67

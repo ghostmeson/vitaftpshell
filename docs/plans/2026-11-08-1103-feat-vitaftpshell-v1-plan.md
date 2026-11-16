@@ -763,7 +763,7 @@ and confirming it launches; that is M1's precondition, not a separate gate.
 
 **Review remediation (2026-11-15).** A full review of the b49 diff found 29
 findings and five lane-flow gaps. The remediation is a separate plan,
-`docs/plans/2026-11-15-1213-fix-b50-review-remediation-plan.md`; its U1-U12
+`docs/plans/archive/2026-11-15-1213-fix-b50-review-remediation-plan.md`; its U1-U12
 landed in b55. It fixes the transfer terminal, the local-action guard U26 left
 in place, prompt identity, the UI stack budget, the pump budget, the server
 session bounds, and the sidecar owner, and it adds the threaded host test. The
