@@ -37,6 +37,10 @@ static const char *action_label(UiAction action)
         return "REFRESH";
     case UI_ACTION_DISCONNECT:
         return "DISCONNECT";
+    case UI_ACTION_SWITCH_LOCAL:
+        return "SWITCH TO LOCAL";
+    case UI_ACTION_SWITCH_REMOTE:
+        return "SWITCH TO REMOTE";
     default:
         return "";
     }
@@ -67,6 +71,9 @@ static const char *action_desc(UiAction action, UiClipMode clip)
         return "READ THE FOLDER AGAIN";
     case UI_ACTION_DISCONNECT:
         return "CLOSE THE SESSION";
+    case UI_ACTION_SWITCH_LOCAL:
+    case UI_ACTION_SWITCH_REMOTE:
+        return "THE RIGHT PANE";
     default:
         return "";
     }
@@ -99,6 +106,9 @@ static const char *action_consequence(UiAction action, UiClipMode clip)
         return "UPDATES THE REMOTE LISTING.";
     case UI_ACTION_DISCONNECT:
         return "ENDS THE FTP SESSION AND CLEARS THE REMOTE PANE.";
+    case UI_ACTION_SWITCH_LOCAL:
+    case UI_ACTION_SWITCH_REMOTE:
+        return "THE OTHER VIEW KEEPS ITS PLACE.";
     default:
         return "";
     }
@@ -217,14 +227,19 @@ static void target_draw(const UiState *state, const LayoutRect *r)
 {
     const UiActions *actions = &state->actions;
     UiPane pane = (UiPane)actions->pane;
+    UiAction selected = (UiAction)actions->selected;
+    int switches = selected == UI_ACTION_SWITCH_LOCAL ||
+                   selected == UI_ACTION_SWITCH_REMOTE;
 
     Rect panel = {(float)r->x, (float)r->y, (float)r->w, (float)r->h};
     ui_panel_frame(panel, 0, C_CYAN);
 
     font_text("TARGET", 596.0f, 84.0f, PX_MICRO, C_DIM);
-    font_text(ui_pane_is_local(pane) ? "LOCAL" : "REMOTE", 596.0f, 108.0f,
-              PX_LABEL, C_WHITE);
-    font_text(actions->dest, 596.0f, 126.0f, PX_MICRO, C_CYAN);
+    font_text(switches ? "PANE"
+                       : (ui_pane_is_local(pane) ? "LOCAL" : "REMOTE"),
+              596.0f, 108.0f, PX_LABEL, C_WHITE);
+    font_text(switches ? "--" : actions->dest, 596.0f, 126.0f, PX_MICRO,
+              C_CYAN);
 
     int protected_root = actions->protected_root;
 
@@ -232,8 +247,10 @@ static void target_draw(const UiState *state, const LayoutRect *r)
     int known = 0;
     int have_size = target_size(state, actions, &bytes, &known);
 
-    UiAction selected = (UiAction)actions->selected;
-    if (selected == UI_ACTION_PASTE && state->clip_mode != UI_CLIP_NONE) {
+    if (switches) {
+        font_text("--", 596.0f, 148.0f, PX_VALUE, C_DIM);
+        font_text("PANE", 596.0f, 178.0f, PX_LABEL, C_DIM);
+    } else if (selected == UI_ACTION_PASTE && state->clip_mode != UI_CLIP_NONE) {
         char count[32];
         snprintf(count, sizeof(count), "%d", state->clip_count);
         font_text(count, 596.0f, 148.0f, PX_PRIMARY, C_WHITE);
@@ -273,7 +290,7 @@ static void target_draw(const UiState *state, const LayoutRect *r)
 
     font_text("DESTINATION", 596.0f, 224.0f, PX_MICRO, C_DIM);
     const char *destination =
-        selected == UI_ACTION_DISCONNECT
+        selected == UI_ACTION_DISCONNECT || switches
             ? "--"
             : ((selected == UI_ACTION_COPY || selected == UI_ACTION_MOVE)
                    ? "CLIPBOARD"
@@ -300,8 +317,10 @@ static void dock_actions(const UiState *state)
     p.word = "READY";
     p.word_color = C_DIM;
     UiAction dock_selected = (UiAction)actions->selected;
+    int dock_switch = dock_selected == UI_ACTION_SWITCH_LOCAL ||
+                      dock_selected == UI_ACTION_SWITCH_REMOTE;
     p.subject = action_label(dock_selected);
-    p.path = dock_selected == UI_ACTION_DISCONNECT
+    p.path = dock_selected == UI_ACTION_DISCONNECT || dock_switch
                  ? "--"
                  : ((dock_selected == UI_ACTION_COPY ||
                      dock_selected == UI_ACTION_MOVE)

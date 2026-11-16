@@ -550,6 +550,14 @@ static void close_confirm(UiState *state, int return_to_editor)
 
 static int action_for_pane(UiPane pane, UiAction action, UiClipMode clip)
 {
+    /* The switch belongs to the right slot only: the left pane never shows
+     * one, the remote view offers SWITCH TO LOCAL, the local right view offers
+     * SWITCH TO REMOTE (KTD3). */
+    if (action == UI_ACTION_SWITCH_LOCAL)
+        return pane == UI_PANE_REMOTE;
+    if (action == UI_ACTION_SWITCH_REMOTE)
+        return pane == UI_PANE_LOCAL_RIGHT;
+
     if (ui_pane_is_local(pane)) {
         if (action == UI_ACTION_DOWNLOAD || action == UI_ACTION_REFRESH ||
             action == UI_ACTION_DISCONNECT)
@@ -1396,6 +1404,24 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD)
                 ? state->actions.other
                 : state->actions.dest;
+
+        /* The right-pane switch is reducer-only: no worker command exists for
+         * it. Flipping the view preserves the session and both views' state
+         * (R8, KTD3). It stays reachable when the remote view is lost or
+         * disconnected because nothing here reads the session. */
+        if (action == UI_ACTION_SWITCH_LOCAL ||
+            action == UI_ACTION_SWITCH_REMOTE) {
+            UiPane view = action == UI_ACTION_SWITCH_LOCAL
+                              ? UI_PANE_LOCAL_RIGHT
+                              : ui_pane_remote_view();
+            state->right_view = view;
+            state->active_pane = view;
+            leave_screen(state);
+            set_status(state, action == UI_ACTION_SWITCH_LOCAL
+                                  ? "SWITCHED TO LOCAL"
+                                  : "SWITCHED TO REMOTE");
+            return;
+        }
 
         /* COPY and MOVE arm the clipboard. Nothing is touched until PASTE,
          * after the user has navigated to the destination folder. The marked

@@ -170,11 +170,16 @@ static const char *pane_name(UiPane pane)
 static void idle_dock(const UiState *state, DockPanel *p)
 {
     const UiPaneState *pane = &state->panes[state->active_pane];
-    int no_session = !state->panes[ui_pane_remote_view()].connected;
+    UiPane remote_view = ui_pane_remote_view();
+    int both_local = state->right_view != remote_view;
+    int no_session = !state->panes[remote_view].connected;
 
     p->word = "IDLE";
     p->word_color = C_DIM;
-    p->subject = no_session ? "REMOTE" : pane_name(state->active_pane);
+    /* With both panes local the dock names the active local pane; REMOTE would
+     * name a view that is not on screen (R15). */
+    p->subject =
+        (both_local || !no_session) ? pane_name(state->active_pane) : "REMOTE";
     p->path = pane->path;
     p->progress_valid = 0;
     p->left_color = C_DIM;
@@ -206,6 +211,18 @@ static void idle_dock(const UiState *state, DockPanel *p)
                  state->clip_count);
         p->left = left;
         p->left_color = C_CYAN;
+    } else if (both_local) {
+        /* A file or marked set has no remote destination, so the hint names
+         * the reason instead of promising an upload (R12). A folder or volume
+         * still opens with Cross. */
+        const UiRow *row = ui_state_selected_row(state, state->active_pane);
+        if (pane->mark_count > 0 ||
+            (row != NULL && row->type == UI_ROW_FILE)) {
+            p->left = "NO REMOTE VIEW";
+            p->left_color = C_YELLOW;
+        } else {
+            p->left = "X TO OPEN";
+        }
     } else if (no_session) {
         p->left = "NO SELECTION";
     } else if (pane->mark_count > 0) {

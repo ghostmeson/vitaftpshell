@@ -119,6 +119,15 @@ static int mark_count(UiPane pane)
     return ui_state_mark_count(&s_state, pane);
 }
 
+static int visible_has(UiAction action)
+{
+    for (int i = 0; i < s_state.actions.visible_count; ++i) {
+        if (s_state.actions.visible[i] == (int)action)
+            return 1;
+    }
+    return 0;
+}
+
 static void test_workspace_nav(void)
 {
     reset();
@@ -1375,6 +1384,90 @@ static void test_remote_actions_availability(void)
           0);
 }
 
+static void test_action_switch(void)
+{
+    /* The left pane keeps six rows and never offers a switch. */
+    reset();
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    CHECK(s_state.actions.visible_count == 6);
+    CHECK(!visible_has(UI_ACTION_SWITCH_LOCAL));
+    CHECK(!visible_has(UI_ACTION_SWITCH_REMOTE));
+
+    /* The right remote view adds SWITCH TO LOCAL last. */
+    reset();
+    send_key(UI_KEY_L1);
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.pane == UI_PANE_REMOTE);
+    CHECK(s_state.actions.visible_count == 7);
+    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
+
+    /* The switch is reducer-only: no command, the new view is active, and
+     * ACTIONS closes. */
+    s_state.actions.selected = UI_ACTION_SWITCH_LOCAL;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 0);
+    CHECK(s_state.right_view == UI_PANE_LOCAL_RIGHT);
+    CHECK(s_state.active_pane == UI_PANE_LOCAL_RIGHT);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(strcmp(s_state.status, "SWITCHED TO LOCAL") == 0);
+
+    /* The right local view adds SWITCH TO REMOTE last. */
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.pane == UI_PANE_LOCAL_RIGHT);
+    CHECK(s_state.actions.visible_count == 7);
+    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_REMOTE);
+    CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_REMOTE] == 1);
+    s_state.actions.selected = UI_ACTION_SWITCH_REMOTE;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 0);
+    CHECK(s_state.right_view == UI_PANE_REMOTE);
+    CHECK(s_state.active_pane == UI_PANE_REMOTE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(strcmp(s_state.status, "SWITCHED TO REMOTE") == 0);
+
+    /* A disconnected remote view still enters ACTIONS with the switch live. */
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].connected = 0;
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    CHECK(s_state.actions.visible_count == 7);
+    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
+
+    /* A lost remote view keeps the prepared switch row reachable. */
+    reset();
+    send_key(UI_KEY_L1);
+    send_key(UI_KEY_TRIANGLE);
+    s_state.panes[UI_PANE_REMOTE].connected = 0;
+    s_state.panes[UI_PANE_REMOTE].session_lost = 1;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    CHECK(s_state.actions.visible_count == 7);
+    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
+    s_state.actions.selected = UI_ACTION_SWITCH_LOCAL;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 0);
+    CHECK(s_state.right_view == UI_PANE_LOCAL_RIGHT);
+    CHECK(s_state.active_pane == UI_PANE_LOCAL_RIGHT);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+
+    /* With both panes local, UPLOAD's NO REMOTE VIEW reason wins over the
+     * no-selection reason. */
+    reset();
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.active_pane = UI_PANE_LOCAL;
+    s_state.panes[UI_PANE_LOCAL].selected = 0; /* ".." */
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.has_selection == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_UPLOAD], "NO REMOTE VIEW") ==
+          0);
+}
+
 static void test_remote_disconnect_action(void)
 {
     reset();
@@ -1998,6 +2091,7 @@ int main(void)
     test_remote_volume_marks();
     test_remote_marks_pruned();
     test_remote_actions_availability();
+    test_action_switch();
     test_remote_disconnect_action();
     test_remote_refresh_action();
     test_remote_delete_confirm_and_type();

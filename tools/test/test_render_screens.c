@@ -241,8 +241,8 @@ static void test_actions(void)
     ui_actions_prepare(&s_state);
     render();
 
-    CHECK(trace_has_rect(18.0f, 76.0f, 552.0f, 352.0f, C_PANEL));
-    CHECK(trace_has_rect(582.0f, 76.0f, 360.0f, 352.0f, C_PANEL));
+    CHECK(trace_has_rect(18.0f, 76.0f, 552.0f, 360.0f, C_PANEL));
+    CHECK(trace_has_rect(582.0f, 76.0f, 360.0f, 360.0f, C_PANEL));
     CHECK(trace_text_at("LOCAL ACTIONS", 32.0f, 84.0f));
     CHECK(trace_text_at("ux0:data/FILE.BIN", 32.0f, 102.0f));
     CHECK(trace_text_right("1 ITEM", 556.0f, 86.0f, PX_MICRO, C_DIM));
@@ -252,6 +252,8 @@ static void test_actions(void)
     CHECK(trace_text_at("TO CLIPBOARD", 50.0f, 191.0f));
     CHECK(trace_text_at("DELETE", 50.0f, 350.0f));
     CHECK(trace_text_at_color("CANNOT BE UNDONE", 50.0f, 367.0f, C_YELLOW));
+    CHECK(!trace_has_text("SWITCH TO LOCAL"));
+    CHECK(!trace_has_text("SWITCH TO REMOTE"));
     CHECK(trace_text_at("TARGET", 596.0f, 84.0f));
     CHECK(trace_text_at("LOCAL", 596.0f, 108.0f));
     CHECK(trace_text_at("ux0:data", 596.0f, 126.0f));
@@ -304,6 +306,20 @@ static void test_actions(void)
     CHECK(trace_text_at("DELETE", 50.0f, 262.0f));
     CHECK(trace_text_at("REFRESH", 50.0f, 306.0f));
     CHECK(trace_text_at("DISCONNECT", 50.0f, 350.0f));
+    CHECK(trace_text_at("SWITCH TO LOCAL", 50.0f, 394.0f));
+    CHECK(trace_text_at("THE RIGHT PANE", 50.0f, 411.0f));
+
+    /* The seventh row sits inside the frame, and its target is a pane. */
+    s_state.actions.selected = UI_ACTION_SWITCH_LOCAL;
+    render();
+    CHECK(trace_has_rect(19.0f, 388.0f, 550.0f, 44.0f, C_CYAN));
+    CHECK(trace_text_at("PANE", 596.0f, 108.0f));
+    CHECK(trace_text_at("--", 596.0f, 126.0f));
+    CHECK(trace_text_at("--", 596.0f, 148.0f));
+    CHECK(trace_text_at("PANE", 596.0f, 178.0f));
+    CHECK(trace_text_right("--", 928.0f, 224.0f, PX_MICRO, C_CYAN));
+    CHECK(trace_text_at("SWITCH TO LOCAL", 596.0f, 300.0f));
+    CHECK(trace_text_at("THE OTHER VIEW KEEPS ITS PLACE.", 596.0f, 320.0f));
 
     /* The right local view is still a LOCAL ledger and a LOCAL target. */
     setup();
@@ -313,10 +329,14 @@ static void test_actions(void)
     s_state.panes[UI_PANE_LOCAL_RIGHT].selected = 1;
     ui_actions_prepare(&s_state);
     render();
+    CHECK(trace_has_rect(18.0f, 76.0f, 552.0f, 360.0f, C_PANEL));
     CHECK(trace_text_at("LOCAL ACTIONS", 32.0f, 84.0f));
     CHECK(trace_text_at("LOCAL", 596.0f, 108.0f));
     CHECK(trace_text_at("COPY", 50.0f, 130.0f));
     CHECK(trace_text_at("UPLOAD", 50.0f, 218.0f));
+    CHECK(trace_text_at("DELETE", 50.0f, 350.0f));
+    CHECK(trace_text_at("SWITCH TO REMOTE", 50.0f, 394.0f));
+    CHECK(trace_text_at("THE RIGHT PANE", 50.0f, 411.0f));
 }
 
 static void test_server(void)

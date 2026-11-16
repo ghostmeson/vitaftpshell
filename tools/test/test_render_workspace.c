@@ -520,6 +520,40 @@ static void test_both_local(void)
     CHECK(trace_has_rect(486.0f, 76.0f, 456.0f, 352.0f, C_PANEL));
 }
 
+/* R12: both panes local makes the idle hint row-aware and the legend read
+ * OPEN, because a local file has no remote destination. */
+static void test_both_local_hint(void)
+{
+    setup();
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.panes[UI_PANE_REMOTE].connected = 0;
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    UiPaneState *right = &s_state.panes[UI_PANE_LOCAL_RIGHT];
+    snprintf(right->path, sizeof(right->path), "ur0:data");
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL_RIGHT, s_rows, 3, 0);
+
+    right->selected = 1; /* VITAFTPSHELL, a folder */
+    render();
+    CHECK(trace_text_at("X TO OPEN", 32.0f, 483.0f));
+    CHECK(trace_text_at("OPEN", 40.0f, 512.0f));
+    CHECK(!trace_has_text("OPEN/SEND"));
+    CHECK(!trace_has_text("REMOTE"));
+
+    right->selected = 2; /* A.TXT, a file */
+    render();
+    CHECK(trace_text_at("NO REMOTE VIEW", 32.0f, 483.0f));
+    CHECK(!trace_has_text("X TO OPEN"));
+    CHECK(trace_text_at("OPEN", 40.0f, 512.0f));
+
+    static const UiRow volume_rows[] = {
+        {.name = "ux0:", .type = UI_ROW_VOLUME},
+    };
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL_RIGHT, volume_rows, 1, 0);
+    right->selected = 0;
+    render();
+    CHECK(trace_text_at("X TO OPEN", 32.0f, 483.0f));
+}
+
 int main(void)
 {
     test_ten_rows_and_scroll();
@@ -527,6 +561,7 @@ int main(void)
     test_aside_debris_mark();
     test_active_pane();
     test_both_local();
+    test_both_local_hint();
     test_first_2000();
     test_risk_mark();
     test_pane_error();

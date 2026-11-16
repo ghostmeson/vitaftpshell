@@ -145,6 +145,9 @@ allowed outside the hazard band.
   the item failed and is retried by running it again; a control failure leaves
   the reconnect to the pane.
 - **No session:** `IDLE` dim; `REMOTE`; `NO MARKS`; `NO SELECTION`.
+- **Both local:** `IDLE` dim; the active pane (`LOCAL`) and its path; the mark
+  count and total; `X TO OPEN` or `NO REMOTE VIEW` on line three. The dock never
+  reads `REMOTE` in this mode, and the legend's first key reads `[X] OPEN`.
 - **Status:** a status message replaces the idle hint on line three until the
   next key: red for a failure or refusal, yellow for a warning. The rest of the
   idle dock does not change.
@@ -419,8 +422,8 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
 
 | Region | x | y | w | h |
 |---|---|---|---|---|
-| Action panel | 18 | 76 | 552 | 352 |
-| Target panel | 582 | 76 | 360 | 352 |
+| Action panel | 18 | 76 | 552 | 360 |
+| Target panel | 582 | 76 | 360 | 360 |
 | Dock | 18 | 440 | 924 | 64 |
 | Control legend | 18 | 510 | 924 | 16 |
 
@@ -430,16 +433,23 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
   32, 102 (micro, cyan); the band state right-aligned at 556: `n ITEM(S)`,
   `n MARKED`, `COPY n`, `MOVE n`, `NO SELECTION`, `VOLUME ROOT`, or
   `PROTECTED PATH`.
-- A hairline at 119; rows from 124 at 44 px, six maximum.
+- A hairline at 119; rows from 124 at 44 px, six on the left and seven on the
+  right. The right pane's last row is the switch.
 - Each row: label at 50 (px 2), description at 50 (micro, `y+23`). Disabled rows
   are dim and carry the reason (`NO SELECTION`, `PROTECTED PATH`, `VOLUME ROOT`).
   A destructive row’s description is yellow (`CANNOT BE UNDONE`). The selected
   row is a cyan slab from `x+1` to `x+w-1`; its label, description, and disabled
   reason are near-black.
+- The switch row: `SWITCH TO LOCAL` on the right remote view, `SWITCH TO REMOTE`
+  on the right local view, described `THE RIGHT PANE`. Its target reads `PANE`,
+  its destination `--`, and its consequence `THE OTHER VIEW KEEPS ITS PLACE.`
+  The left pane never offers a switch. The row stays live while the remote view
+  is lost or disconnected.
 
 ### Target panel
 
-- `TARGET` at 596, 84; the pane at 596, 108; the path at 596, 126.
+- `TARGET` at 596, 84; the pane at 596, 108 (the switch shows `PANE`); the path
+  at 596, 126 (the switch shows `--`).
 - Multi: the count at 596, 148 (px 5), `MARKED` and the total at 169. Single: the
   name at 596, 148 (px 3) and the size at 178 (px 2). Protected: the root at 148
   (px 3) and `VOLUME ROOT` at 178 (px 2, yellow). No selection: `--` at 148 and
@@ -448,7 +458,8 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
 - A hairline at 210; `DESTINATION` at 224 with the value right-aligned at 928.
   COPY and MOVE show `CLIPBOARD`; PASTE and the other actions show the current
   folder (or the remote pane for upload). REFRESH shows `--` at 148 and `FOLDER`
-  at 178; DISCONNECT shows `--` at 148 and `SESSION` at 178.
+  at 178; DISCONNECT shows `--` at 148 and `SESSION` at 178; the switch shows
+  `--` at 148 and `PANE` at 178, with `--` as the destination.
 - The selected action at 300 and its consequence at 320 (micro); the note at
   400 (micro).
 - The target is the single source of truth for where an action goes.
@@ -486,6 +497,11 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
   unsafe when it is empty, `.`/`..`, or contains `/`, `\`, or `:`.
 - **Protected root:** copy, move, rename, and delete are dim with their reasons;
   new folder is the only action.
+- **Both panes local:** the right pane is a second local browser with the same
+  actions and marks as the left. UPLOAD is dim on both with `NO REMOTE VIEW`,
+  and that reason wins over `NO SELECTION`; the switch row stays live. The idle
+  hint reads `X TO OPEN` on a folder or volume and `NO REMOTE VIEW` on a file or
+  marked set, and the legend's first key reads `[X] OPEN`.
 
 ### Dock and legend
 

@@ -243,8 +243,9 @@ static void workspace_states(void)
     state.panes[UI_PANE_REMOTE].marked_bytes_known = 1;
     save_state("workspace-idle", &state);
 
-    /* U3: the right slot holding the second local view. The switch row is U4,
-     * so this state is constructed directly. */
+    /* The right slot holding the second local view. The ACTIONS switch is a
+     * reducer action (U4), so this workspace state constructs the view
+     * directly. */
     base(&state);
     state.right_view = UI_PANE_LOCAL_RIGHT;
     state.active_pane = UI_PANE_LOCAL_RIGHT;
@@ -605,6 +606,19 @@ static void actions_states(void)
     state.panes[UI_PANE_REMOTE].selected = 5;
     ui_actions_prepare(&state);
     save_state("actions-remote-single", &state);
+
+    base(&state);
+    state.screen = UI_SCREEN_ACTIONS;
+    state.right_view = UI_PANE_LOCAL_RIGHT;
+    state.active_pane = UI_PANE_LOCAL_RIGHT;
+    UiPaneState *right = &state.panes[UI_PANE_LOCAL_RIGHT];
+    snprintf(right->path, sizeof(right->path), "ur0:data");
+    snprintf(right->free_text, sizeof(right->free_text), "3.1 GB");
+    right->free_known = 1;
+    right->selected = 1;
+    ui_state_set_rows(&state, UI_PANE_LOCAL_RIGHT, s_rows, 9, 0);
+    ui_actions_prepare(&state);
+    save_state("actions-local-right", &state);
 
     base(&state);
     state.screen = UI_SCREEN_ACTIONS;

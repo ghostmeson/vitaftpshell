@@ -360,10 +360,10 @@ static void pane_draw(const UiState *state, UiPane pane, const LayoutRect *r)
     }
 }
 
-static void legend_standard(void)
+static void legend_standard(int both_local)
 {
     float x = (float)LAYOUT_MARGIN;
-    x = ui_keycap("X", "OPEN/SEND", x, 510.0f);
+    x = ui_keycap("X", both_local ? "OPEN" : "OPEN/SEND", x, 510.0f);
     x = ui_keycap("O", "UP", x, 510.0f);
     x = ui_keycap("SQUARE", "MARK", x, 510.0f);
     x = ui_keycap("TRIANGLE", "ACTIONS", x, 510.0f);
@@ -416,5 +416,5 @@ void workspace_draw(const UiState *state)
     if (state->panes[state->active_pane].session_lost)
         legend_reconnect();
     else
-        legend_standard();
+        legend_standard(state->right_view != ui_pane_remote_view());
 }
