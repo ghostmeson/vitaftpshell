@@ -1182,6 +1182,64 @@ static void test_path_busy_prompt(void)
     CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_CANCEL);
 }
 
+/* R16/R17/KTD6: the same-folder paste is its own prompt. The safe answer is
+ * focused first, the list is the items already here, and the destination folder
+ * is the context line. */
+static void test_duplicate_prompt(void)
+{
+    reset();
+    s_confirm_items[0].name = "ux0:data/A.TXT";
+    s_confirm_items[0].size = 3;
+    s_confirm_items[0].size_known = 1;
+
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_CONFIRM_REQUEST;
+    event.confirm = UI_CONFIRM_DUPLICATE;
+    event.pane = UI_PANE_LOCAL;
+    event.items = s_confirm_items;
+    event.item_count = 1;
+    event.existing_count = 0;
+    snprintf(event.text, sizeof(event.text), "ux0:data");
+    send_event(&event);
+
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_DUPLICATE);
+    CHECK(strcmp(s_state.confirm.title, "ITEMS ALREADY HERE") == 0);
+    CHECK(strcmp(s_state.confirm.context, "ux0:data") == 0);
+    CHECK(strcmp(s_state.confirm.warning,
+                 "SAVE DUPLICATES KEEPS THE ORIGINAL.") == 0);
+    CHECK(s_state.confirm.choices[0] == UI_CHOICE_CANCEL);
+    CHECK(s_state.confirm.choices[1] == UI_CHOICE_SAVE_DUPLICATE);
+    CHECK(s_state.confirm.choice_count == 2);
+    CHECK(s_state.confirm.choice_focus == 0);
+    CHECK(s_state.confirm.item_count == 1);
+
+    /* Cross on the focused answer is CANCEL: the paste changes nothing. */
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CONFIRM) != NULL);
+    CHECK(command(UI_CMD_CONFIRM)->confirm == UI_CONFIRM_DUPLICATE);
+    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_CANCEL);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+
+    /* Right reaches SAVE DUPLICATES; Circle is still CANCEL. */
+    reset();
+    send_event(&event);
+    CHECK(s_state.confirm.choice_focus == 0);
+    send_key(UI_KEY_RIGHT);
+    CHECK(s_state.confirm.choice_focus == 1);
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CONFIRM) != NULL);
+    CHECK(command(UI_CMD_CONFIRM)->confirm == UI_CONFIRM_DUPLICATE);
+    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_SAVE_DUPLICATE);
+
+    reset();
+    send_event(&event);
+    send_key(UI_KEY_CIRCLE);
+    CHECK(command(UI_CMD_CONFIRM) != NULL);
+    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_CANCEL);
+}
+
 /* D73: duplicate destination names are refused before any command, and a move
  * source inside another is skipped. */
 /* U27: each lane keeps its own dock; both running shows the network lane full
@@ -1327,7 +1385,7 @@ static void test_waiting_lane_cancel(void)
 
     /* A network PATH BUSY answer marks the network lane waiting, not local. */
     reset();
-    static const UiConfirmItem blocker = {"ux0:data/HELD.BIN", 0, 0};
+    static const UiConfirmItem blocker = {"ux0:data/HELD.BIN", 0, 0, 0};
     UiStateEvent request;
     memset(&request, 0, sizeof(request));
     request.kind = UI_EVT_CONFIRM_REQUEST;
@@ -1345,7 +1403,7 @@ static void test_waiting_lane_cancel(void)
 
     /* A worker prompt's identity rides the answer back to the worker. */
     reset();
-    static const UiConfirmItem one = {"ux0:data/A.TXT", 0, 0};
+    static const UiConfirmItem one = {"ux0:data/A.TXT", 0, 0, 0};
     UiStateEvent identified;
     memset(&identified, 0, sizeof(identified));
     identified.kind = UI_EVT_CONFIRM_REQUEST;
@@ -2575,6 +2633,7 @@ int main(void)
     test_stick_scope();
     test_confirm_busy_guard();
     test_path_busy_prompt();
+    test_duplicate_prompt();
     test_two_lane_dock();
     test_waiting_lane_cancel();
     test_paste_guards();

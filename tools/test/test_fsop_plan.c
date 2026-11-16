@@ -134,24 +134,207 @@ static void test_cross_volume_move(void)
     CHECK(s_plan.rollback_count == 0);
 }
 
+/* R16-R19: a same-folder COPY asks before it writes, duplicates under SAVE
+ * DUPLICATES, and is skipped under a mixed decision. A same-folder MOVE is
+ * skipped by the planner's mixed rule; the reducer refuses the all-in-folder
+ * move before it can reach a plan. */
+static int plan_writes_onto_itself(const FsOpPlan *plan)
+{
+    for (int i = 0; i < plan->step_count; ++i) {
+        const char *source = fsop_plan_step_source(plan, i);
+        const char *dest = fsop_plan_step_dest(plan, i);
+        if (source[0] != '\0' && dest[0] != '\0' &&
+            strcmp(source, dest) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 static void test_same_folder(void)
 {
     facts_reset();
     fact("ux0:data/A.TXT", FS_ENTRY_FILE, 3, 1);
+    fact("ux0:data/B.TXT", FS_ENTRY_FILE, 4, 1);
 
     const char *sources[] = {"ux0:data/A.TXT"};
     FsOpFacts f = facts();
-    FsOpRequest copy = {FSOP_COPY, sources, 1, "ux0:data", &f,
-                        FSOP_CONFLICT_OVERWRITE};
-    CHECK(fsop_plan_build(&s_plan, &copy) == 1);
+
+    /* ASK: the duplicate question, and no step until it is answered. */
+    FsOpRequest ask = {FSOP_COPY, sources, 1, "ux0:data", &f,
+                       FSOP_CONFLICT_ASK};
+    CHECK(fsop_plan_build(&s_plan, &ask) == 1);
     CHECK(s_plan.ok == 1);
+    CHECK(s_plan.needs_duplicate == 1);
+    CHECK(s_plan.needs_conflict == 0);
+    CHECK(s_plan.duplicate_count == 1);
+    CHECK(strcmp(fsop_plan_duplicate_source(&s_plan, 0),
+                 "ux0:data/A.TXT") == 0);
+    CHECK(s_plan.step_count == 0);
+    CHECK(s_plan.skipped_count == 0);
+    CHECK(!plan_writes_onto_itself(&s_plan));
+
+    /* SAVE DUPLICATES: the copy-name rule, never the source. */
+    FsOpRequest duplicate = ask;
+    duplicate.conflict = FSOP_CONFLICT_DUPLICATE;
+    CHECK(fsop_plan_build(&s_plan, &duplicate) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(!s_plan.needs_duplicate);
     CHECK(step_dest_index(&s_plan, FSOP_STEP_COPY_FILE,
                           "ux0:data/A copy.TXT") >= 0);
+    CHECK(step_source_index(&s_plan, FSOP_STEP_COPY_FILE,
+                            "ux0:data/A.TXT") >= 0);
+    CHECK(!plan_writes_onto_itself(&s_plan));
 
-    FsOpRequest move = {FSOP_MOVE, sources, 1, "ux0:data", &f,
+    /* A second run sees the first copy and takes the next name. */
+    fact("ux0:data/A copy.TXT", FS_ENTRY_FILE, 3, 1);
+    FsOpFacts two = facts();
+    FsOpRequest second = {FSOP_COPY, sources, 1, "ux0:data", &two,
+                          FSOP_CONFLICT_DUPLICATE};
+    CHECK(fsop_plan_build(&s_plan, &second) == 1);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_COPY_FILE,
+                          "ux0:data/A copy 2.TXT") >= 0);
+
+    /* OVERWRITE and SKIP cannot write a file onto itself: they skip. */
+    FsOpRequest overwrite = ask;
+    overwrite.conflict = FSOP_CONFLICT_OVERWRITE;
+    CHECK(fsop_plan_build(&s_plan, &overwrite) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.step_count == 0);
+    CHECK(s_plan.skipped_count == 1);
+    CHECK(!s_plan.needs_duplicate);
+    CHECK(!plan_writes_onto_itself(&s_plan));
+
+    FsOpRequest skip = ask;
+    skip.conflict = FSOP_CONFLICT_SKIP;
+    CHECK(fsop_plan_build(&s_plan, &skip) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.step_count == 0);
+    CHECK(s_plan.skipped_count == 1);
+    CHECK(!plan_writes_onto_itself(&s_plan));
+
+    /* A folder duplicates recursively under its copy name. */
+    facts_reset();
+    fact("ux0:data/DIR", FS_ENTRY_DIR, 0, 1);
+    fact("ux0:data/DIR/F.TXT", FS_ENTRY_FILE, 2, 1);
+    fact("ux0:data/DIR/SUB", FS_ENTRY_DIR, 0, 1);
+    fact("ux0:data/DIR/SUB/G.TXT", FS_ENTRY_FILE, 3, 1);
+    const char *folders[] = {"ux0:data/DIR"};
+    FsOpFacts folder_facts = facts();
+    FsOpRequest folder_ask = {FSOP_COPY, folders, 1, "ux0:data",
+                              &folder_facts, FSOP_CONFLICT_ASK};
+    CHECK(fsop_plan_build(&s_plan, &folder_ask) == 1);
+    CHECK(s_plan.needs_duplicate == 1);
+    CHECK(s_plan.step_count == 0);
+    FsOpRequest folder_dup = folder_ask;
+    folder_dup.conflict = FSOP_CONFLICT_DUPLICATE;
+    CHECK(fsop_plan_build(&s_plan, &folder_dup) == 1);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_MKDIR,
+                          "ux0:data/DIR copy") >= 0);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_COPY_FILE,
+                          "ux0:data/DIR copy/F.TXT") >= 0);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_MKDIR,
+                          "ux0:data/DIR copy/SUB") >= 0);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_COPY_FILE,
+                          "ux0:data/DIR copy/SUB/G.TXT") >= 0);
+    CHECK(!plan_writes_onto_itself(&s_plan));
+
+    /* The all-in-folder MOVE is refused by the reducer, but a plan built from
+     * one still never renames a file onto itself. */
+    facts_reset();
+    fact("ux0:data/A.TXT", FS_ENTRY_FILE, 3, 1);
+    const char *one_in_folder[] = {"ux0:data/A.TXT"};
+    FsOpFacts move_facts = facts();
+    FsOpRequest move = {FSOP_MOVE, one_in_folder, 1, "ux0:data", &move_facts,
                         FSOP_CONFLICT_OVERWRITE};
-    CHECK(fsop_plan_build(&s_plan, &move) == 0);
-    CHECK(strstr(s_plan.reason, "ALREADY IN THIS FOLDER") != NULL);
+    CHECK(fsop_plan_build(&s_plan, &move) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.step_count == 0);
+    CHECK(s_plan.skipped_count == 1);
+    CHECK(!plan_writes_onto_itself(&s_plan));
+
+    /* A mixed MOVE keeps the already-here source and moves the rest. */
+    facts_reset();
+    fact("ux0:data/A.TXT", FS_ENTRY_FILE, 1, 1);
+    fact("ux0:tai/B.TXT", FS_ENTRY_FILE, 1, 1);
+    const char *mixed[] = {"ux0:data/A.TXT", "ux0:tai/B.TXT"};
+    FsOpFacts mixed_facts = facts();
+    FsOpRequest mixed_move = {FSOP_MOVE, mixed, 2, "ux0:data", &mixed_facts,
+                              FSOP_CONFLICT_OVERWRITE};
+    CHECK(fsop_plan_build(&s_plan, &mixed_move) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.skipped_count == 1);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_RENAME,
+                          "ux0:data/B.TXT") >= 0);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_COPY_FILE,
+                          "ux0:data/A.TXT") == -1);
+    CHECK(!plan_writes_onto_itself(&s_plan));
+
+    /* SAVE DUPLICATES still never replaces a different destination. */
+    facts_reset();
+    fact("ux0:other/B.TXT", FS_ENTRY_FILE, 4, 1);
+    fact("ux0:data/B.TXT", FS_ENTRY_FILE, 5, 1);
+    const char *other[] = {"ux0:other/B.TXT"};
+    FsOpFacts other_facts = facts();
+    FsOpRequest dup_existing = {FSOP_COPY, other, 1, "ux0:data", &other_facts,
+                                FSOP_CONFLICT_DUPLICATE};
+    CHECK(fsop_plan_build(&s_plan, &dup_existing) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.step_count == 0);
+    CHECK(s_plan.skipped_count == 1);
+}
+
+/* A folder already in the destination duplicates recursively under SAVE
+ * DUPLICATES and is skipped whole under a mixed decision (R17, R19). */
+static void test_same_folder_tree(void)
+{
+    facts_reset();
+    fact("ux0:data/DIR", FS_ENTRY_DIR, 0, 1);
+    fact("ux0:data/DIR/F.TXT", FS_ENTRY_FILE, 2, 1);
+    fact("ux0:tai/B.TXT", FS_ENTRY_FILE, 3, 1);
+
+    const char *folders[] = {"ux0:data/DIR"};
+    FsOpFacts f = facts();
+    FsOpRequest overwrite = {FSOP_COPY, folders, 1, "ux0:data", &f,
+                             FSOP_CONFLICT_OVERWRITE};
+    CHECK(fsop_plan_build(&s_plan, &overwrite) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.step_count == 0);
+    CHECK(s_plan.skipped_count == 1);
+    CHECK(!plan_writes_onto_itself(&s_plan));
+
+    /* The same folder in a mixed batch: skipped, never a self-copy; the other
+     * item still lands. */
+    const char *mixed[] = {"ux0:data/DIR", "ux0:tai/B.TXT"};
+    FsOpFacts mixed_facts = facts();
+    FsOpRequest mixed_copy = {FSOP_COPY, mixed, 2, "ux0:data", &mixed_facts,
+                              FSOP_CONFLICT_OVERWRITE};
+    CHECK(fsop_plan_build(&s_plan, &mixed_copy) == 1);
+    CHECK(s_plan.ok == 1);
+    CHECK(s_plan.skipped_count == 1);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_COPY_FILE,
+                          "ux0:data/B.TXT") >= 0);
+    CHECK(step_dest_index(&s_plan, FSOP_STEP_MKDIR, "ux0:data/DIR") == -1);
+    CHECK(!plan_writes_onto_itself(&s_plan));
+}
+
+/* The one copy-name rule the prompt, the fact collector, and the plan share
+ * (KTD6): a file keeps its extension, a folder keeps its whole name. */
+static void test_copy_name_rule(void)
+{
+    char out[64];
+
+    CHECK(fsop_copy_name("ux0:data/A.TXT", 0, 0, out, sizeof(out)) == 1);
+    CHECK(strcmp(out, "A copy.TXT") == 0);
+    CHECK(fsop_copy_name("ux0:data/A.TXT", 0, 1, out, sizeof(out)) == 1);
+    CHECK(strcmp(out, "A copy 2.TXT") == 0);
+    CHECK(fsop_copy_name("ux0:data/DIR", 1, 0, out, sizeof(out)) == 1);
+    CHECK(strcmp(out, "DIR copy") == 0);
+    CHECK(fsop_copy_name("ux0:data/DIR", 1, 2, out, sizeof(out)) == 1);
+    CHECK(strcmp(out, "DIR copy 3") == 0);
+    CHECK(fsop_copy_name("ux0:data/README", 0, 0, out, sizeof(out)) == 1);
+    CHECK(strcmp(out, "README copy") == 0);
+    CHECK(fsop_copy_name("ux0:data/A.TXT", 0, 0, out, 4) == 0);
+    CHECK(fsop_copy_name(NULL, 0, 0, out, sizeof(out)) == 0);
 }
 
 static void test_read_only_and_alias(void)
@@ -171,11 +354,14 @@ static void test_read_only_and_alias(void)
     FsOpFacts alias = facts();
     FsOpRequest move = {FSOP_MOVE, alias_sources, 1, "ux0:app/VFTPSHELL",
                         &alias, FSOP_CONFLICT_OVERWRITE};
-    CHECK(fsop_plan_build(&s_plan, &move) == 0);
-    CHECK(strstr(s_plan.reason, "ALREADY IN THIS FOLDER") != NULL);
+    /* The alias is the same folder, so the mixed MOVE rule skips it instead of
+     * renaming the file onto itself. */
+    CHECK(fsop_plan_build(&s_plan, &move) == 1);
+    CHECK(s_plan.step_count == 0);
+    CHECK(s_plan.skipped_count == 1);
 
     FsOpRequest dup = {FSOP_COPY, alias_sources, 1, "ux0:app/VFTPSHELL",
-                       &alias, FSOP_CONFLICT_OVERWRITE};
+                       &alias, FSOP_CONFLICT_DUPLICATE};
     CHECK(fsop_plan_build(&s_plan, &dup) == 1);
     CHECK(step_dest_index(&s_plan, FSOP_STEP_COPY_FILE,
                           "ux0:app/VFTPSHELL/A copy.TXT") >= 0);
@@ -407,6 +593,8 @@ int main(void)
     test_copy_into_self();
     test_cross_volume_move();
     test_same_folder();
+    test_same_folder_tree();
+    test_copy_name_rule();
     test_read_only_and_alias();
     test_batch_conflict();
     test_tai_destination_allowed();

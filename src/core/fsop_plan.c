@@ -180,14 +180,15 @@ static int join_dest(const char *dir, const char *name, Path *out)
     return path_join(dir, name, out) == PATH_OK;
 }
 
-static int choose_copy_name(FsOpPlan *plan, const FsOpFacts *facts,
-                            const char *source, const char *dest_dir,
-                            Path *out)
+int fsop_copy_name(const char *source, int source_is_dir, int n, char *out,
+                   size_t cap)
 {
+    if (source == NULL || out == NULL || cap == 0 || n < 0)
+        return 0;
+
     const char *name = last_segment(source);
-    const FsOpFact *source_fact = fact_find(facts, source);
     const char *dot = NULL;
-    if (source_fact != NULL && source_fact->type == FS_ENTRY_FILE) {
+    if (!source_is_dir) {
         for (const char *p = name; *p != '\0'; ++p) {
             if (*p == '.' && p != name)
                 dot = p;
@@ -195,16 +196,31 @@ static int choose_copy_name(FsOpPlan *plan, const FsOpFacts *facts,
     }
     size_t stem_len = dot != NULL ? (size_t)(dot - name) : strlen(name);
     const char *suffix = dot != NULL ? dot : "";
+
+    int written;
+    if (n == 0)
+        written = snprintf(out, cap, "%.*s copy%s", (int)stem_len, name,
+                           suffix);
+    else
+        written = snprintf(out, cap, "%.*s copy %d%s", (int)stem_len, name,
+                           n + 1, suffix);
+    return written > 0 && (size_t)written < cap;
+}
+
+static int choose_copy_name(FsOpPlan *plan, const FsOpFacts *facts,
+                            const char *source, const FsOpFact *source_fact,
+                            const char *dest_dir, Path *out)
+{
+    int source_is_dir =
+        source_fact != NULL && source_fact->type == FS_ENTRY_DIR;
     char candidate[PATH_NAME_MAX + 16];
 
     for (int n = 0; n < 100; ++n) {
-        if (n == 0)
-            snprintf(candidate, sizeof(candidate), "%.*s copy%s", (int)stem_len,
-                     name, suffix);
-        else
-            snprintf(candidate, sizeof(candidate), "%.*s copy %d%s",
-                     (int)stem_len, name, n + 1, suffix);
-
+        if (!fsop_copy_name(source, source_is_dir, n, candidate,
+                            sizeof(candidate))) {
+            fail(plan, "NAME TOO LONG");
+            return 0;
+        }
         if (!join_dest(dest_dir, candidate, out)) {
             fail(plan, "NAME TOO LONG");
             return 0;
@@ -236,6 +252,19 @@ static void record_existing(FsOpPlan *plan, const char *dest)
     }
 }
 
+/* The duplicate prompt names the item that is already here; a mixed batch
+ * converts these records to skipped items instead (R19). */
+static void record_duplicate(FsOpPlan *plan, const char *source)
+{
+    plan->duplicate_count++;
+    if (plan->duplicate_named < FSOP_CONFLICT_NAMES) {
+        snprintf(plan->duplicate_source[plan->duplicate_named].text,
+                 sizeof(plan->duplicate_source[plan->duplicate_named].text),
+                 "%s", source);
+        plan->duplicate_named++;
+    }
+}
+
 static void plan_file_move(FsOpPlan *plan, const char *source, const char *dest,
                            const FsOpFact *source_fact, const FsOpFacts *facts,
                            FsOpConflict conflict)
@@ -253,7 +282,10 @@ static void plan_file_move(FsOpPlan *plan, const char *source, const char *dest,
             record_existing(plan, dest);
             return;
         }
-        if (conflict == FSOP_CONFLICT_SKIP) {
+        /* SAVE DUPLICATES never replaces anything: a destination that is not
+         * the source itself still stays (R17). */
+        if (conflict == FSOP_CONFLICT_SKIP ||
+            conflict == FSOP_CONFLICT_DUPLICATE) {
             plan->skipped_count++;
             return;
         }
@@ -301,7 +333,10 @@ static void plan_file_copy(FsOpPlan *plan, const char *source,
             record_existing(plan, dest);
             return;
         }
-        if (conflict == FSOP_CONFLICT_SKIP) {
+        /* SAVE DUPLICATES never replaces anything: a destination that is not
+         * the source itself still stays (R17). */
+        if (conflict == FSOP_CONFLICT_SKIP ||
+            conflict == FSOP_CONFLICT_DUPLICATE) {
             plan->skipped_count++;
             return;
         }
@@ -435,6 +470,12 @@ static void plan_copy_or_move(FsOpPlan *plan, const FsOpRequest *request)
 
     plan->item_count = request->source_count;
 
+    /* A duplicate need is reported only when every item already lives in the
+     * destination; a mixed batch uses the conflict prompt and counts its
+     * already-here items as skipped (R16, R19, KTD6). */
+    int all_here = 1;
+    int duplicate_seen = 0;
+
     for (int i = 0; i < request->source_count; ++i) {
         Path source;
         if (request->sources[i] == NULL ||
@@ -454,17 +495,31 @@ static void plan_copy_or_move(FsOpPlan *plan, const FsOpRequest *request)
             return;
         }
 
-        Path dest;
-        if (request->kind == FSOP_MOVE &&
-            same_folder(source.text, destination.text)) {
-            fail(plan, "ALREADY IN THIS FOLDER");
-            return;
-        }
+        int here = same_folder(source.text, destination.text);
+        if (!here)
+            all_here = 0;
 
-        if (request->kind == FSOP_COPY &&
-            same_folder(source.text, destination.text)) {
+        Path dest;
+        if (here && request->kind == FSOP_MOVE) {
+            /* Never a self-move: a mixed MOVE keeps the already-here source in
+             * place. The reducer refuses the all-in-folder MOVE before it
+             * reaches a plan (R18, R19). */
+            plan->skipped_count++;
+            continue;
+        }
+        if (here && request->kind == FSOP_COPY) {
+            if (request->conflict == FSOP_CONFLICT_ASK) {
+                record_duplicate(plan, source.text);
+                duplicate_seen = 1;
+                continue; /* no step until SAVE DUPLICATES answers */
+            }
+            if (request->conflict != FSOP_CONFLICT_DUPLICATE) {
+                /* OVERWRITE and SKIP cannot write a file onto itself. */
+                plan->skipped_count++;
+                continue;
+            }
             if (!choose_copy_name(plan, request->facts, source.text,
-                                  destination.text, &dest))
+                                  source_fact, destination.text, &dest))
                 return;
         } else {
             if (!join_dest(destination.text, last_segment(source.text), &dest)) {
@@ -515,6 +570,18 @@ static void plan_copy_or_move(FsOpPlan *plan, const FsOpRequest *request)
         }
         if (!plan->ok)
             return;
+    }
+
+    if (duplicate_seen) {
+        if (all_here) {
+            plan->needs_duplicate = 1;
+        } else {
+            /* Not every item is here, so the conflict prompt owns the batch;
+             * the already-here items stay put and count as skipped (R19). */
+            plan->skipped_count += plan->duplicate_count;
+            plan->duplicate_count = 0;
+            plan->duplicate_named = 0;
+        }
     }
 }
 
@@ -706,7 +773,9 @@ int fsop_plan_build(FsOpPlan *plan, const FsOpRequest *request)
     if (!plan->ok)
         return 0;
     plan->total_known = plan->file_count > 0 && plan->all_sizes_known;
-    if (plan->needs_conflict) {
+    if (plan->needs_conflict)
+        plan->needs_duplicate = 0; /* the conflict prompt owns a mixed batch */
+    if (plan->needs_conflict || plan->needs_duplicate) {
         /* Do not leave a partial plan that a caller could execute before the
          * one batch decision is made. The request still carries the items. */
         plan->step_count = 0;
@@ -742,6 +811,13 @@ const char *fsop_plan_existing_dest(const FsOpPlan *plan, int index)
     if (plan == NULL || index < 0 || index >= plan->existing_named)
         return "";
     return plan->existing_dest[index].text;
+}
+
+const char *fsop_plan_duplicate_source(const FsOpPlan *plan, int index)
+{
+    if (plan == NULL || index < 0 || index >= plan->duplicate_named)
+        return "";
+    return plan->duplicate_source[index].text;
 }
 
 const char *fsop_plan_rollback_from(const FsOpPlan *plan, int rollback)

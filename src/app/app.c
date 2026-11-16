@@ -462,6 +462,7 @@ static void drain_events(App *app)
             app->confirm_items[i].size = app->confirm.items[i].size;
             app->confirm_items[i].size_known =
                 app->confirm.items[i].size_known;
+            app->confirm_items[i].stays = app->confirm.items[i].stays;
         }
         UiStateEvent request;
         memset(&request, 0, sizeof(request));
@@ -472,6 +473,12 @@ static void drain_events(App *app)
         request.items = app->confirm_items;
         request.item_count = confirm.item_count;
         request.existing_count = confirm.existing_count;
+        /* Only the duplicate prompt carries a context line: the destination
+         * folder the paste would fill (R16). The other kinds keep their own
+         * text, unchanged. */
+        if (confirm.kind == UI_CONFIRM_DUPLICATE)
+            snprintf(request.text, sizeof(request.text), "%s",
+                     confirm.context);
         feed(app, &request);
     }
 }

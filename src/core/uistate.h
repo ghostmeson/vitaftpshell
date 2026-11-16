@@ -125,6 +125,9 @@ typedef struct {
     const char *name;
     uint64_t size;
     int size_known;
+    /* Named in a mixed conflict but already in the destination, so it stays
+     * (R19). */
+    int stays;
 } UiConfirmItem;
 
 typedef struct {

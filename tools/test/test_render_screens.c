@@ -527,6 +527,43 @@ static void test_confirm(void)
     CHECK(trace_has_text("OVERWRITE ALL"));
     CHECK(trace_has_text("CANCEL"));
 
+    /* R16/KTD6: the duplicate question keeps its context, warning, and list
+     * together, with CANCEL focused first and SAVE DUPLICATES as the yellow
+     * commit. */
+    memset(confirm, 0, sizeof(*confirm));
+    confirm->kind = UI_CONFIRM_DUPLICATE;
+    snprintf(confirm->title, sizeof(confirm->title), "ITEMS ALREADY HERE");
+    snprintf(confirm->context, sizeof(confirm->context), "ux0:data");
+    snprintf(confirm->warning, sizeof(confirm->warning),
+             "SAVE DUPLICATES KEEPS THE ORIGINAL.");
+    confirm->items = s_items;
+    confirm->item_count = 2;
+    s_items[0].name = "A.TXT";
+    s_items[0].size = 3;
+    s_items[0].size_known = 1;
+    s_items[0].stays = 0;
+    s_items[1].name = "B.TXT";
+    s_items[1].size = 0;
+    s_items[1].size_known = 0;
+    s_items[1].stays = 1;
+    confirm->choices[0] = UI_CHOICE_CANCEL;
+    confirm->choices[1] = UI_CHOICE_SAVE_DUPLICATE;
+    confirm->choice_count = 2;
+    confirm->choice_focus = 0;
+    render();
+    CHECK(trace_text_at("ITEMS ALREADY HERE", 210.0f, 140.0f));
+    CHECK(trace_text_at("ux0:data", 210.0f, 168.0f));
+    CHECK(trace_text_at("A.TXT", 210.0f, 190.0f));
+    CHECK(trace_text_at("B.TXT", 210.0f, 214.0f));
+    CHECK(trace_text_right("STAYS", 750.0f, 214.0f, PX_MICRO, C_DIM));
+    CHECK(trace_text_at_color("SAVE DUPLICATES KEEPS THE ORIGINAL.", 210.0f,
+                              336.0f, C_YELLOW));
+    CHECK(trace_has_text("CANCEL"));
+    CHECK(trace_has_text("SAVE DUPLICATES"));
+    /* Two slabs: CANCEL focused first, SAVE DUPLICATES painted yellow. */
+    CHECK(trace_has_line(256.0f, 362.0f, 464.0f, 362.0f, C_WHITE));
+    CHECK(trace_has_rect(500.0f, 366.0f, 200.0f, 40.0f, C_YELLOW));
+
     memset(confirm, 0, sizeof(*confirm));
     confirm->kind = UI_CONFIRM_CANCEL_XFER;
     snprintf(confirm->title, sizeof(confirm->title), "CANCEL THE TRANSFER");

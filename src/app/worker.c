@@ -86,6 +86,15 @@ typedef struct {
     int total_known;
 } LocalBatch;
 
+/* One row of a local confirm. A batch names its real replacements first and
+ * then the items already in the destination, which stay (R19, KTD6). */
+typedef struct {
+    Path path;
+    uint64_t size;
+    int size_known;
+    int stays;
+} PromptItem;
+
 struct Worker {
     WorkerPorts ports;
     Handoff *handoff;
@@ -172,11 +181,12 @@ struct Worker {
     int network_waiting;
     LocalBatch local_batch;
     UiCommand batch_preflight[UI_CLIP_MAX];
-    /* Existing destinations named by the one prompt the batch may ask. Kept in
-     * the heap-owned Worker: a Path is PATH_MAX_LEN bytes, and a local array of
-     * them made handle_action reserve 71,680 bytes of the 128 KiB worker stack
-     * (b40 crash). All paths stay in the Worker so a prompt never truncates. */
-    Path batch_existing[WORKER_CONFIRM_ITEMS];
+    /* The one local prompt a batch may ask. Kept in the heap-owned Worker: a
+     * PromptItem is large, and sixteen on handle_action's stack would blow the
+     * worker budget (b40 crash, D77). Replacements come first; the items
+     * already in the destination follow and stay (R19, KTD6). */
+    PromptItem prompt_items[WORKER_CONFIRM_ITEMS];
+    int prompt_count;
     int batch_preflight_count;
     unsigned batch_preflight_id;
     int batch_executing;
@@ -237,7 +247,7 @@ static void worker_list_local(Worker *worker, UiPane pane, const char *path);
 static void worker_list_root(Worker *worker, UiPane pane);
 static UiPane local_view(const UiCommand *command);
 static const char *last_name(const char *path);
-static int same_folder_path(const char *a, const char *b);
+static int source_in_folder(const char *source, const char *folder);
 static void queue_pending_action(Worker *worker, const UiCommand *command);
 static void local_batch_advance(Worker *worker);
 static int run_plan_begin(Worker *worker, const UiCommand *command,
@@ -528,14 +538,65 @@ static int preflight_dest(const UiCommand *command, Path *dest)
     if (command->action != UI_ACTION_COPY &&
         command->action != UI_ACTION_MOVE)
         return 0;
-    Path parent;
-    if (path_parent(command->path, &parent) == PATH_OK &&
-        strcmp(parent.text, command->path2) == 0)
-        return 0;
+    /* A same-folder item resolves to its own path; it is not a replacement,
+     * but the preflight must still see it so the batch can ask once (R16). */
     const char *name = last_name(command->path);
     if (!path_name_is_safe(name))
         return 0;
     return path_join(command->path2, name, dest) == PATH_OK;
+}
+
+/* True when the pasted item already lives in the destination folder: the
+ * preflight joins the folder with the source's own name, so a same-folder item
+ * resolves to its own canonical path (R16, R20). */
+static int preflight_is_here(const UiCommand *command, const char *dest)
+{
+    Path source;
+    if (path_canonicalize(command->path, &source) != PATH_OK)
+        return 0;
+    return path_ci_equal(dest, source.text);
+}
+
+static void prompt_item_add(Worker *worker, const char *path, uint64_t size,
+                            int size_known, int stays)
+{
+    if (worker->prompt_count >= WORKER_CONFIRM_ITEMS)
+        return;
+    PromptItem *item = &worker->prompt_items[worker->prompt_count++];
+    fmt_copy(item->path.text, sizeof(item->path.text), path);
+    item->size = size;
+    item->size_known = size_known;
+    item->stays = stays;
+}
+
+/* One request builder for both local questions, so the duplicate and the
+ * mixed conflict carry the same item record (KTD6). A prompt never names more
+ * items than its view holds: a 64-item paste must not claim 64 in a 16-item
+ * list (R16, R19). */
+static void request_prompt(Worker *worker, UiConfirmKind kind, UiPane pane,
+                           const char *context, int count, int existing_count)
+{
+    HandoffConfirm request;
+    memset(&request, 0, sizeof(request));
+    request.kind = kind;
+    request.valid = 1;
+    request.pane = pane;
+    fmt_copy(request.context, sizeof(request.context),
+             context != NULL ? context : "");
+    if (count > WORKER_CONFIRM_ITEMS)
+        count = WORKER_CONFIRM_ITEMS;
+    if (existing_count > count)
+        existing_count = count;
+    request.item_count = count;
+    request.existing_count = existing_count;
+    for (int i = 0; i < count; ++i) {
+        request.items[i].size = worker->prompt_items[i].size;
+        request.items[i].size_known = worker->prompt_items[i].size_known;
+        request.items[i].stays = worker->prompt_items[i].stays;
+        fmt_copy(request.items[i].name, sizeof(request.items[i].name),
+                 worker->prompt_items[i].path.text);
+    }
+    confirm_request(worker, &request);
 }
 
 static void local_batch_execute(Worker *worker)
@@ -590,11 +651,18 @@ static void local_batch_advance(Worker *worker)
 
 static void local_batch_preflight(Worker *worker)
 {
-    int existing_count = 0;
+    UiPane pane = local_view(&worker->batch_preflight[0]);
+    const char *destination = worker->batch_preflight[0].path2;
+    worker->prompt_count = 0;
 
+    /* The destinations that would actually be replaced come first. A folder
+     * destination is not a replacement: the planner merges into it. */
     for (int i = 0; i < worker->batch_preflight_count; ++i) {
+        const UiCommand *pre = &worker->batch_preflight[i];
         Path dest;
-        if (!preflight_dest(&worker->batch_preflight[i], &dest))
+        if (!preflight_dest(pre, &dest))
+            continue;
+        if (preflight_is_here(pre, dest.text))
             continue;
         FsEntry entry;
         memset(&entry, 0, sizeof(entry));
@@ -603,14 +671,45 @@ static void local_batch_preflight(Worker *worker)
             entry.type == FS_ENTRY_DIR)
             continue;
         int duplicate = 0;
-        for (int j = 0; j < existing_count; ++j) {
-            if (strcmp(worker->batch_existing[j].text, dest.text) == 0) {
+        for (int j = 0; j < worker->prompt_count; ++j) {
+            if (path_ci_equal(worker->prompt_items[j].path.text, dest.text)) {
                 duplicate = 1;
                 break;
             }
         }
-        if (!duplicate && existing_count < WORKER_CONFIRM_ITEMS)
-            worker->batch_existing[existing_count++] = dest;
+        if (!duplicate)
+            prompt_item_add(worker, dest.text, entry.size, entry.size_known,
+                            0);
+    }
+    int existing_count = worker->prompt_count;
+
+    /* Every collision already lives here and the action is a copy: the
+     * duplicate question, not the overwrite question (R16). A MOVE has no
+     * duplicate answer; its already-here item is skipped by the plan (R18). */
+    if (existing_count == 0 &&
+        worker->batch_preflight[0].action == UI_ACTION_COPY) {
+        for (int i = 0; i < worker->batch_preflight_count; ++i) {
+            const UiCommand *pre = &worker->batch_preflight[i];
+            Path dest;
+            if (!preflight_dest(pre, &dest))
+                continue;
+            if (!preflight_is_here(pre, dest.text))
+                continue;
+            FsEntry entry;
+            memset(&entry, 0, sizeof(entry));
+            int stat_ok = worker->ports.fs->stat(worker->ports.fs->ctx,
+                                                 dest.text, &entry) == FS_OK;
+            prompt_item_add(worker, dest.text, stat_ok ? entry.size : 0,
+                            stat_ok ? entry.size_known : 0, 0);
+        }
+        if (worker->prompt_count > 0) {
+            request_prompt(worker, UI_CONFIRM_DUPLICATE, pane, destination,
+                           worker->prompt_count, 0);
+            worker->pending.valid = 1;
+            worker->pending.kind = PENDING_BATCH_CONFLICT;
+            worker->pending.conflict = FSOP_CONFLICT_DUPLICATE;
+            return;
+        }
     }
 
     if (existing_count == 0) {
@@ -618,20 +717,26 @@ static void local_batch_preflight(Worker *worker)
         return;
     }
 
-    HandoffConfirm request;
-    memset(&request, 0, sizeof(request));
-    request.kind = UI_CONFIRM_CONFLICT;
-    request.valid = 1;
-    fmt_copy(request.context, sizeof(request.context), "TRANSFER");
-    request.item_count = existing_count;
-    request.existing_count = existing_count;
-    for (int i = 0; i < existing_count; ++i)
-        fmt_copy(request.items[i].name, sizeof(request.items[i].name),
-                 worker->batch_existing[i].text);
-    confirm_request(worker, &request);
+    /* A mixed batch: the replacements were counted above; the items already
+     * here are appended and named as staying, so the prompt never claims to
+     * replace them (R19, AE5). */
+    for (int i = 0; i < worker->batch_preflight_count; ++i) {
+        const UiCommand *pre = &worker->batch_preflight[i];
+        Path dest;
+        if (!preflight_dest(pre, &dest))
+            continue;
+        if (!preflight_is_here(pre, dest.text))
+            continue;
+        prompt_item_add(worker, dest.text, 0, 0, 1);
+    }
+
+    request_prompt(worker, UI_CONFIRM_CONFLICT, pane,
+                   ui_action_context(worker->batch_preflight[0].action),
+                   worker->prompt_count, existing_count);
 
     worker->pending.valid = 1;
     worker->pending.kind = PENDING_BATCH_CONFLICT;
+    worker->pending.conflict = FSOP_CONFLICT_ASK;
 }
 
 static void emit_session(Worker *worker, int connected, const char *detail)
@@ -1373,25 +1478,17 @@ static void save_settings(Worker *worker)
 static void request_local_conflict(Worker *worker, const UiCommand *command,
                                    const FsOpPlan *plan)
 {
-    HandoffConfirm request;
-    memset(&request, 0, sizeof(request));
-    request.kind = UI_CONFIRM_CONFLICT;
-    request.valid = 1;
-    request.pane = local_view(command);
-    fmt_copy(request.context, sizeof(request.context),
-             ui_action_context(command->action));
-    request.item_count = plan->existing_count;
-    request.existing_count = plan->existing_count;
-    if (request.item_count > WORKER_CONFIRM_ITEMS)
-        request.item_count = WORKER_CONFIRM_ITEMS;
-    for (int i = 0; i < request.item_count; ++i) {
-        fmt_copy(request.items[i].name, sizeof(request.items[i].name),
-                 fsop_plan_existing_dest(plan, i)[0] != '\0'
-                     ? fsop_plan_existing_dest(plan, i)
-                     : "-");
-        request.items[i].size_known = 0;
-    }
-    confirm_request(worker, &request);
+    worker->prompt_count = 0;
+    int named = plan->existing_named;
+    if (named > WORKER_CONFIRM_ITEMS)
+        named = WORKER_CONFIRM_ITEMS;
+    for (int i = 0; i < named; ++i)
+        prompt_item_add(worker, fsop_plan_existing_dest(plan, i), 0, 0, 0);
+
+    /* The count is the number of names the prompt can show, so a folder full
+     * of collisions never claims more than its 16-item view (R19, KTD6). */
+    request_prompt(worker, UI_CONFIRM_CONFLICT, local_view(command),
+                   ui_action_context(command->action), named, named);
 
     worker->pending.valid = 1;
     worker->pending.kind = PENDING_LOCAL_CONFLICT;
@@ -1873,37 +1970,25 @@ static int run_plan_begin(Worker *worker, const UiCommand *command,
     return 1;
 }
 
-static int same_folder_path(const char *a, const char *b)
+/* True when the source already lives in `folder`. The copy-name candidates are
+ * statted only for this case: the planner must see an existing `A copy.TXT`
+ * before it can choose `A copy 2.TXT` (R17, KTD6). */
+static int source_in_folder(const char *source, const char *folder)
 {
-    Path pa;
-    Path pb;
-    if (path_parent(a, &pa) != PATH_OK || path_parent(b, &pb) != PATH_OK)
+    Path parent;
+    if (path_parent(source, &parent) != PATH_OK)
         return 0;
-    return strcmp(pa.text, pb.text) == 0;
+    return path_ci_equal(parent.text, folder);
 }
 
 static void add_copy_candidates(Worker *worker, const char *source,
                                 const char *destination, int source_is_dir)
 {
-    const char *name = last_name(source);
-    const char *dot = NULL;
-    if (!source_is_dir) {
-        for (const char *p = name; *p != '\0'; ++p) {
-            if (*p == '.' && p != name)
-                dot = p;
-        }
-    }
-    size_t stem_len = dot != NULL ? (size_t)(dot - name) : strlen(name);
-    const char *suffix = dot != NULL ? dot : "";
-
     for (int n = 0; n < 100; ++n) {
         char candidate[PATH_NAME_MAX + 16];
-        if (n == 0)
-            snprintf(candidate, sizeof(candidate), "%.*s copy%s",
-                     (int)stem_len, name, suffix);
-        else
-            snprintf(candidate, sizeof(candidate), "%.*s copy %d%s",
-                     (int)stem_len, name, n + 1, suffix);
+        if (!fsop_copy_name(source, source_is_dir, n, candidate,
+                            sizeof(candidate)))
+            return;
 
         Path target;
         if (path_join(destination, candidate, &target) != PATH_OK)
@@ -1991,6 +2076,7 @@ static void execute_action(Worker *worker, const UiCommand *command,
     }
 
     FsEntry source_entry;
+    memset(&source_entry, 0, sizeof(source_entry));
     int source_is_dir = 0;
     if (worker->ports.fs->stat(worker->ports.fs->ctx, source,
                                &source_entry) == FS_OK)
@@ -2004,7 +2090,7 @@ static void execute_action(Worker *worker, const UiCommand *command,
             return;
         }
         if (kind == FSOP_COPY &&
-            same_folder_path(source, destination))
+            source_in_folder(source, destination))
             add_copy_candidates(worker, source, destination, source_is_dir);
         if (worker->facts_truncated) {
             emit_error(worker, issuing, "PLAN TOO LARGE", OP_CAUSE_APP,
@@ -2045,6 +2131,26 @@ static void execute_action(Worker *worker, const UiCommand *command,
 
     if (plan->needs_conflict) {
         request_local_conflict(worker, command, plan);
+        free(plan);
+        return;
+    }
+
+    if (plan->needs_duplicate) {
+        /* The same-folder copy: no step exists until SAVE DUPLICATES answers
+         * (R16, KTD6). The item list names what the prompt can show. */
+        worker->prompt_count = 0;
+        int named = plan->duplicate_named;
+        if (named > WORKER_CONFIRM_ITEMS)
+            named = WORKER_CONFIRM_ITEMS;
+        for (int i = 0; i < named; ++i)
+            prompt_item_add(worker, fsop_plan_duplicate_source(plan, i),
+                            source_entry.size, source_entry.size_known, 0);
+        request_prompt(worker, UI_CONFIRM_DUPLICATE, issuing, destination,
+                       named, 0);
+        worker->pending.valid = 1;
+        worker->pending.kind = PENDING_LOCAL_CONFLICT;
+        worker->pending.command = *command;
+        worker->pending.conflict = FSOP_CONFLICT_ASK;
         free(plan);
         return;
     }
@@ -3478,7 +3584,9 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     worker->local_conflict =
                         command->choice == UI_CHOICE_OVERWRITE
                             ? FSOP_CONFLICT_OVERWRITE
-                            : FSOP_CONFLICT_SKIP;
+                            : command->choice == UI_CHOICE_SAVE_DUPLICATE
+                                  ? FSOP_CONFLICT_DUPLICATE
+                                  : FSOP_CONFLICT_SKIP;
                     worker->local_conflict_set = 1;
                     local_batch_execute(worker);
                 }
@@ -3491,10 +3599,13 @@ static void handle_command(Worker *worker, const UiCommand *command)
                     worker->local_conflict_set = 0;
                     local_batch_cancel(worker);
                 } else {
-                    FsOpConflict conflict =
-                        command->choice == UI_CHOICE_OVERWRITE
-                            ? FSOP_CONFLICT_OVERWRITE
-                            : FSOP_CONFLICT_SKIP;
+                    FsOpConflict conflict;
+                    if (command->choice == UI_CHOICE_OVERWRITE)
+                        conflict = FSOP_CONFLICT_OVERWRITE;
+                    else if (command->choice == UI_CHOICE_SAVE_DUPLICATE)
+                        conflict = FSOP_CONFLICT_DUPLICATE;
+                    else
+                        conflict = FSOP_CONFLICT_SKIP;
                     worker->local_conflict = conflict;
                     worker->local_conflict_set = 1;
                     execute_action(worker, &pending.command, conflict);

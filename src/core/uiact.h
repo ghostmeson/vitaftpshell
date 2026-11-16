@@ -62,7 +62,9 @@ typedef enum {
     UI_CONFIRM_DISCARD,
     UI_CONFIRM_DELETE_SITE,
     UI_CONFIRM_PATH_BUSY,
-    UI_CONFIRM_CANCEL_LANES
+    UI_CONFIRM_CANCEL_LANES,
+    /* A same-folder paste asks SAVE DUPLICATES or CANCEL (R16, KTD6). */
+    UI_CONFIRM_DUPLICATE
 } UiConfirmKind;
 
 typedef enum {
@@ -75,7 +77,8 @@ typedef enum {
     UI_CHOICE_STOP,
     UI_CHOICE_WAIT,
     UI_CHOICE_CANCEL_NETWORK,
-    UI_CHOICE_CANCEL_LOCAL
+    UI_CHOICE_CANCEL_LOCAL,
+    UI_CHOICE_SAVE_DUPLICATE
 } UiChoice;
 
 typedef enum {

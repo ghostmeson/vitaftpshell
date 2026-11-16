@@ -2686,6 +2686,287 @@ static void test_local_conflict_prompt(void)
     app_destroy(app);
 }
 
+/* The clipboard is built in one folder, so the same-folder question fires
+ * when PASTE targets the folder the items came from. Save duplicates takes the
+ * copy rule; cancel changes nothing (R16, R17, AE4). */
+static void test_local_duplicate_prompt(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "A.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_COPY);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    /* The cursor stays on A.TXT, so PASTE targets ux0:data itself. */
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 40);
+
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DUPLICATE);
+    CHECK(strcmp(app_state(app)->confirm.title, "ITEMS ALREADY HERE") == 0);
+    CHECK(strcmp(app_state(app)->confirm.context, "ux0:data") == 0);
+    CHECK(strcmp(app_state(app)->confirm.warning,
+                 "SAVE DUPLICATES KEEPS THE ORIGINAL.") == 0);
+    CHECK(app_state(app)->confirm.choices[0] == UI_CHOICE_CANCEL);
+    CHECK(app_state(app)->confirm.choices[1] == UI_CHOICE_SAVE_DUPLICATE);
+    CHECK(app_state(app)->confirm.choice_focus == 0);
+    CHECK(app_state(app)->confirm.item_count == 1);
+    if (app_state(app)->confirm.item_count == 1)
+        CHECK(strcmp(app_state(app)->confirm.items[0].name,
+                     "ux0:data/A.TXT") == 0);
+
+    /* CANCEL is the focused answer and changes nothing. */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 40);
+    CHECK(!fake_fs_exists("ux0:data/A copy.TXT"));
+    CHECK(content_is("ux0:data/A.TXT", "A"));
+
+    /* Paste again (the clipboard is consumed by the paste) and SAVE
+     * DUPLICATES: A copy.TXT, original untouched. */
+    select_local_named(app, "A.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_COPY);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 40);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DUPLICATE);
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    CHECK(app_state(app)->confirm.choice_focus == 1);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 160);
+
+    CHECK(content_is("ux0:data/A.TXT", "A"));
+    CHECK(fake_fs_exists("ux0:data/A copy.TXT"));
+    CHECK(content_is("ux0:data/A copy.TXT", "A"));
+    CHECK(app_state(app)->local_dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->local_dock.skipped == 0);
+    CHECK(app_state(app)->local_dock.failed == 0);
+
+    /* A second run takes the next free name (AE4). */
+    select_local_named(app, "A.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_COPY);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_PASTE);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 40);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DUPLICATE);
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 160);
+
+    CHECK(content_is("ux0:data/A copy.TXT", "A"));
+    CHECK(fake_fs_exists("ux0:data/A copy 2.TXT"));
+    CHECK(content_is("ux0:data/A copy 2.TXT", "A"));
+    CHECK(content_is("ux0:data/A.TXT", "A"));
+
+    app_destroy(app);
+}
+
+/* A local COPY that did not arrive as a batch (no batch id) reaches the
+ * planner directly; its duplicate need asks the same question through the
+ * single-item answer path (KTD6). */
+static void test_local_duplicate_single(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    pump(app, NULL, 10);
+    UiCommand copy;
+    memset(&copy, 0, sizeof(copy));
+    copy.type = UI_CMD_RUN_ACTION;
+    copy.action = UI_ACTION_COPY;
+    copy.pane = UI_PANE_LOCAL;
+    snprintf(copy.path, sizeof(copy.path), "ux0:data/A.TXT");
+    snprintf(copy.path2, sizeof(copy.path2), "ux0:data");
+    CHECK(handoff_command_push(app_handoff(app), &copy) == 1);
+    pump(app, NULL, 60);
+
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DUPLICATE);
+    CHECK(app_state(app)->confirm.item_count == 1);
+
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 160);
+
+    CHECK(content_is("ux0:data/A.TXT", "A"));
+    CHECK(fake_fs_exists("ux0:data/A copy.TXT"));
+    CHECK(content_is("ux0:data/A copy.TXT", "A"));
+    CHECK(app_state(app)->local_dock.failed == 0);
+
+    app_destroy(app);
+}
+
+/* The one clipboard a user can build in the pane lives in one folder, so a
+ * mixed batch (an item already in the destination plus another folder's item)
+ * is pushed as the worker sees it: two commands of one batch (R19, AE5). */
+static void push_batch_action(App *app, UiAction action, const char *source,
+                              const char *destination, unsigned id, int index,
+                              int total)
+{
+    UiCommand command;
+    memset(&command, 0, sizeof(command));
+    command.type = UI_CMD_RUN_ACTION;
+    command.action = action;
+    command.pane = UI_PANE_LOCAL;
+    command.source_type = UI_ROW_FILE;
+    command.batch_id = id;
+    command.batch_index = index;
+    command.batch_total = total;
+    command.batch_last = index + 1 >= total;
+    snprintf(command.path, sizeof(command.path), "%s", source);
+    snprintf(command.path2, sizeof(command.path2), "%s", destination);
+    CHECK(handoff_command_push(app_handoff(app), &command) == 1);
+}
+
+static int named_index(const UiConfirm *confirm, const char *name)
+{
+    for (int i = 0; i < confirm->item_count; ++i) {
+        if (strcmp(confirm->items[i].name, name) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* A mixed batch asks the conflict prompt once and counts only the destinations
+ * that would be replaced; the already-here item is named as staying, stays
+ * unchanged, and the terminal counts it as skipped (R19, AE5). */
+static void test_local_mixed_batch(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:other");
+    fake_fs_seed_file("ux0:other/B.TXT", "NEW", 3);
+    fake_fs_seed_file("ux0:data/B.TXT", "OLD", 3);
+
+    pump(app, NULL, 10);
+    push_batch_action(app, UI_ACTION_COPY, "ux0:data/A.TXT", "ux0:data", 1, 0,
+                      2);
+    push_batch_action(app, UI_ACTION_COPY, "ux0:other/B.TXT", "ux0:data", 1, 1,
+                      2);
+    pump(app, NULL, 60);
+
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+    CHECK(app_state(app)->confirm.existing_count == 1);
+    CHECK(app_state(app)->confirm.item_count == 2);
+    int named_b = named_index(&app_state(app)->confirm, "ux0:data/B.TXT");
+    int named_a = named_index(&app_state(app)->confirm, "ux0:data/A.TXT");
+    CHECK(named_b >= 0);
+    CHECK(named_a >= 0);
+    if (named_b >= 0)
+        CHECK(app_state(app)->confirm.items[named_b].stays == 0);
+    if (named_a >= 0)
+        CHECK(app_state(app)->confirm.items[named_a].stays == 1);
+
+    /* CANCEL, SKIP EXISTING, OVERWRITE ALL: the third choice replaces B. */
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, NULL, 200);
+
+    CHECK(content_is("ux0:data/A.TXT", "A"));
+    CHECK(content_is("ux0:data/B.TXT", "NEW"));
+    CHECK(app_state(app)->local_dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->local_dock.item_total == 2);
+    CHECK(app_state(app)->local_dock.item_index == 1);
+    CHECK(app_state(app)->local_dock.skipped == 1);
+    CHECK(app_state(app)->local_dock.failed == 0);
+    CHECK(app_state(app)->local_dock.cancelled == 0);
+
+    app_destroy(app);
+}
+
+/* R19: an already-here source in a mixed MOVE stays in place and never fails
+ * the batch; the rest moves. No other destination exists, so nothing asks. */
+static void test_local_mixed_move(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:other");
+    fake_fs_seed_file("ux0:other/B.TXT", "B", 1);
+
+    pump(app, NULL, 10);
+    push_batch_action(app, UI_ACTION_MOVE, "ux0:data/A.TXT", "ux0:data", 2, 0,
+                      2);
+    push_batch_action(app, UI_ACTION_MOVE, "ux0:other/B.TXT", "ux0:data", 2, 1,
+                      2);
+    pump(app, NULL, 200);
+
+    CHECK(app_state(app)->screen != UI_SCREEN_CONFIRM);
+    CHECK(fake_fs_exists("ux0:data/A.TXT"));
+    CHECK(content_is("ux0:data/A.TXT", "A"));
+    CHECK(!fake_fs_exists("ux0:other/B.TXT"));
+    CHECK(content_is("ux0:data/B.TXT", "B"));
+    CHECK(app_state(app)->local_dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->local_dock.item_total == 2);
+    CHECK(app_state(app)->local_dock.skipped == 1);
+    CHECK(app_state(app)->local_dock.failed == 0);
+
+    app_destroy(app);
+}
+
+/* The prompt names at most the items its view holds: a 17-item paste must not
+ * claim 17 in a 16-item handoff list (KTD6). */
+static void test_local_duplicate_prompt_fits(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    char name[32];
+    char path[64];
+    for (int i = 0; i < 17; ++i) {
+        snprintf(name, sizeof(name), "F%02d.TXT", i);
+        snprintf(path, sizeof(path), "ux0:data/%s", name);
+        fake_fs_seed_file(path, "X", 1);
+    }
+
+    pump(app, NULL, 10);
+    for (int i = 0; i < 17; ++i) {
+        snprintf(name, sizeof(name), "F%02d.TXT", i);
+        snprintf(path, sizeof(path), "ux0:data/%s", name);
+        push_batch_action(app, UI_ACTION_COPY, path, "ux0:data", 3, i, 17);
+    }
+    pump(app, NULL, 80);
+
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_DUPLICATE);
+    CHECK(app_state(app)->confirm.item_count == 16);
+    CHECK(app_state(app)->confirm.item_count == HANDOFF_CONFIRM_ITEMS);
+    CHECK(app_state(app)->confirm.context[0] != '\0');
+
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 600; ++i) {
+        (void)app_tick(app);
+        if (app_state(app)->local_dock.state == UI_DOCK_DONE)
+            break;
+    }
+
+    CHECK(fake_fs_exists("ux0:data/F00 copy.TXT"));
+    CHECK(fake_fs_exists("ux0:data/F16 copy.TXT"));
+    CHECK(app_state(app)->local_dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->local_dock.item_total == 17);
+    CHECK(app_state(app)->local_dock.failed == 0);
+    CHECK(app_state(app)->local_dock.skipped == 0);
+
+    app_destroy(app);
+}
+
 /* A worker confirmation raised while a local dialog owns the screen waits for
  * that dialog instead of replacing it or vanishing. */
 static void test_deferred_worker_confirmation(void)
@@ -2943,6 +3224,11 @@ int main(void)
     test_clipboard_move();
     test_local_batch_terminal();
     test_local_conflict_prompt();
+    test_local_duplicate_prompt();
+    test_local_duplicate_single();
+    test_local_mixed_batch();
+    test_local_mixed_move();
+    test_local_duplicate_prompt_fits();
     test_local_rename_conflict();
     test_local_rename_aside_notice();
     test_upload_preflight_size_folder();

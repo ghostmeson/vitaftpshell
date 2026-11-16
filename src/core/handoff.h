@@ -105,6 +105,9 @@ typedef struct {
     char name[PATH_NAME_MAX];
     uint64_t size;
     int size_known;
+    /* An already-here item in a mixed batch: named so the user sees it, but
+     * nothing is copied or replaced (R19, KTD6). */
+    int stays;
 } HandoffConfirmItem;
 
 typedef struct {

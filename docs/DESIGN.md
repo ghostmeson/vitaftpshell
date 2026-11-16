@@ -490,8 +490,10 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
 - **Clipboard armed:** PASTE and CLEAR replace COPY and MOVE in the first two
   rows. The target reads `n CLIPBOARD`; the destination is the current folder.
   PASTE executes one COPY or MOVE per clipboard path into that folder. A
-  same-folder MOVE is dim (`ALREADY HERE`); a same-folder COPY is allowed and
-  uses a free copy name. CLEAR discards the clipboard.
+  same-folder MOVE is dim (`ALREADY HERE`). A same-folder COPY is allowed and
+  asks `ITEMS ALREADY HERE` with CANCEL / SAVE DUPLICATES; SAVE DUPLICATES uses
+  the free copy name (`A copy.TXT`, then `A copy 2.TXT`) and never touches the
+  original. CLEAR discards the clipboard.
 - **Remote single:** download to the local pane; rename, delete, new folder;
   refresh; disconnect. Row actions are dim while the pane is disconnected or
   reading. DISCONNECT stays live while reading and closes the session; it is the
@@ -529,8 +531,9 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
 ## CONFIRM
 
 The one interrupt: the centered 600 × 300 panel (D28). The item list is a fixed
-five-row viewport; a longer set scrolls (D29). The six states are in
-[`design/2026-11-08-confirm-a-states.html`](design/2026-11-08-confirm-a-states.html).
+five-row viewport; a longer set scrolls (D29). The original six states are in
+[`design/2026-11-08-confirm-a-states.html`](design/2026-11-08-confirm-a-states.html);
+the duplicate question is the seventh and is described below.
 
 ### Geometry
 
@@ -547,7 +550,8 @@ five-row viewport; a longer set scrolls (D29). The six states are in
 
 - The title is px 3 in yellow; the context is micro in `C_CYAN_DIM`.
 - The item list is five rows at a 24 px pitch. The sizes are right-aligned at
-  750; a 2 px scrollbar sits at 758 when the set overflows. A long set scrolls;
+  750; an already-here item in a mixed batch reads `STAYS` there instead (R19).
+  A 2 px scrollbar sits at 758 when the set overflows. A long set scrolls;
   the count, known size, warning, and options never move.
 - The total is micro dim (`12 ITEMS - 3.7 KB KNOWN`); the warning is px 2 yellow.
 - The options: two 200 px slabs at 260 and 500, or three 170 px slabs at 210,
@@ -571,7 +575,15 @@ five-row viewport; a longer set scrolls (D29). The six states are in
 - **Batch conflict:** `2 DESTINATIONS EXIST`; the batch count; CANCEL / SKIP
   EXISTING / OVERWRITE ALL; the replace warning. A download checks the local
   destination; an upload checks the remote destination with MLST when the server
-  advertises it. CANCEL ends the batch.
+  advertises it. CANCEL ends the batch. An item already in the destination is
+  named in the list with `STAYS` in the size column: it is not a replacement and
+  the count names only the destinations that would be replaced (R19).
+- **Items already here:** a paste whose items all live in the destination.
+  `ITEMS ALREADY HERE`; the destination folder in the context line; the item
+  list; `SAVE DUPLICATES KEEPS THE ORIGINAL.` in the warning slot; CANCEL
+  focused first and SAVE DUPLICATES as the yellow slab. CANCEL changes nothing;
+  SAVE DUPLICATES creates the free copy name and never overwrites the source
+  (R16, R17).
 - **Cancel a transfer:** the item, the progress, the partial removed; KEEP
   DOWNLOADING / CANCEL.
 - **Stop the server during a write:** the client’s write and the partial removed;
@@ -628,7 +640,7 @@ look and how focus moves.
 | SITE EDITOR | Name, host, port, user, password, anonymous | new, edit, invalid field, password warning |
 | SERVER | Start/stop, port, IP, client count, access | OFF, starting, ON, client connected, stop, error |
 | ACTIONS | Context actions for the active pane | local, remote, multi-select, read-only |
-| CONFIRM | Destructive confirmation or batch conflict | delete, overwrite all, skip existing, cancel |
+| CONFIRM | Destructive confirmation or batch conflict | delete, overwrite all, skip existing, items already here, cancel |
 | TEXT INPUT | System IME for paths, names, and fields | open, cancelled, unavailable |
 | ERROR / RECONNECT | Inline failure and reconnect | network lost, login failed, transfer failed, server failed |
 

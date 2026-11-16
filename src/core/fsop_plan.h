@@ -51,7 +51,10 @@ typedef enum {
 typedef enum {
     FSOP_CONFLICT_ASK = 0,
     FSOP_CONFLICT_OVERWRITE,
-    FSOP_CONFLICT_SKIP
+    FSOP_CONFLICT_SKIP,
+    /* A same-folder COPY: choose a free copy name instead of asking again
+     * (R17, KTD6). */
+    FSOP_CONFLICT_DUPLICATE
 } FsOpConflict;
 
 typedef struct {
@@ -101,6 +104,14 @@ typedef struct {
     Path existing_dest[FSOP_CONFLICT_NAMES];
     int existing_named;
 
+    /* A same-folder COPY under ASK: every item already lives in the
+     * destination, so the caller asks SAVE DUPLICATES or CANCEL and no step
+     * exists until the answer arrives (R16, KTD6). */
+    int needs_duplicate;
+    int duplicate_count;
+    Path duplicate_source[FSOP_CONFLICT_NAMES];
+    int duplicate_named;
+
     int item_count;
     int file_count;
     int all_sizes_known;
@@ -129,9 +140,19 @@ typedef struct {
  */
 int fsop_plan_build(FsOpPlan *plan, const FsOpRequest *request);
 
+/*
+ * The one copy-name rule, shared by the planner and the worker's fact collector
+ * so the prompt and the plan cannot disagree (R17, KTD6). Candidate 0 is
+ * `A copy.TXT`, candidate n is `A copy <n + 1>.TXT`; a folder keeps its whole
+ * name. Returns 0 when `out` cannot hold the name.
+ */
+int fsop_copy_name(const char *source, int source_is_dir, int n, char *out,
+                   size_t cap);
+
 const char *fsop_plan_step_source(const FsOpPlan *plan, int step);
 const char *fsop_plan_step_dest(const FsOpPlan *plan, int step);
 const char *fsop_plan_existing_dest(const FsOpPlan *plan, int index);
+const char *fsop_plan_duplicate_source(const FsOpPlan *plan, int index);
 const char *fsop_plan_rollback_from(const FsOpPlan *plan, int rollback);
 const char *fsop_plan_rollback_to(const FsOpPlan *plan, int rollback);
 

@@ -540,6 +540,16 @@ static void open_confirm(UiState *state, UiConfirmKind kind)
         snprintf(c->title, sizeof(c->title), "DELETE SITE");
         snprintf(c->warning, sizeof(c->warning), "THIS CANNOT BE UNDONE.");
         break;
+    case UI_CONFIRM_DUPLICATE:
+        /* CANCEL is focused first, so a same-folder paste cannot duplicate by
+         * accident; SAVE DUPLICATES is the yellow commit (R16). */
+        c->choices[0] = UI_CHOICE_CANCEL;
+        c->choices[1] = UI_CHOICE_SAVE_DUPLICATE;
+        c->choice_count = 2;
+        snprintf(c->title, sizeof(c->title), "ITEMS ALREADY HERE");
+        snprintf(c->warning, sizeof(c->warning),
+                 "SAVE DUPLICATES KEEPS THE ORIGINAL.");
+        break;
     case UI_CONFIRM_NONE:
     default:
         break;
@@ -2511,6 +2521,11 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         state->confirm.items = event->items;
         state->confirm.item_count = event->item_count;
         state->confirm.existing_count = event->existing_count;
+        /* The request's own context line, e.g. the folder a duplicate paste
+         * would fill (R16). A kind without one keeps the empty fallback. */
+        if (event->text[0] != '\0')
+            fmt_copy(state->confirm.context, sizeof(state->confirm.context),
+                     event->text);
         break;
     case UI_EVT_IME_RESULT:
         if (state->pending_action_valid) {

@@ -24,6 +24,13 @@
 static void item_size(const UiConfirmItem *item, char *out, size_t cap,
                       uint32_t *color)
 {
+    /* An already-here item in a mixed batch is named so the user sees it, but
+     * it is never replaced; the size column says so (R19, KTD6). */
+    if (item->stays) {
+        snprintf(out, cap, "STAYS");
+        *color = C_DIM;
+        return;
+    }
     if (item->size_known) {
         fmt_size(out, cap, item->size, 1);
         *color = C_WHITE;
@@ -150,6 +157,12 @@ static void body_draw(const UiConfirm *confirm)
         font_text("THE SITE IS REMOVED FROM THE BOOK.", CONFIRM_ITEM_X, y,
                   PX_LABEL, C_DIM);
         break;
+    case UI_CONFIRM_DUPLICATE:
+        /* The list already names the items; this body is the no-list fallback
+         * so the question still explains itself (KTD6). */
+        font_text("EVERY ITEM ALREADY LIVES IN THIS FOLDER.", CONFIRM_ITEM_X, y,
+                  PX_LABEL, C_WHITE);
+        break;
     default:
         break;
     }
@@ -235,6 +248,10 @@ static void options_draw(const UiConfirm *confirm)
             label = "OVERWRITE";
             primary = 1;
             break;
+        case UI_CHOICE_SAVE_DUPLICATE:
+            label = "SAVE DUPLICATES";
+            primary = 1;
+            break;
         default:
             break;
         }
@@ -266,6 +283,20 @@ static void legend_draw(const UiConfirm *confirm)
     font_text("CHOOSE", x, 512.0f, PX_MICRO, C_DIM);
 }
 
+/* A prompt shows its item list when it has one and its body otherwise. The
+ * context line and the warning are drawn outside that choice on purpose: the
+ * duplicate question keeps its destination and its "keeps the original"
+ * warning beside the list it explains (R16, KTD6), and every other kind keeps
+ * the list-or-body layout it had. */
+static void panel_draw(const UiConfirm *confirm)
+{
+    int has_items = confirm->items != NULL && confirm->item_count > 0;
+    if (has_items)
+        items_draw(confirm);
+    else
+        body_draw(confirm);
+}
+
 void confirm_draw(const UiState *state)
 {
     if (state == NULL)
@@ -283,10 +314,7 @@ void confirm_draw(const UiState *state)
                   C_CYAN_DIM);
     }
 
-    if (confirm->items != NULL && confirm->item_count > 0)
-        items_draw(confirm);
-    else
-        body_draw(confirm);
+    panel_draw(confirm);
 
     if (confirm->warning[0] != '\0')
         font_text(confirm->warning, CONFIRM_ITEM_X, 336.0f, PX_LABEL, C_YELLOW);
