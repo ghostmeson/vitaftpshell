@@ -11,12 +11,14 @@ unit; do not use this folder as a scratchpad.
 
 | Plan | Kind | Status |
 |---|---|---|
-| [`2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | Implementation-ready unified plan | Behavior source of truth; the 2026-11-14 and 2026-11-16 correction passes applied; the console matrix is the open row |
-| [`2026-11-16-0643-fix-residual-network-closure-plan.md`](2026-11-16-0643-fix-residual-network-closure-plan.md) | Implementation-ready fix plan | Code units landed; its record unit was carried out by the truth sweep; console matrix pending |
+| [`2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | Implementation-ready unified plan | Behavior source of truth; the 2026-11-14 and 2026-11-16 correction passes applied; R22/R23 are planned and not built, and the console matrix is the open row |
 
 Completed plans move to [`archive/`](archive/README.md), one index row each.
 A plan is archived only after its units are absorbed by `../DECISIONS.md`,
 `../FIXES.md`, or `../VERIFICATION.md`, and its inbound citations are rewritten.
+The v1 plan stays here after its code lands because it owns the R, KTD, and U
+numbering every other document cites; its remaining requirements live in this
+file, not in a second plan.
 
 ## Rules
 

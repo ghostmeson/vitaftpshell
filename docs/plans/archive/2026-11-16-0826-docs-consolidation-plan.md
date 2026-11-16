@@ -180,8 +180,8 @@ behavior change gets its own plan.
 
 - `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — behavior source of
   truth.
-- `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md` — current
-  implementation plan.
+- `docs/plans/archive/2026-11-16-0643-fix-residual-network-closure-plan.md` —
+  the implementation plan current at the time; completed and archived.
 - This plan until it is applied, then archive it.
 
 **Plans — archive after verifying absorption:**

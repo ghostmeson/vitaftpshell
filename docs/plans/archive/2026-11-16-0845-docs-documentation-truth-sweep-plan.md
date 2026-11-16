@@ -48,7 +48,7 @@ The set also mixes finished work with live work. Three completed remediation pla
 - **The one-press retry promise is retired for v1.** A failed item is retried by running it again, and `X TO RETRY` leaves `docs/DESIGN.md` and every other live document. (session-settled: user-directed — chosen over keeping the promise and planning the behavior separately: no document may describe an action the build lacks.) Governs DR9.
 - **Remote recursive transfer is a v1 requirement that is planned, not built.** The v1 plan's R22/R23 become active requirements, and the one status owner records them as planned. (session-settled: user-directed — chosen over keeping the deferral: the owner wants remote recursion in v1, with the implementation planned separately.) Governs DR8.
 - **The ambition is stated with measurable proxies.** `STRATEGY.md` gains a short Ambition subsection using signals the project already records, and claims nothing as achieved. (session-settled: user-directed — chosen over withdrawing the wording: the goal is real and only the document was missing.) Governs DR12.
-- **This sweep executes the residual plan's record unit.** The port record that `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md` leaves in its U5 lands here, so exactly one plan writes the superseding decision, the port text, and the summary corrections; that plan keeps its console-matrix rows. (session-settled: user-directed — chosen over land U5 against the moving documentation surface: one sweep, one writer.) Governs DR10, DR11.
+- **This sweep executes the residual plan's record unit.** The port record that `docs/plans/archive/2026-11-16-0643-fix-residual-network-closure-plan.md` leaves in its U5 lands here, so exactly one plan writes the superseding decision, the port text, and the summary corrections; that plan keeps its console-matrix rows. (session-settled: user-directed — chosen over land U5 against the moving documentation surface: one sweep, one writer.) Governs DR10, DR11.
 - **One sweep supersedes the 0826 consolidation plan.** That plan is the primary input to this one and is archived on completion, so exactly one documentation plan is active. (session-settled: user-directed — chosen over amending it in place: it belongs to another session and its own open decisions are settled here.) Governs DR2.
 
 ### Actors
@@ -78,7 +78,7 @@ Requirements use `DR` so they cannot be confused with the product requirements `
 
 - DR8. Remote recursive transfer is stated once as a v1 requirement that is planned and not built, and every deferred statement of it is rewritten: D65's status and scope item, the v1 plan's Key Decision and its deferred-list bullet, and the one status owner. No page implies the transfer works.
 - DR9. D35 is superseded and the retry promise is gone wherever a document offers one: the README transfer-dock row, `docs/DESIGN.md`'s dock-failure line and its data-channel-failure state, the v1 plan's data-failure flow step and its deferred-decision row, and the workspace states sheet. Each says a failed item is retried by running it again, and the preview fixture that renders the same state is corrected with them.
-- DR10. The new decision entry states the per-session port rule once, and every live statement of the server's ports agrees with it: D39's rule is superseded, D59's, D63's, and D86's port sentences are amended, the bind-failure rule in R49 splits into a control bind that leaves the server OFF and a data bind that answers 425, and each other named document states only what its own subject needs with a reference to that entry. This sweep executes the record unit that `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md` leaves in its U5.
+- DR10. The new decision entry states the per-session port rule once, and every live statement of the server's ports agrees with it: D39's rule is superseded, D59's, D63's, and D86's port sentences are amended, the bind-failure rule in R49 splits into a control bind that leaves the server OFF and a data bind that answers 425, and each other named document states only what its own subject needs with a reference to that entry. This sweep executes the record unit that `docs/plans/archive/2026-11-16-0643-fix-residual-network-closure-plan.md` leaves in its U5.
 - DR11. `docs/FIXES.md` records the per-session ports as a host-verified row with `PENDING` for the packaged build, since this sweep produces none, no longer lists the same-host data-port limitation as accepted, and restates only the residuals that remain.
 
 **Traceability and ambition**
@@ -177,7 +177,7 @@ None. Both open questions are resolved above, and the gate's limit is recorded u
 
 ### Sources / Research
 
-- `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md` — its U5 record unit is executed here; its console-matrix rows stay open.
+- `docs/plans/archive/2026-11-16-0643-fix-residual-network-closure-plan.md` — its U5 record unit is executed here; its console-matrix rows stay open.
 - `docs/plans/archive/2026-11-16-0826-docs-consolidation-plan.md` — the primary input; its ownership table, correction matrix, and drift-guard checks are carried forward, and its superseded claims are corrected here.
 - The documentation audit for this plan: status duplication in `README.md`, `AGENTS.md`, and `docs/PROJECT.md`; reference counts in `AGENTS.md`; the port statements listed under DR10; five "awaiting choice" rows and one "awaiting approval" row in `docs/design/README.md`; the plan, design, retry, and recursion statements mapped file by file.
 - `src/core/ftp/server.h` — the landed per-session port contract and `SERVER_PORT_MAX`.
@@ -237,7 +237,7 @@ U1 first, so every later unit is measured. U2 next, because decisions are what t
 - Goal: The decisions the sweep needs are recorded before any summary cites them: the per-session port rule, the retry retirement, remote recursion as planned v1, the one-home rule, and the gate.
 - Requirements: DR6, DR7, DR8, DR9, DR10, DR11; KTD5.
 - Dependencies: U1.
-- Files: `docs/DECISIONS.md`, `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`, `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md`, `docs/ARCHITECTURE.md`, `docs/DESIGN.md`.
+- Files: `docs/DECISIONS.md`, `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`, `docs/plans/archive/2026-11-16-0643-fix-residual-network-closure-plan.md`, `docs/ARCHITECTURE.md`, `docs/DESIGN.md`.
 - Approach:
   - Add D92 stating the per-session port rule and superseding D39's port rule; amend the port sentences in D59, D63, and D86 while leaving their other rules intact.
   - Rewrite D65's status, its item 3, and its consequences so remote recursion is a v1 requirement that is planned, not a deferred refusal.
@@ -272,7 +272,7 @@ U1 first, so every later unit is measured. U2 next, because decisions are what t
 - Goal: Completed plans and rejected design directions leave the active set with an index row and intact inbound links.
 - Requirements: DR2, DR3; KTD6. Covers AE3, AE7.
 - Dependencies: U2, U3.
-- Files: `docs/plans/README.md`, `docs/plans/archive/README.md`, `docs/design/README.md`, the design archive index, `docs/DESIGN.md`, `docs/DECISIONS.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/PROJECT.md`, `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`, `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md`.
+- Files: `docs/plans/README.md`, `docs/plans/archive/README.md`, `docs/design/README.md`, the design archive index, `docs/DESIGN.md`, `docs/DECISIONS.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/PROJECT.md`, `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`, `docs/plans/archive/2026-11-16-0643-fix-residual-network-closure-plan.md`.
 - Approach:
   - Create both archive folders with an index that gives each file one row: outcome, build, and where its decisions or evidence live.
   - Move the three completed remediation plans and the 0826 consolidation plan with `git mv`; move this sweep's own plan when the sweep is complete.
