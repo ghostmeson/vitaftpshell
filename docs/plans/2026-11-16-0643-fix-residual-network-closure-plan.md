@@ -336,7 +336,7 @@ U1 and U3 can proceed independently. U2 follows U1 because it shares the bind he
 - Requirements: R14 (its evidence and matrix clauses; the decision and v1-plan clauses landed with D92 in the documentation truth sweep).
 - Dependencies: U1, U2, U3, U4.
 - Files: `docs/FIXES.md`, `docs/VERIFICATION.md`.
-- Note: the port record landed as D92 in the documentation truth sweep (`docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md`); this unit keeps only the console-matrix rows.
+- Note: the port record landed as D92 in the documentation truth sweep (`docs/plans/archive/2026-11-16-0845-docs-documentation-truth-sweep-plan.md`); this unit keeps only the console-matrix rows.
 - Approach:
   - Record M5 against per-session ports, and give it the same-address transfer that proves the slot port.
   - Rewrite M7's second-client expectation to an accepted session, with 450 reserved for a fifth session or a data command during the owner's transfer.

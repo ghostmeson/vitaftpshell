@@ -2114,8 +2114,8 @@ and cited `docs/` paths, unbalanced fences, plan and design indexing, the
 ownership table, R/U/KTD/D references and whole-set ranges, build tokens outside
 their owners, the shared status block, the traceability table, and the
 retired-phrase list. It runs from `tools/test/run.sh` and CI and fails on a
-finding. While the sweep is in progress, `docs/drift-baseline.txt` records the
-violations that predate the gate: entries key on file, check, and matched text,
+finding. While the sweep was in progress, a baseline file recorded the violations
+that predate the gate: entries key on file, check, and matched text,
 may only be removed, and a regeneration that would add one fails; the file is
 deleted when the count reaches zero. Archived files, dated plan bodies, and
 historical evidence rows are exempt from the phrase check, and the decision

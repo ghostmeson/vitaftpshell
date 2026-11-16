@@ -212,7 +212,7 @@ arena.
   and step, removes the temporary file, rolls back, and reports
   `CANCELLED n OF m`; the popped command is consumed once so it cannot reach the
   next job (D75).
-- The b41 build replaces the exclusive slot with canonical-path reservations,
+- Canonical-path reservations replace the earlier exclusive slot,
   one local job beside one network transfer, and the WAIT/SKIP/CANCEL collision
   confirm (D72, D73). It also enforces the worker stack budget: large
   per-operation arrays live in the heap-owned `Worker`, the worker stack is

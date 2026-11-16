@@ -43,7 +43,7 @@ The set also mixes finished work with live work. Three completed remediation pla
 
 - **One fact, one home.** Each kind of fact has exactly one owner document; every other document links to it. Governs DR1, DR4, DR5.
 - **Status is not history.** Summaries carry a short current state and links; `PROJECTS.md` owns the board, `docs/VERIFICATION.md` the hardware evidence, `docs/FIXES.md` the defects, and git the rest. Governs DR4, DR5.
-- **Archive, do not rewrite history.** Completed plans and rejected design directions move to `docs/plans/archive/` and `docs/design/archive/` with index rows; only an exact duplicate with no unique rationale and no inbound link is deleted. Governs DR2, DR3.
+- **Archive, do not rewrite history.** Completed plans move to the plans archive and rejected design directions move to the design archive, each with index rows; only an exact duplicate with no unique rationale and no inbound link is deleted. Governs DR2, DR3.
 - **The gate lands first, with a shrinking baseline.** `tools/check_docs.py` enters the host suite and CI with a baseline file listing today's violations, refuses anything new, and the sweep ends with the baseline empty and removed. (session-settled: user-approved — chosen over writing the docs first and adding the gate last: the sweep's own edits are checked while they happen, and progress becomes a count instead of a judgment.) Governs DR13.
 - **The one-press retry promise is retired for v1.** A failed item is retried by running it again, and `X TO RETRY` leaves `docs/DESIGN.md` and every other live document. (session-settled: user-directed — chosen over keeping the promise and planning the behavior separately: no document may describe an action the build lacks.) Governs DR9.
 - **Remote recursive transfer is a v1 requirement that is planned, not built.** The v1 plan's R22/R23 become active requirements, and the one status owner records them as planned. (session-settled: user-directed — chosen over keeping the deferral: the owner wants remote recursion in v1, with the implementation planned separately.) Governs DR8.
@@ -70,7 +70,7 @@ Requirements use `DR` so they cannot be confused with the product requirements `
 **Status and truth**
 
 - DR4. `README.md`, `AGENTS.md`, and `docs/PROJECT.md` each carry the state paragraph as a marked block between `<!-- status:begin -->` and `<!-- status:end -->`; the prose inside is identical in all three, only the two relative link targets differ, and no block carries a build number, SHA, test count, or build-by-build narrative.
-- DR5. `PROJECTS.md` keeps the board and trims its log to the current phase, moving unique history to `docs/HISTORY.md` only when unique history survives the trim and dropping anything git or `docs/FIXES.md` already carries.
+- DR5. `PROJECTS.md` keeps the board and trims its log to the current phase, moving unique history to a history page only when unique history survives the trim and dropping anything git or `docs/FIXES.md` already carries.
 - DR6. Every contradiction found by the audit is corrected, and a re-grep with the retired-phrase list the gate owns returns no live occurrence.
 - DR7. The v1 plan's self-references match its contents: R1–R74, KTD1–KTD25, and U1–U28, with no deferred bullet the plan no longer carries, including the multiple-simultaneous-server-clients bullet that D86 and R50 settle.
 
@@ -149,7 +149,7 @@ Requirements use `DR` so they cannot be confused with the product requirements `
 
 ### Success Criteria
 
-- The active set is the root four, the `docs/` pages plus `docs/HISTORY.md` if DR5 creates it, the v1 plan and the residual implementation plan, this sweep's own plan archived on completion, the settled design sheet per screen, and the archive indexes.
+- The active set is the root four, the `docs/` pages plus a history page if DR5 creates one, the v1 plan and the residual implementation plan, this sweep's own plan archived on completion, the settled design sheet per screen, and the archive indexes.
 - The gate passes with no baseline, and the audit's patterns return no live occurrence.
 - `README.md`, `AGENTS.md`, and `docs/PROJECT.md` send status readers to the owners and pin no build.
 - The port rule and the three decided scope items are consistent across every live document that mentions them.
@@ -216,10 +216,10 @@ U1 first, so every later unit is measured. U2 next, because decisions are what t
 - Goal: A checked documentation gate runs beside the existing guards, fails on the classes the sweep must not reintroduce, and starts from an explicit baseline of today's violations.
 - Requirements: DR13; KTD1, KTD2, KTD3, KTD4. Covers AE2, AE3, AE7, AE8.
 - Dependencies: none.
-- Files: `tools/check_docs.py`, `tools/test/run.sh`, `docs/drift-baseline.txt`.
+- Files: `tools/check_docs.py`, `tools/test/run.sh`, and the baseline file the guard reads.
 - Approach:
   - Write the script with one function per check: link and backticked-path resolution, fence balance, plans and design inventory, ownership-table completeness, reference existence and range maxima (R74, KTD25, U28, D91 at the time of writing), build tokens outside the owner allowlist, the status block, the traceability table's rows, and the retired-phrase list.
-  - Read `docs/drift-baseline.txt` when present; a finding covered by an entry is reported only under `--verbose`, an uncovered finding fails.
+  - Read the baseline file when present; a finding covered by an entry is reported only under `--verbose`, an uncovered finding fails.
   - Add `--self-test`, which builds a temporary fixture tree, asserts each check fails on its own fixture and passes on a clean one, and exits 2 on a missing argument.
   - Invoke it from `tools/test/run.sh` after the asset guard, before the suite loop, so it fails fast.
 - Test scenarios:
@@ -254,12 +254,12 @@ U1 first, so every later unit is measured. U2 next, because decisions are what t
 - Goal: The three summary documents stop carrying status history, every stale scope and retry line is corrected, and the board keeps the live state with its log trimmed.
 - Requirements: DR1, DR4, DR5, DR6, DR7, DR9; KTD4.
 - Dependencies: U2.
-- Files: `README.md`, `AGENTS.md`, `docs/PROJECT.md`, `PROJECTS.md`, `docs/README.md`, `docs/design/2026-11-08-workspace-a-states.html`, `tools/preview/preview.c`, `docs/HISTORY.md` when DR5 creates it.
+- Files: `README.md`, `AGENTS.md`, `docs/PROJECT.md`, `PROJECTS.md`, `docs/README.md`, `docs/design/2026-11-08-workspace-a-states.html`, `tools/preview/preview.c`, and a history page when DR5 creates one.
 - Approach:
   - Replace each status section with the marked block and two links; delete the pre-alpha badge text, the "VPK only launches and exits" note, the suite and state counts, and the build narratives rather than updating them.
   - Correct the scope lines: four server clients, two lanes, local recursion in and remote recursion planned, and no retired phrase.
   - Remove `retry` from the dock description, the workspace states sheet, and the preview fixture that renders the same state, and correct `AGENTS.md`'s read-order counts to R1–R74, KTD1–KTD25, and U1–U28.
-  - Trim `PROJECTS.md`'s log to the current phase, move unique history to `docs/HISTORY.md`, and re-sort what remains by date.
+  - Trim `PROJECTS.md`'s log to the current phase, move unique history to a history page, and re-sort what remains by date.
   - Update `docs/README.md`'s ownership table and its description of the plans and design folders.
 - Test scenarios:
   - The same status block appears in all three documents with resolving links (Covers AE8).
@@ -272,7 +272,7 @@ U1 first, so every later unit is measured. U2 next, because decisions are what t
 - Goal: Completed plans and rejected design directions leave the active set with an index row and intact inbound links.
 - Requirements: DR2, DR3; KTD6. Covers AE3, AE7.
 - Dependencies: U2, U3.
-- Files: `docs/plans/README.md`, `docs/plans/archive/README.md`, `docs/design/README.md`, `docs/design/archive/README.md`, `docs/DESIGN.md`, `docs/DECISIONS.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/PROJECT.md`, `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`, `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md`.
+- Files: `docs/plans/README.md`, `docs/plans/archive/README.md`, `docs/design/README.md`, the design archive index, `docs/DESIGN.md`, `docs/DECISIONS.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/PROJECT.md`, `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`, `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md`.
 - Approach:
   - Create both archive folders with an index that gives each file one row: outcome, build, and where its decisions or evidence live.
   - Move the three completed remediation plans and the 0826 consolidation plan with `git mv`; move this sweep's own plan when the sweep is complete.
@@ -290,7 +290,7 @@ U1 first, so every later unit is measured. U2 next, because decisions are what t
 - Goal: The three primary features map to requirements and matrix rows, the ambition is stated with proxies, and the evidence page records what this pass proved.
 - Requirements: DR11, DR12, DR13, DR14, DR15.
 - Dependencies: U1, U2, U3, U4.
-- Files: `docs/PROJECT.md`, `STRATEGY.md`, `docs/VERIFICATION.md`, `docs/FIXES.md`, `PROJECTS.md`, `docs/drift-baseline.txt`.
+- Files: `docs/PROJECT.md`, `STRATEGY.md`, `docs/VERIFICATION.md`, `docs/FIXES.md`, `PROJECTS.md`, and the baseline file.
 - Approach:
   - Add the three-row traceability table to `docs/PROJECT.md` and add its presence to the gate's checks.
   - Add the Ambition subsection to `STRATEGY.md` with the proxies the project already records.

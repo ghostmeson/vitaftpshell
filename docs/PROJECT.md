@@ -57,6 +57,17 @@ requirements R1-R74.
 - An encrypted credential vault or a master password.
 - Themes, plugins, or alternate HUD layouts.
 
+## Feature traceability
+
+The three primary features, the requirements that define them, and the matrix
+rows that prove them on hardware.
+
+| Feature | Requirements | Matrix |
+|---|---|---|
+| FTP client — saved sites, browse, download, upload, mutations | R5, R6, R41 | M1, M2, M3, M14 |
+| Local file manager — browse, marks, copy/move, rename, delete, new folder | R30, R31, R39 | M11, M12, M13 |
+| Anonymous FTP server — four sessions, per-session data ports, path guard | R50, R51 | M5, M6, M7 |
+
 ## Roadmap
 
 | Phase | Outcome |
