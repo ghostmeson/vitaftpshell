@@ -44,6 +44,7 @@ typedef struct {
     const char *sub_listing;
     const char *payload;
     const char *exists_path;
+    const char *exists_path2;
     uint64_t exists_size;
     int mlst_mode;
     NetSocket *stor_data;
@@ -52,8 +53,10 @@ typedef struct {
     int hold_data;
     int hold_final;
     int size_supported;
+    int list_fail;
     int sizes;
     int listings;
+    int list_fails;
     int retrs;
     int aborts;
     int cwds;
@@ -166,6 +169,13 @@ static void peer_serve(Peer *peer)
             fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
         } else if (strncmp(line, "MLSD ", 5) == 0 ||
                    strncmp(line, "LIST ", 5) == 0) {
+            if (peer->list_fail) {
+                /* The client retries MLSD as LIST; both must fail for the
+                 * listing to end as a read error. */
+                peer->list_fails++;
+                fake_ftpd_reply(&peer->server, 550, "Listing refused.");
+                continue;
+            }
             const char *listing = peer->listing;
             if (strcmp(peer->cwd, "/") != 0 && peer->sub_listing != NULL)
                 listing = peer->sub_listing;
@@ -183,8 +193,11 @@ static void peer_serve(Peer *peer)
         } else if (strncmp(line, "SIZE ", 5) == 0) {
             const char *path = line + 5;
             peer->sizes++;
-            if (peer->size_supported && peer->exists_path != NULL &&
-                strcmp(path, peer->exists_path) == 0) {
+            int exists = (peer->exists_path != NULL &&
+                          strcmp(path, peer->exists_path) == 0) ||
+                         (peer->exists_path2 != NULL &&
+                          strcmp(path, peer->exists_path2) == 0);
+            if (peer->size_supported && exists) {
                 char size[32];
                 snprintf(size, sizeof(size), "%llu",
                          (unsigned long long)peer->exists_size);
@@ -328,6 +341,31 @@ static int log_has(const char *needle)
             return 1;
     }
     return 0;
+}
+
+/* Count log lines mentioning `needle`. Record details are percent-encoded, so a
+ * message with spaces has to be matched as the log writes it: "%20" between
+ * words (see logev_format). */
+static int log_count(const char *needle)
+{
+    int count = 0;
+    for (unsigned i = 0; i < fake_log_count(); ++i) {
+        const char *line = fake_log_line(i);
+        if (line != NULL && strstr(line, needle) != NULL)
+            count++;
+    }
+    return count;
+}
+
+/* The polled remote pane row, or NULL. */
+static const UiRow *remote_row_named(App *app, const char *name)
+{
+    const UiPaneState *pane = &app_state(app)->panes[UI_PANE_REMOTE];
+    for (int i = 0; i < pane->row_count; ++i) {
+        if (strcmp(pane->rows[i].name, name) == 0)
+            return &pane->rows[i];
+    }
+    return NULL;
 }
 
 static int content_is(const char *path, const char *expected)
@@ -739,6 +777,8 @@ static void test_upload_preflight_size_folder(void)
 
     start_upload(app, &peer);
     CHECK(peer.sizes == 1);
+    /* The row already types the destination, so no refresh is asked for. */
+    CHECK(peer.listings == 1);
     CHECK(peer.stors == 0);
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
     CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
@@ -1729,6 +1769,388 @@ static void test_upload_preflight_failure(void)
     app_destroy(app);
 }
 
+/* Start an upload through the actions ledger and drive the probe to its SIZE
+ * answer, leaving the peer unable to answer the refresh that follows. */
+static void start_upload_until_size(App *app, Peer *peer)
+{
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_UPLOAD);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(peer);
+        if (peer->sizes == 1)
+            break;
+    }
+    CHECK(peer->sizes == 1);
+    /* The answer is read on the next step; the peer then stays silent, so the
+     * refresh it asks for is still in flight. */
+    for (int i = 0; i < 4; ++i)
+        (void)app_tick(app);
+}
+
+/* AE4: the listing published when the session opened has no DEST row; the one
+ * refresh the preflight asks for types it as a folder, so the STOR is refused
+ * before it is sent. */
+static void test_upload_preflight_refresh_folder(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/UP.TXT";
+    peer.exists_size = 5;
+    CHECK(peer.listings == 1);
+
+    peer.listing = "type=dir;modify=20240101000000; UP.TXT\r\n";
+
+    start_upload(app, &peer);
+    CHECK(peer.sizes == 1);
+    /* One refresh, and no listing rescheduled after it: the lanes went idle
+     * with the batch over, so a second listing would be a loop (KTD4). */
+    CHECK(peer.listings == 2);
+    CHECK(peer.stors == 0);
+    CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
+
+    /* The refreshed rows are the pane's rows, not a private copy. */
+    const UiRow *row = remote_row_named(app, "UP.TXT");
+    CHECK(row != NULL);
+    if (row != NULL)
+        CHECK(row->type == UI_ROW_DIR);
+
+    app_destroy(app);
+}
+
+/* R7: a destination the current listing already shows as a file needs no
+ * refresh; the overwrite decision applies directly. */
+static void test_upload_preflight_refresh_not_for_listed_file(void)
+{
+    App *app = make_app_ex("ux0:data/TEST.BIN", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "TEST.BIN");
+
+    Peer peer;
+    connect_site(app, &peer); /* the open listing already holds TEST.BIN */
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/TEST.BIN";
+    peer.exists_size = 5;
+
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_UPLOAD);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM)
+            break;
+    }
+    CHECK(peer.sizes == 1);
+    CHECK(peer.listings == 1); /* the row says file; nothing to refresh */
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(app_state(app)->confirm.kind == UI_CONFIRM_CONFLICT);
+
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_RIGHT)); /* OVERWRITE */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.stors > 0)
+            break;
+    }
+    CHECK(peer.stors == 1);
+    CHECK(strcmp(peer.last_stor, "/TEST.BIN") == 0);
+
+    app_destroy(app);
+}
+
+/* AE5: SIZE reports no such destination, so no refresh is asked for and the
+ * STOR proceeds (R7, R10). */
+static void test_upload_preflight_refresh_not_needed(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/OTHER.TXT";
+
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_UPLOAD);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.stors > 0)
+            break;
+    }
+    CHECK(peer.sizes == 1);
+    CHECK(peer.listings == 1); /* the open listing only */
+    CHECK(peer.stors == 1);
+    CHECK(strcmp(peer.last_stor, "/UP.TXT") == 0);
+
+    app_destroy(app);
+}
+
+/* AE6, reachable half: a second item with the same destination name is queued
+ * while the refresh is in flight. The arriving refresh decides the item it was
+ * asked for; the new item runs its own probe and is decided by that (KTD3). */
+static void test_upload_preflight_refresh_names_its_own_item(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/UP.TXT";
+    peer.exists_size = 5;
+
+    start_upload_until_size(app, &peer);
+
+    /* The same destination again, queued behind the item whose refresh owns
+     * the lane. The UI cannot do this itself (the pane is READING), so the
+     * command the ledger would emit is pushed directly. */
+    UiCommand second;
+    memset(&second, 0, sizeof(second));
+    second.type = UI_CMD_TRANSFER;
+    second.pane = UI_PANE_LOCAL;
+    second.source_type = UI_ROW_FILE;
+    snprintf(second.path, sizeof(second.path), "ux0:data/UP.TXT");
+    snprintf(second.path2, sizeof(second.path2), "/");
+    CHECK(handoff_command_push(app_handoff(app), &second) == 1);
+    (void)app_tick(app);
+
+    /* The refreshed listing refuses the first item. The second one's own SIZE
+     * then says the name is gone, so it is stored instead of inheriting the
+     * first item's folder answer. */
+    peer.listing = "type=dir;modify=20240101000000; UP.TXT\r\n";
+    peer.exists_path = "/GONE.TXT";
+    pump(app, &peer, 160);
+
+    CHECK(peer.sizes == 2);
+    CHECK(peer.listings == 3); /* open, one refresh, the post-upload refresh */
+    CHECK(peer.stors == 1);
+    CHECK(strcmp(peer.last_stor, "/UP.TXT") == 0);
+    CHECK(log_count("DESTINATION%20IS%20A%20FOLDER") == 1);
+
+    app_destroy(app);
+}
+
+/* R7: the refresh is asked for only while the pane shows the destination's own
+ * parent. A batch queued in /SUB that runs with the pane back in / leaves the
+ * destination untyped and asks for no listing. */
+static void test_upload_preflight_refresh_parent_not_shown(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/SUB/UP.TXT";
+    peer.exists_size = 5;
+
+    UiCommand upload;
+    memset(&upload, 0, sizeof(upload));
+    upload.type = UI_CMD_TRANSFER;
+    upload.pane = UI_PANE_LOCAL;
+    upload.source_type = UI_ROW_FILE;
+    snprintf(upload.path, sizeof(upload.path), "ux0:data/UP.TXT");
+    snprintf(upload.path2, sizeof(upload.path2), "/SUB");
+    CHECK(handoff_command_push(app_handoff(app), &upload) == 1);
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM)
+            break;
+    }
+    CHECK(peer.sizes == 1);
+    CHECK(peer.listings == 1); /* no refresh: /SUB is not what the pane shows */
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_RIGHT)); /* OVERWRITE */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.stors > 0)
+            break;
+    }
+    CHECK(peer.stors == 1);
+    CHECK(strcmp(peer.last_stor, "/SUB/UP.TXT") == 0);
+
+    app_destroy(app);
+}
+
+/* R9: a cancel while the refresh owns the lane is refused, and the item still
+ * reaches its decision when the listing ends. */
+static void test_upload_preflight_refresh_refuses_cancel(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/UP.TXT";
+    peer.exists_size = 5;
+
+    start_upload_until_size(app, &peer);
+
+    UiCommand cancel;
+    memset(&cancel, 0, sizeof(cancel));
+    cancel.type = UI_CMD_CANCEL_NETWORK;
+    CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
+    (void)app_tick(app);
+    CHECK(strstr(app_state(app)->status, "REMOTE CHECK IN PROGRESS") != NULL);
+
+    peer.listing = "type=dir;modify=20240101000000; UP.TXT\r\n";
+    pump(app, &peer, 120);
+    CHECK(peer.listings == 2);
+    CHECK(peer.stors == 0);
+    /* The refused cancel left the item in place: the refresh still decides it. */
+    CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
+
+    app_destroy(app);
+}
+
+/* R9: a refresh whose listing fails leaves the destination untyped and reports
+ * one listing error; the item then proceeds on the file path. */
+static void test_upload_preflight_refresh_failure(void)
+{
+    App *app = make_app_ex("ux0:data/UP.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "UP.TXT");
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/UP.TXT";
+    peer.exists_size = 5;
+
+    start_upload_until_size(app, &peer);
+    peer.list_fail = 1;
+
+    for (int i = 0; i < 60; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM)
+            break;
+    }
+    /* MLSD and its LIST fallback are both refused; the untyped destination
+     * then follows the existing overwrite decision. */
+    CHECK(peer.list_fails == 2);
+    CHECK(app_state(app)->screen == UI_SCREEN_CONFIRM);
+    CHECK(strstr(app_state(app)->panes[UI_PANE_REMOTE].error,
+                 "REMOTE LISTING FAILED") != NULL);
+    /* One failed listing on the log: the refresh, not a retry loop. */
+    CHECK(log_count("stage=read\tcls=server") == 1);
+
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_RIGHT)); /* OVERWRITE */
+    press(app, INPUT_BIT(INPUT_CROSS));
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        peer_serve(&peer);
+        if (peer.stors > 0)
+            break;
+    }
+    CHECK(peer.stors == 1);
+    CHECK(strcmp(peer.last_stor, "/UP.TXT") == 0);
+
+    app_destroy(app);
+}
+
+/* R9: each item refreshes at most once. Two marked uploads each refresh their
+ * own parent once and are each refused as a folder. */
+static void test_upload_preflight_refresh_once_per_item(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, "ux0:data/B.TXT", "B");
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    select_local_named(app, "A.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    select_local_named(app, "B.TXT");
+    press(app, INPUT_BIT(INPUT_SQUARE));
+
+    Peer peer;
+    connect_site(app, &peer);
+    peer.mlst_mode = MLST_UNSUPPORTED;
+    peer.size_supported = 1;
+    peer.exists_path = "/A.TXT";
+    peer.exists_path2 = "/B.TXT";
+    peer.exists_size = 1;
+    peer.listing = "type=dir;modify=20240101000000; A.TXT\r\n";
+
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_UPLOAD);
+    press(app, INPUT_BIT(INPUT_CROSS));
+
+    for (int i = 0; i < 240; ++i) {
+        (void)app_tick(app);
+        /* The first refresh types only A; retarget the peer so the second
+         * item's refresh is needed and types only B. */
+        if (peer.listings == 2)
+            peer.listing = "type=dir;modify=20240101000000; B.TXT\r\n";
+        peer_serve(&peer);
+    }
+    CHECK(peer.sizes == 2);    /* each item asked for itself */
+    CHECK(peer.listings == 3); /* open, A's refresh, B's refresh */
+    CHECK(peer.stors == 0);
+    CHECK(log_count("DESTINATION%20IS%20A%20FOLDER") == 2);
+
+    app_destroy(app);
+}
+
 static void test_download_conflict(void)
 {
     App *app = make_app_ex("ux0:data/TEST.BIN", "OLD!!", NULL, NULL, NULL);
@@ -2264,6 +2686,14 @@ int main(void)
     test_upload_preflight_size_fallback();
     test_upload_preflight_directory();
     test_upload_preflight_failure();
+    test_upload_preflight_refresh_folder();
+    test_upload_preflight_refresh_not_needed();
+    test_upload_preflight_refresh_not_for_listed_file();
+    test_upload_preflight_refresh_names_its_own_item();
+    test_upload_preflight_refresh_parent_not_shown();
+    test_upload_preflight_refresh_refuses_cancel();
+    test_upload_preflight_refresh_failure();
+    test_upload_preflight_refresh_once_per_item();
     test_download_conflict();
     test_download_final_reply_loses_queue();
     test_listing_cap();

@@ -43,6 +43,16 @@ typedef enum {
     PENDING_REMOTE_WAIT
 } PendingKind;
 
+/* What a preflight parent-listing refresh did. The caller must tell them apart:
+ * a held command slot is retried, a started listing owns the lane until it
+ * ends, and an uncollected listing leaves the destination untyped (KTD5). */
+typedef enum {
+    UPLOAD_REFRESH_UNTYPED = 0,
+    UPLOAD_REFRESH_BUSY,
+    UPLOAD_REFRESH_STARTED,
+    UPLOAD_REFRESH_UNCOLLECTED
+} UploadRefresh;
+
 typedef struct {
     int valid;
     PendingKind kind;
@@ -179,10 +189,22 @@ struct Worker {
     int upload_stat_used_size;
     /* Neither MLST nor SIZE is available; the session goes straight to STOR. */
     int upload_stat_disabled;
-    /* The destination the pending STAT result belongs to. A cancel can drop
-     * the active item before pump_queue reads the result; the path check stops
-     * that answer from deciding the next item's conflict. */
+    /* KTD3: the answer belongs to the item it was asked for, so the item is
+     * named by a token rather than by its path. `batch_reset` and every new
+     * preflight move the token on, and the request records the value it was
+     * asked under; an answer that outlives its item therefore matches nothing,
+     * even when the next batch reuses the same destination path. */
+    unsigned upload_stat_token;
+    unsigned upload_stat_answer_token;
+    /* The destination the pending answer describes. Identity is the token; the
+     * path only says which destination the answer is about. */
     char upload_stat_path[PATH_MAX_LEN];
+    /* R9: one parent refresh per item, the latch that owns the network lane
+     * while that listing runs, and the flag that hands the decision back to
+     * pump_queue once the listing ends. */
+    int upload_stat_refresh_used;
+    int upload_stat_refresh_active;
+    int upload_stat_refresh_done;
 
     int server_transfer_active;
     XferDirection server_direction;
@@ -1114,6 +1136,11 @@ static void worker_list_local(Worker *worker, const char *path)
 static void remote_listing_begin(Worker *worker, const char *path)
 {
     log_event(worker, LOGEV_LIST, NULL, NULL, path, "begin", "app", 0, 0);
+    /* A begin that cannot take a slot must not leave an earlier collection's
+     * flag set: the preflight reads `collecting` right after starting its
+     * refresh, and a stale flag would make it wait for a listing that never
+     * publishes (KTD5). */
+    worker->collecting = 0;
     int slot = handoff_listing_begin(worker->handoff, UI_PANE_REMOTE);
     if (slot < 0) {
         emit_listing_end(worker, UI_PANE_REMOTE, path, 0, 0, 0, 0, "LISTING BUSY");
@@ -1187,21 +1214,27 @@ static void remote_listing_end(Worker *worker, int ok)
     worker->collect_count = 0;
 }
 
-/* SIZE cannot report a type. When the destination is in the listing the
- * worker just published, its row says whether it is a folder; a destination
- * outside that folder still relies on the server's STOR refusal. */
-static int remote_listing_is_dir(Worker *worker, const char *destination)
+/* SIZE cannot report a type. Only the rows published for the destination's
+ * own parent can type it: rows left from another folder would type a name that
+ * merely shares its last segment. Returns the row type, or -1 when no row for
+ * the name belongs to the listed folder, so the caller can tell "a file" from
+ * "the listing does not show it" (R7). */
+static int remote_listing_type(Worker *worker, const char *destination)
 {
     if (worker->remote_row_count <= 0)
-        return 0;
+        return -1;
+    char parent[PATH_MAX_LEN];
+    if (!remote_parent(destination, parent, sizeof(parent)) ||
+        strcmp(worker->remote_path, parent) != 0)
+        return -1;
     const char *name = last_name(destination);
     const UiRow *rows =
         rows_for(worker, UI_PANE_REMOTE, worker->collect_slot);
     for (int i = 0; i < worker->remote_row_count; ++i) {
         if (strcmp(rows[i].name, name) == 0)
-            return rows[i].type == UI_ROW_DIR;
+            return rows[i].type;
     }
-    return 0;
+    return -1;
 }
 
 /* Release a reserved listing generation when the session dies mid-listing.
@@ -2065,9 +2098,14 @@ static void batch_reset(Worker *worker)
     worker->batch_conflict_decided = 0;
     worker->batch_conflict = XFER_CONFLICT_NONE;
     /* A probe belongs to one batch; a result that arrives after its batch
-     * ended must not decide the next one. */
+     * ended must not decide the next one. The token is what makes that true,
+     * so an answer cannot match even the same destination path again (KTD3). */
     worker->upload_stat_active = 0;
     worker->upload_stat_ready = 0;
+    worker->upload_stat_token++;
+    worker->upload_stat_refresh_used = 0;
+    worker->upload_stat_refresh_active = 0;
+    worker->upload_stat_refresh_done = 0;
 }
 
 /*
@@ -2442,6 +2480,48 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
     emit(worker, &started);
 }
 
+/* Start this item's preflight and give its answer an identity. The token is
+ * captured here, not when the answer arrives: `batch_reset` moves the token on
+ * while the probe flies, and the answer must still say which item it was asked
+ * for (KTD3). */
+static void upload_stat_begin(Worker *worker, const char *destination,
+                              int use_size)
+{
+    worker->upload_stat_token++;
+    worker->upload_stat_answer_token = worker->upload_stat_token;
+    worker->upload_stat_active = 1;
+    worker->upload_stat_ready = 0;
+    worker->upload_stat_used_size = use_size;
+    worker->upload_stat_refresh_used = 0;
+    worker->upload_stat_refresh_active = 0;
+    worker->upload_stat_refresh_done = 0;
+    fmt_copy(worker->upload_stat_path, sizeof(worker->upload_stat_path),
+             destination);
+}
+
+/* R7: refresh the destination's own parent, once, and only while the pane
+ * still shows that directory. KTD4: this is the ordinary listing path, so the
+ * rows land in the pane's own slot and the next pump decides from them; it must
+ * not set refresh_remote, which would ask for the listing again forever.
+ * KTD5: LISTING_BEGIN runs inside ftp_client_list, so `collecting` says now
+ * whether a slot was taken; waiting for a completion that never publishes
+ * would wait forever. */
+static UploadRefresh upload_stat_refresh(Worker *worker)
+{
+    char parent[PATH_MAX_LEN];
+    if (!remote_parent(worker->upload_stat_path, parent, sizeof(parent)) ||
+        strcmp(worker->remote_path, parent) != 0)
+        return UPLOAD_REFRESH_UNTYPED;
+
+    FtpClientResult result = ftp_client_list(worker->client, parent);
+    if (result == FTP_CLIENT_BUSY)
+        return UPLOAD_REFRESH_BUSY;
+    if (result != FTP_CLIENT_OK)
+        return UPLOAD_REFRESH_UNTYPED;
+    return worker->collecting ? UPLOAD_REFRESH_STARTED
+                              : UPLOAD_REFRESH_UNCOLLECTED;
+}
+
 static void pump_queue(Worker *worker)
 {
     /*
@@ -2464,82 +2544,6 @@ static void pump_queue(Worker *worker)
                 return;
         } else if (!xfer_claim(&worker->queue, &item)) {
             return;
-        }
-
-        /* The MLST check for this upload finished on the previous step. */
-        if (worker->upload_stat_ready &&
-            strcmp(worker->upload_stat_path, item.destination.text) == 0) {
-            worker->upload_stat_ready = 0;
-            if (worker->upload_stat_failed) {
-                emit_error(worker, UI_PANE_REMOTE, "REMOTE CHECK FAILED",
-                           worker->upload_stat_cause,
-                           worker->upload_stat_stage);
-                xfer_release(&worker->queue, NULL);
-                worker->batch_done++;
-                batch_finish(worker);
-                continue;
-            }
-            if (worker->upload_stat_unsupported) {
-                if (worker->upload_stat_used_size) {
-                    /* SIZE is refused too: no probe exists on this server. */
-                    worker->upload_stat_disabled = 1;
-                } else {
-                    /* MLST was refused; ask SIZE before giving up (b37). */
-                    FtpClientResult size = ftp_client_size(
-                        worker->client, item.destination.text);
-                    if (size == FTP_CLIENT_OK) {
-                        worker->upload_stat_used_size = 1;
-                        worker->upload_stat_active = 1;
-                        fmt_copy(worker->upload_stat_path,
-                                 sizeof(worker->upload_stat_path),
-                                 item.destination.text);
-                        return;
-                    }
-                    if (size == FTP_CLIENT_BUSY)
-                        return;
-                    emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED",
-                               OP_CAUSE_APP, OP_STAGE_CONNECT);
-                    xfer_release(&worker->queue, NULL);
-                    worker->batch_done++;
-                    batch_finish(worker);
-                    continue;
-                }
-                start_transfer_item(worker, &item);
-                return;
-            }
-            if (!worker->upload_stat_exists) {
-                start_transfer_item(worker, &item);
-                return;
-            }
-            if (!worker->upload_stat_is_dir && worker->upload_stat_used_size)
-                worker->upload_stat_is_dir =
-                    remote_listing_is_dir(worker, item.destination.text);
-            if (worker->upload_stat_is_dir) {
-                emit_error(worker, UI_PANE_REMOTE, "DESTINATION IS A FOLDER",
-                           OP_CAUSE_APP, OP_STAGE_TRANSFER);
-                xfer_release(&worker->queue, NULL);
-                worker->batch_done++;
-                batch_finish(worker);
-                continue;
-            }
-            if (worker->batch_conflict == XFER_CONFLICT_SKIP_EXISTING) {
-                xfer_release(&worker->queue, NULL);
-                worker->batch_done++;
-                batch_finish(worker);
-                continue;
-            }
-            if (!worker->batch_conflict_decided) {
-                request_transfer_conflict(worker, &item);
-                return;
-            }
-            start_transfer_item(worker, &item);
-            return;
-        }
-        if (worker->upload_stat_ready) {
-            /* The answer belongs to an item a cancel removed; discard it
-             * instead of deciding this item's conflict. */
-            worker->upload_stat_ready = 0;
-            worker->upload_stat_active = 0;
         }
 
         if (item.direction == XFER_DIR_DOWNLOAD) {
@@ -2575,6 +2579,108 @@ static void pump_queue(Worker *worker)
          * MLST; a server without it (or one that refuses MLST) falls back to
          * SIZE. When neither answers, the transfer starts as before. R41 asks
          * once per batch and applies the answer to every file. */
+        if (worker->upload_stat_refresh_active)
+            return; /* the refresh listing owns the lane until it ends */
+
+        /* An answer decides this item only when it was asked for this item
+         * (KTD3). The refreshed rows are the answer's second half, so a
+         * finished refresh re-enters the same decision (KTD4). */
+        int answering = 0;
+        if (worker->upload_stat_refresh_done) {
+            worker->upload_stat_refresh_done = 0;
+            answering = worker->upload_stat_answer_token ==
+                        worker->upload_stat_token;
+        } else if (worker->upload_stat_ready) {
+            worker->upload_stat_ready = 0;
+            answering = worker->upload_stat_answer_token ==
+                        worker->upload_stat_token;
+        }
+
+        if (answering) {
+            if (worker->upload_stat_failed) {
+                emit_error(worker, UI_PANE_REMOTE, "REMOTE CHECK FAILED",
+                           worker->upload_stat_cause,
+                           worker->upload_stat_stage);
+                xfer_release(&worker->queue, NULL);
+                worker->batch_done++;
+                batch_finish(worker);
+                continue;
+            }
+            if (worker->upload_stat_unsupported &&
+                !worker->upload_stat_used_size) {
+                /* MLST was refused; ask SIZE before giving up (b37). This is
+                 * still the same item, so it keeps the same token. */
+                FtpClientResult size =
+                    ftp_client_size(worker->client, worker->upload_stat_path);
+                if (size == FTP_CLIENT_OK) {
+                    worker->upload_stat_used_size = 1;
+                    worker->upload_stat_active = 1;
+                    return;
+                }
+                if (size == FTP_CLIENT_BUSY)
+                    return;
+                emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED",
+                           OP_CAUSE_APP, OP_STAGE_CONNECT);
+                xfer_release(&worker->queue, NULL);
+                worker->batch_done++;
+                batch_finish(worker);
+                continue;
+            }
+            if (worker->upload_stat_unsupported) {
+                /* SIZE is refused too: no probe exists on this server. */
+                worker->upload_stat_disabled = 1;
+            }
+            if (worker->upload_stat_unsupported || !worker->upload_stat_exists) {
+                start_transfer_item(worker, &item);
+                return;
+            }
+            /* SIZE says the destination exists but cannot say what it is. The
+             * pane's rows type it when they belong to its parent; a row that
+             * says "file" needs no refresh, and a missing row costs one. */
+            if (!worker->upload_stat_is_dir && worker->upload_stat_used_size) {
+                int row_type =
+                    remote_listing_type(worker, worker->upload_stat_path);
+                if (row_type == UI_ROW_DIR)
+                    worker->upload_stat_is_dir = 1;
+                else if (row_type < 0 && !worker->upload_stat_refresh_used) {
+                    UploadRefresh refresh = upload_stat_refresh(worker);
+                    if (refresh == UPLOAD_REFRESH_BUSY)
+                        return; /* keepalive holds the slot; retry next step */
+                    worker->upload_stat_refresh_used = 1;
+                    if (refresh == UPLOAD_REFRESH_STARTED) {
+                        worker->upload_stat_refresh_active = 1;
+                        return; /* the rows decide it when the listing ends */
+                    }
+                    if (refresh == UPLOAD_REFRESH_UNCOLLECTED) {
+                        /* The listing runs but will never be collected; decide
+                         * once the client is idle again (R9). */
+                        worker->upload_stat_refresh_done = 1;
+                        return;
+                    }
+                }
+            }
+            if (worker->upload_stat_is_dir) {
+                emit_error(worker, UI_PANE_REMOTE, "DESTINATION IS A FOLDER",
+                           OP_CAUSE_APP, OP_STAGE_TRANSFER);
+                xfer_release(&worker->queue, NULL);
+                worker->batch_done++;
+                batch_finish(worker);
+                continue;
+            }
+            if (worker->batch_conflict == XFER_CONFLICT_SKIP_EXISTING) {
+                xfer_release(&worker->queue, NULL);
+                worker->batch_done++;
+                batch_finish(worker);
+                continue;
+            }
+            if (!worker->batch_conflict_decided) {
+                request_transfer_conflict(worker, &item);
+                return;
+            }
+            start_transfer_item(worker, &item);
+            return;
+        }
+
         if (worker->batch_conflict != XFER_CONFLICT_OVERWRITE_ALL &&
             !worker->upload_stat_disabled) {
             int use_size = worker->upload_stat_used_size ||
@@ -2585,11 +2691,7 @@ static void pump_queue(Worker *worker)
                          : ftp_client_mlst(worker->client,
                                            item.destination.text);
             if (check == FTP_CLIENT_OK) {
-                worker->upload_stat_active = 1;
-                worker->upload_stat_used_size = use_size;
-                fmt_copy(worker->upload_stat_path,
-                         sizeof(worker->upload_stat_path),
-                         item.destination.text);
+                upload_stat_begin(worker, item.destination.text, use_size);
                 return;
             }
             if (check == FTP_CLIENT_BUSY)
@@ -2719,6 +2821,15 @@ static void client_listing_end(Worker *worker, const FtpClientEvent *event)
     if (!worker->collecting)
         return;
     remote_listing_end(worker, event->ok);
+    /* A preflight refresh ends here, whatever its result: the same decision
+     * runs again with the rows just published, and an empty or failed listing
+     * leaves the destination untyped (R8, R9). The latch is separate from
+     * upload_stat_active, which clears when the SIZE answer arrives, or a
+     * cancel would be refused only while the probe flies. */
+    if (worker->upload_stat_refresh_active) {
+        worker->upload_stat_refresh_active = 0;
+        worker->upload_stat_refresh_done = 1;
+    }
 }
 
 static void client_operation_done(Worker *worker, const FtpClientEvent *event)
@@ -2741,6 +2852,8 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
     if (event->operation == FTP_CLIENT_OP_STAT) {
         if (!worker->upload_stat_active)
             return;
+        /* The answer keeps the token the request was started under, so a batch
+         * reset in between cannot make it look like the next item's. */
         worker->upload_stat_active = 0;
         worker->upload_stat_ready = 1;
         worker->upload_stat_failed = !event->ok;
@@ -3108,7 +3221,9 @@ static void cancel_local_lane(Worker *worker)
 
 static void cancel_network_transfer(Worker *worker)
 {
-    if (worker->upload_stat_active) {
+    /* The probe and its refresh are two commands but one preflight; a cancel
+     * between them would leave the item undecided, so both latches refuse. */
+    if (worker->upload_stat_active || worker->upload_stat_refresh_active) {
         emit_error(worker, UI_PANE_REMOTE, "REMOTE CHECK IN PROGRESS",
                    OP_CAUSE_APP, OP_STAGE_COMMAND);
         return;
@@ -3125,6 +3240,10 @@ static void cancel_network_transfer(Worker *worker)
          * one (the client op, if still active, is ignored on arrival). */
         worker->upload_stat_ready = 0;
         worker->upload_stat_active = 0;
+        worker->upload_stat_refresh_used = 0;
+        worker->upload_stat_refresh_active = 0;
+        worker->upload_stat_refresh_done = 0;
+        worker->upload_stat_token++;
         (void)xfer_cancel_active(&worker->queue, NULL);
         worker->batch_done++;
         batch_finish(worker);
