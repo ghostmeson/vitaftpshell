@@ -209,6 +209,7 @@ stateDiagram-v2
 
 This plan covers the local workspace. The broader breakdown is the current understanding, not a committed roadmap.
 
+- Order: this plan lands first, then remote recursive folder transfer, then the sleep and resume work.
 - Power and resume integrity is a separate plan. It shares the activity signals this plan touches (server ON, transfers, local jobs) but can proceed independently.
 - Remote recursive folder transfer is a separate requirement. It shares the remote pane and the transfer queue, and it is independent of this plan.
 - The hardware matrix grows with rows for this plan; the code-freeze pass runs them with the rest.
