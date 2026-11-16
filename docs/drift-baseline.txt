@@ -1,0 +1,116 @@
+# docs guard baseline: file<TAB>check<TAB>matched text
+# Entries may only be removed; --regenerate prunes them and refuses additions.
+AGENTS.md	build-token	b16
+AGENTS.md	build-token	b18
+AGENTS.md	build-token	b20
+AGENTS.md	build-token	b21
+AGENTS.md	build-token	b22
+AGENTS.md	build-token	b23
+AGENTS.md	build-token	b24
+AGENTS.md	build-token	b25
+AGENTS.md	build-token	b26
+AGENTS.md	build-token	b27
+AGENTS.md	build-token	b28
+AGENTS.md	build-token	b32
+AGENTS.md	build-token	b36
+AGENTS.md	build-token	b37
+AGENTS.md	build-token	b38
+AGENTS.md	build-token	b40
+AGENTS.md	build-token	b43
+AGENTS.md	build-token	b55
+AGENTS.md	build-token	b56
+AGENTS.md	build-token	b57
+AGENTS.md	build-token	b58
+AGENTS.md	build-token	b60
+AGENTS.md	build-token	b61
+AGENTS.md	build-token	b62
+AGENTS.md	build-token	b63
+AGENTS.md	build-token	b66
+AGENTS.md	build-token	b68
+AGENTS.md	build-token	b72
+AGENTS.md	build-token	vitaftpshell-v01.00
+AGENTS.md	reference	KTD1-KTD18
+AGENTS.md	reference	R1-R73
+AGENTS.md	reference	U1-U10
+AGENTS.md	reference	U1-U17
+AGENTS.md	retired-phrase	recursive folders
+AGENTS.md	status-block	status:begin
+PROJECTS.md	reference	KTD1–KTD18
+PROJECTS.md	reference	U1–U12
+PROJECTS.md	reference	U1–U14
+PROJECTS.md	reference	U1–U17
+PROJECTS.md	retired-phrase	control port plus one
+PROJECTS.md	retired-phrase	control+1
+PROJECTS.md	retired-phrase	multiple server clients
+PROJECTS.md	retired-phrase	recursive folders
+README.md	build-token	vitaftpshell-v01.00
+README.md	ownership	ownership-table
+README.md	retired-phrase	control port plus one
+README.md	retired-phrase	multiple server clients
+README.md	retired-phrase	one active transfer
+README.md	retired-phrase	pre-alpha
+README.md	retired-phrase	recursive folders
+README.md	status-block	status:begin
+docs/ARCHITECTURE.md	build-token	b41
+docs/ARCHITECTURE.md	retired-phrase	control+1
+docs/DECISIONS.md	retired-phrase	1024-65534
+docs/DECISIONS.md	retired-phrase	TO RETRY
+docs/DECISIONS.md	retired-phrase	control port plus one
+docs/DECISIONS.md	retired-phrase	control+1
+docs/DECISIONS.md	retired-phrase	one active transfer
+docs/DECISIONS.md	retired-phrase	recursive folders
+docs/DESIGN.md	retired-phrase	1024-65534
+docs/DESIGN.md	retired-phrase	TO RETRY
+docs/DESIGN.md	retired-phrase	control port plus one
+docs/FIXES.md	retired-phrase	control+1
+docs/PROJECT.md	build-token	b16
+docs/PROJECT.md	build-token	b18
+docs/PROJECT.md	build-token	b20
+docs/PROJECT.md	build-token	b21
+docs/PROJECT.md	build-token	b22
+docs/PROJECT.md	build-token	b23
+docs/PROJECT.md	build-token	b24
+docs/PROJECT.md	build-token	b25
+docs/PROJECT.md	build-token	b26
+docs/PROJECT.md	build-token	b27
+docs/PROJECT.md	build-token	b28
+docs/PROJECT.md	build-token	b32
+docs/PROJECT.md	build-token	b36
+docs/PROJECT.md	build-token	b37
+docs/PROJECT.md	build-token	b38
+docs/PROJECT.md	build-token	b40
+docs/PROJECT.md	build-token	b43
+docs/PROJECT.md	build-token	b55
+docs/PROJECT.md	build-token	b56
+docs/PROJECT.md	build-token	b57
+docs/PROJECT.md	build-token	b58
+docs/PROJECT.md	build-token	b60
+docs/PROJECT.md	build-token	b61
+docs/PROJECT.md	build-token	b62
+docs/PROJECT.md	build-token	b63
+docs/PROJECT.md	build-token	vitaftpshell-v01.00
+docs/PROJECT.md	reference	R1-R70
+docs/PROJECT.md	reference	U1-U10
+docs/PROJECT.md	retired-phrase	multiple server clients
+docs/PROJECT.md	retired-phrase	recursive folders
+docs/PROJECT.md	status-block	status:begin
+docs/PROJECT.md	traceability	traceability-table
+docs/README.md	ownership	ownership-table
+docs/VERIFICATION.md	reference	U1-U10
+docs/design/2026-11-08-workspace-a-states.html	retired-phrase	TO RETRY
+docs/design/README.md	build-token	b63
+docs/plans/2026-11-16-0826-docs-consolidation-plan.md	code-path	docs/HISTORY.md
+docs/plans/2026-11-16-0826-docs-consolidation-plan.md	code-path	docs/design/archive/
+docs/plans/2026-11-16-0826-docs-consolidation-plan.md	code-path	docs/plans/archive/
+docs/plans/2026-11-16-0826-docs-consolidation-plan.md	code-path	docs/plans/archive/README.md
+docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/HISTORY.md
+docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/design/archive/
+docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/design/archive/README.md
+docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/plans/archive/
+docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	code-path	docs/plans/archive/README.md
+docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	inventory	docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md
+docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md	reference	D92
+docs/plans/README.md	build-token	b40
+docs/plans/README.md	build-token	b41
+docs/plans/README.md	build-token	b50
+docs/plans/README.md	build-token	b67

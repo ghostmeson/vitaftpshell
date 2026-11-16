@@ -71,6 +71,14 @@ python3 "$ROOT/tools/check_worker_stack.py" --self-test
 # sce_sys PNG must be indexed 8-bit (color type 3, bit depth 8).
 "$ROOT/tools/check_assets.sh"
 
+# --- Docs guard -------------------------------------------------------------
+# The docs gate owns what the layering and asset guards cannot see: broken
+# links, unindexed plans and designs, dead R/U/KTD/D references, build tokens in
+# summaries, a divergent status block, and a retired phrase returning to a live
+# document. Its baseline may only shrink, so today's drift is measured while
+# new drift fails here (DR13).
+python3 "$ROOT/tools/check_docs.py" --root "$ROOT"
+
 # --- Host tests -------------------------------------------------------------
 mkdir -p "$OUT"
 shopt -s nullglob
