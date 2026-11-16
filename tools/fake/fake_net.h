@@ -27,6 +27,9 @@ void fake_net_set_resolve(uint32_t addr, int fail);
 void fake_net_set_connect_result(NetResult result);
 void fake_net_fail_send_next(NetResult result);
 unsigned fake_net_overflow_count(void);
+/* The count of the most recent wait set, so a test can prove the server stays
+ * under NET_WAIT_MAX. An over-cap set is rejected like the adapter rejects it. */
+unsigned fake_net_last_wait_count(void);
 void fake_net_set_link(int up, int known, uint32_t addr, uint16_t port);
 void fake_net_fail_next(NetResult result);
 
