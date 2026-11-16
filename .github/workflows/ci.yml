@@ -38,6 +38,9 @@ jobs:
       - name: Upload preview
         uses: actions/upload-artifact@v7
         with:
-          name: workspace-preview
-          path: build/preview/workspace.png
+          # Upload the directory, not one file: the renderer names its states
+          # per surface, and pinning a single filename broke the upload when
+          # that name changed.
+          name: previews
+          path: build/preview
           if-no-files-found: error
