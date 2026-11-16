@@ -53,12 +53,6 @@ README.md	retired-phrase	recursive folders
 README.md	status-block	status:begin
 docs/ARCHITECTURE.md	build-token	b41
 docs/ARCHITECTURE.md	retired-phrase	control+1
-docs/DECISIONS.md	retired-phrase	1024-65534
-docs/DECISIONS.md	retired-phrase	TO RETRY
-docs/DECISIONS.md	retired-phrase	control port plus one
-docs/DECISIONS.md	retired-phrase	control+1
-docs/DECISIONS.md	retired-phrase	one active transfer
-docs/DECISIONS.md	retired-phrase	recursive folders
 docs/DESIGN.md	retired-phrase	1024-65534
 docs/DESIGN.md	retired-phrase	TO RETRY
 docs/DESIGN.md	retired-phrase	control port plus one
