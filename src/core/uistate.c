@@ -1230,9 +1230,26 @@ static void handle_server_key(UiState *state, const UiStateEvent *event,
         return;
     case UI_KEY_CROSS:
         if (!state->server.focus_start) {
-            UiCommand *c = emit(out, max, count, UI_CMD_EDIT_PORT);
-            if (c != NULL)
-                c->value = state->server.port;
+            /* The port is text, so Cross opens the IME seeded with the live
+             * value and the answer comes back as an edit command. Emitting
+             * EDIT_PORT with the current value here made the field a no-op. */
+            char value[8];
+            snprintf(value, sizeof(value), "%u", (unsigned)state->server.port);
+            UiCommand *c = emit(out, max, count, UI_CMD_OPEN_IME);
+            if (c != NULL) {
+                c->field = UI_FIELD_PORT;
+                c->index = 0;
+                c->value = 5;
+                fmt_copy(c->title, sizeof(c->title), "SERVER PORT");
+                fmt_copy(c->text, sizeof(c->text), value);
+            }
+            state->text.open = 1;
+            state->text.field = UI_FIELD_PORT;
+            state->text.masked = 0;
+            state->text.max = 5;
+            fmt_copy(state->text.title, sizeof(state->text.title),
+                     "SERVER PORT");
+            fmt_copy(state->text.value, sizeof(state->text.value), value);
             return;
         }
         if (state->server.run == UI_SERVER_OFF) {
@@ -2299,6 +2316,16 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (!state->text.open)
             break;
         state->text.open = 0;
+        if (event->ok && state->screen == UI_SCREEN_SERVER &&
+            state->text.field == UI_FIELD_PORT) {
+            int port = 0;
+            if (sscanf(event->text, "%d", &port) == 1) {
+                UiCommand *c = emit(out, max, &count, UI_CMD_EDIT_PORT);
+                if (c != NULL)
+                    c->value = port;
+            }
+            break;
+        }
         if (event->ok) {
             UiEditor *editor = &state->editor;
             const char *value = event->text;
