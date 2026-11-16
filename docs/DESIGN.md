@@ -4,7 +4,9 @@
 ACTIONS, CONFIRM, and TEXT ENTRY. The design phase is complete and the
 architecture plan is written. The risk mark landed after the close (D31); the
 high-risk confirmation was retired by D87, and the 2000-row cap's `FIRST 2000`
-notice remains. The fixed constraints below bind every screen.
+notice remains. The 2026-11-17 local-workspace amendment adds the seven-mount
+ALL DRIVES, the right pane's local view, and the duplicate confirm (D96-D99).
+The fixed constraints below bind every screen.
 
 ## Visual authority
 
@@ -56,19 +58,27 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
 
 ### Pane
 
-- **Root:** the local pane opens at `ALL DRIVES`, a virtual root that lists the
-  mounted `ux0:`, `ur0:`, and `uma0:` volumes as `DRIVE` rows. Entering a volume
-  lists its root; Circle at a volume root returns to `ALL DRIVES`. Neither the
-  virtual root nor a volume root carries a `..` row. Copy, move, rename, and
-  delete are unavailable at the virtual root; new folder is unavailable there
-  too. A volume root is protected against rename and delete, but new folder is
-  allowed inside it.
+- **Root:** a local view with no folder yet shows `ALL DRIVES`, a virtual root
+  that lists every mounted user volume in table order: `ux0:`, `ur0:`, `uma0:`,
+  `imc0:`, `gro0:`, `grw0:`, `app0:`. Save data (`savedata0:`) and the protected
+  system partitions (`vs0:`, `os0:`) never appear, and an absent mount is an
+  absent row, not an error; the list is rebuilt on entry, so a mount inserted or
+  removed while it is open appears on the next entry. Entering a volume lists
+  its root; Circle at a volume root returns to `ALL DRIVES`. Neither the virtual
+  root nor a volume root carries a `..` row. Copy, move, rename, and delete are
+  unavailable at the virtual root; new folder is unavailable there too. A
+  volume root is protected against rename and delete, but new folder is allowed
+  inside it. `gro0:` and `app0:` are read-only: the row value reads `DRIVE RO`,
+  and a write, create, paste, rename, move, delete, or download destination
+  there is refused with `READ-ONLY MOUNT`; COPY stays live and a read is
+  allowed.
 - **Band:** title at `y+8` (px 2, tracked 2); path at `y+26` (px 1.5); a hairline
   at `y+43`; rows from `y+48`.
-- **Row:** 30 px pitch; ten visible. Name at `x+40` (px 2). Type or size
-  right-aligned at `x+w-14` (px 1.5): `DIR`, `UP`, `ASIDE`, a size, or `--`. A
-  kept `.vftp.old` copy draws `ASIDE` in yellow instead of a size, so the debris
-  is reachable and never mistaken for the user's file (D81). The mark
+- **Row:** 30 px pitch; ten visible. Name at `x+40` (px 2). Type, size, or the
+  read-only value right-aligned at `x+w-14` (px 1.5): `DIR`, `UP`, `ASIDE`,
+  `DRIVE RO`, a size, or `--`. A kept `.vftp.old` copy draws `ASIDE` in yellow
+  instead of a size, so the debris is reachable and never mistaken for the
+  user's file (D81). The mark
   square is 6×6 at `x+19`; the risk diamond is 6×6 at `x+27`; the scrollbar is
   2 px at `x+w-6`. The name column starts at `x+40` on every row so names stay
   aligned when a risk mark appears. The active cursor row is a cyan slab from
@@ -77,30 +87,51 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
   cursor keeps a 2 px `C_HAIR` bar at `x+8` and a 2.5 % wash.
 - **Risk mark:** a path the shared risk table classifies high draws a 6×6 yellow
   diamond at `x+27` (D31). It marks the `tai` folders and their contents, volume
-  roots, the `ur0:data` and `ux0:data` folders themselves, and the files that
-  control loading. The mark never replaces the type or size column.
+  roots, the `ur0:data`, `ux0:data`, and `imc0:data` folders themselves, and the
+  files that control loading. The mark never replaces the type or size column.
 - **Truncated listing:** a directory longer than the 2000-row cap shows
   `FIRST 2000` in yellow on the band, left of the mark count. The rows shown are
   the first 2000 in the source's order.
-- **Values:** a known size is white; `--`, `DIR`, and `UP` are dim. On the
-  active cursor slab the name and value are near-black. A size the source does
-  not report is never shown as zero.
+- **Values:** a known size is white; `--`, `DIR`, `UP`, and `DRIVE RO` are dim.
+  On the active cursor slab the name and value are near-black. A size the source
+  does not report is never shown as zero.
 - **Active pane:** a full yellow outline that follows the pane chamfer, plus a
   static additive bloom just outside it; the title is yellow. The bloom is
   suppressed on a lost session. The inactive pane keeps a dim title, a
   `C_CYAN_DIM` path, a `C_HAIR` cursor bar, and a 2.5 % wash.
-- **Marks:** pane-scoped. The band shows the count in yellow and the total known
-  size in white. Marks survive directory changes, L/R, and a completed batch
-  (D18); they clear when the pane's connection or volume root changes, or when
-  the user unmarks each row.
-- **Identity:** the remote band shows the site and path; the local band shows
-  the path and free space. The site identity also stays in the header (D19).
+- **Marks:** view-scoped. Each of the three views keeps its own marks; the band
+  shows the count in yellow and the total known size in white. Marks survive
+  directory changes, L/R, a right-pane switch, and a completed batch (D18);
+  they clear when the view's connection or volume root changes, or when the
+  user unmarks each row.
+- **Identity:** the remote band shows the site and path; a local band shows the
+  path and free space and is titled `LOCAL` (both local views carry the same
+  title; position and the active outline tell them apart). The site identity
+  also stays in the header (D19).
 - **Action failure:** a refused or failed action replaces the path with the
   error in red, fitted with `..`; it clears on the next workspace key or a
   successful listing. A failed listing keeps its centered `LISTING FAILED`; a
   lost session keeps its centered detail (D68).
 - **Truncation:** names and paths end in `..`. A path too deep for the band is
   shown in full in ACTIONS, which is still to be designed.
+
+### Pane views
+
+The left pane is always local. The right pane shows one of two views: the FTP
+session (`REMOTE`) or a second local browser (`LOCAL`). Each view keeps its own
+folder, cursor, scroll, marks, and listing; the switch is a view change, not a
+disconnect, so the session and a running transfer survive it (D97). The right
+local view opens at `ALL DRIVES` the first time and returns to its last folder
+for the session; a folder that no longer exists falls back to `ALL DRIVES` when
+the failure is found. Both local bands read `LOCAL`.
+
+With both panes local, the right pane is a full peer of the left: the same
+actions, marks, free space, protection, and one shared clipboard. UPLOAD is dim
+on both with `NO REMOTE VIEW`, and that reason wins over `NO SELECTION`. The
+mode is session state; every launch starts left local plus right remote, and
+neither the mode nor the right local folder is persisted (D97). The seven
+mounts, the right local view, and the seven-row ACTIONS are drawn in
+[`design/2026-11-17-local-workspace-states.html`](design/2026-11-17-local-workspace-states.html).
 
 ### Header
 
@@ -191,15 +222,16 @@ allowed outside the hazard band.
 - **Session lost:** `SESSION LOST` yellow px 2; the mapped reason in micro dim;
   `X RECONNECT  O DISMISS` in micro with the keys white and the words dim. The
   block is centred; the band keeps the last path dim, the site identity clears,
-  marks clear, the header reads `NOT CONNECTED`, and the dock keeps the failed
-  transfer.
+  the remote view's marks clear, the header reads `NOT CONNECTED`, and the dock
+  keeps the failed transfer.
 - **Data-channel failure with a healthy control channel:** the rows stay; the
   dock shows FAILED and says the item is retried by running it again; the
   session stays connected.
 
 ### Input
 
-- L/R switches the active pane and preserves both path and selection.
+- L/R switches the active pane between the left slot and the view the right slot
+  shows, and preserves each view's path and selection.
 - Up and Down move the active pane's selection one row. The list wraps: Up on
   the first row selects the last, and Down on the last selects the first.
 - The left stick is a second list control: it moves the selection by its
@@ -217,6 +249,8 @@ allowed outside the hazard band.
 
 - Standard: `[X] OPEN/SEND  [O] UP  [□] MARK  [△] ACTIONS  L/R PANE  START SERVER
   SELECT SITES`.
+- Both local: `[X] OPEN` replaces `OPEN/SEND`; the rest of the standard legend is
+  unchanged.
 - Reconnect: `[X] RECONNECT  [O] DISMISS  L/R PANE  START SERVER  SELECT SITES`.
 
 ## SITES
@@ -425,9 +459,12 @@ The header repeats the server state on every screen: `SERVER OFF`,
 
 Direction A: the action ledger with the target panel (D26). Local COPY/MOVE
 freeze the marks on a clipboard; PASTE runs them into the folder the user
-navigated to (D60). Remote row actions run over the FTP session; the remote
-ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
-[`design/2026-11-08-actions-a-states.html`](design/2026-11-08-actions-a-states.html).
+navigated to (D60), and a same-folder paste asks CANCEL or SAVE DUPLICATES
+(D98). Remote row actions run over the FTP session; the remote ledger adds
+REFRESH and DISCONNECT (D64/D65). The four early states are in
+[`design/2026-11-08-actions-a-states.html`](design/2026-11-08-actions-a-states.html);
+the both-local state and the seven-row panel are in
+[`design/2026-11-17-local-workspace-states.html`](design/2026-11-17-local-workspace-states.html).
 
 ### Geometry
 
@@ -494,7 +531,7 @@ ledger adds REFRESH and DISCONNECT (D64/D65). The four states are in
   asks `ITEMS ALREADY HERE` with CANCEL / SAVE DUPLICATES; SAVE DUPLICATES uses
   the free copy name (`A copy.TXT`, then `A copy 2.TXT`) and never touches the
   original. CLEAR discards the clipboard.
-- **Remote single:** download to the local pane; rename, delete, new folder;
+- **Remote single:** download to the left local view; rename, delete, new folder;
   refresh; disconnect. Row actions are dim while the pane is disconnected or
   reading. DISCONNECT stays live while reading and closes the session; it is the
   escape from a listing that is taking too long. While `READING` the ledger's row
@@ -635,7 +672,7 @@ look and how focus moves.
 
 | Screen | Purpose | Required states |
 |---|---|---|
-| WORKSPACE | Two live panes, transfer dock, header | local only, connected, disconnected, transferring, empty folder, error |
+| WORKSPACE | Two live panes, transfer dock, header | local and remote, both local, connected, disconnected, transferring, empty folder, error |
 | SITES | Saved site list | empty, populated, selected, deleting |
 | SITE EDITOR | Name, host, port, user, password, anonymous | new, edit, invalid field, password warning |
 | SERVER | Start/stop, port, IP, client count, access | OFF, starting, ON, client connected, stop, error |

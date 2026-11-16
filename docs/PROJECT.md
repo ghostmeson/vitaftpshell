@@ -3,9 +3,9 @@
 ## What it is
 
 vitaFTPShell is one PS Vita app that combines an FTP client, a local file
-manager, and an anonymous FTP server. Local files and a saved site are two live
-panes on a 960×544 Cyberpunk HUD; the transfer dock shows work without taking
-over the screen.
+manager, and an anonymous FTP server. Local storage and a saved site share two
+live panes on a 960×544 Cyberpunk HUD, and the right pane can become a second
+local browser; the transfer dock shows work without taking over the screen.
 
 The console is a peer in the transfer, not a remote endpoint. A user can pull a
 file from `ftp.gnu.org`, push a build to a personal server, or serve the memory
@@ -15,12 +15,14 @@ card to a PC, without making the PC the workspace.
 
 <!-- status:begin -->
 `building`. vitaFTPShell is one PS Vita app with three roles: a passive FTP
-client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
-volumes, and an anonymous read-write FTP server. The seven screens, the
+client, a local file manager over every mounted user volume, and an anonymous
+read-write FTP server on `ux0:`, `ur0:`, and `uma0:`. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
-suites pass. R22 and R23, remote recursive download and upload, are the
-remaining v1 requirements; the console matrix runs once at v1 code freeze
-(D95), so the project is `building`, not `verified`.
+suites pass. The local workspace — a second local pane, the seven user mounts,
+the connect return, and list navigation — is host-complete. R22 and R23, remote
+recursive download and upload, remain the unbuilt v1 requirements; the console
+matrix runs once at v1 code freeze (D95), so the project is `building`, not
+`verified`.
 
 The live state and the single next action are on [the board](../PROJECTS.md); the
 hardware evidence is in [the evidence record](VERIFICATION.md).
@@ -39,7 +41,7 @@ hardware evidence is in [the evidence record](VERIFICATION.md).
 | Capability | In v1 |
 |---|---|
 | FTP client | Saved sites, anonymous and login, passive FTP, browse, download, upload, create, rename, delete; remote recursive transfer is planned, not built (R22/R23, D65) |
-| Local manager | Browse the mounted `ux0:`/`ur0:`/`uma0:` volumes, multi-select, create, rename, copy, move, delete, local recursive folder operations, free space |
+| Local manager | Browse every mounted user volume (`ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, `app0:`), with `app0:` and `gro0:` read-only and save data excluded; two local panes over one session; multi-select, create, rename, copy, move, delete, local recursive folder operations, free space |
 | FTP server | Anonymous read-write, mounted `ux0:`/`ur0:`/`uma0:`, OFF at launch, up to four clients with one data transfer at a time, visible ON state |
 | Transfers | One network transfer and one local job may run together, each with its own queued batch, progress, cancel, and overwrite/skip/cancel conflict prompt |
 | Interface | Two live panes, site manager, server panel, actions, confirms, system text entry, inline errors |
@@ -65,8 +67,8 @@ rows that prove them on hardware.
 
 | Feature | Requirements | Matrix |
 |---|---|---|
-| FTP client — saved sites, browse, download, upload, mutations | R11, R13, R41 | M1, M2, M3, M14, M17, M18, M20, M22 |
-| Local file manager — browse, marks, copy/move, rename, delete, new folder | R30, R31, R39 | M11, M12, M13, M19, M23 |
+| FTP client — saved sites, browse, download, upload, mutations | R11, R13, R41 | M1, M2, M3, M14, M17, M18, M20, M22, M26 |
+| Local file manager — browse, marks, copy/move, rename, delete, new folder | R30, R31, R39 | M11, M12, M13, M19, M23, M24, M25, M27 |
 | Anonymous FTP server — four sessions, per-session data ports, path guard | R50, R51 | M5, M6, M7, M21 |
 
 ## Roadmap
@@ -82,7 +84,7 @@ rows that prove them on hardware.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: v1 completion and verification | R22 and R23 are the remaining requirements; the full matrix runs once on the code-freeze build (D95), and the row-level evidence is the open work |
+| Phase 6: v1 completion and verification | The local workspace is host-complete: a second local pane, the seven user mounts, the connect return, and list navigation. R22 and R23 are the remaining requirements; the full matrix runs once on the code-freeze build (D95), and the row-level evidence is the open work |
 
 ## Failure policy
 

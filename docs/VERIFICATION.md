@@ -373,7 +373,10 @@ evidence are recorded here. The project therefore stays `building`.
 | Wi-Fi / network | pending |
 | VitaShell FTP on 1337 | pending |
 | Unsafe Homebrew enabled | pending |
-| Mounted volumes | pending |
+| Mounted volumes (`ux0:`, `ur0:`, `app0:`) | pending |
+| Internal card (`imc0:`) | BLOCKED: the test console is a PCH-1000, which has no internal card slot |
+| Game card (`gro0:`, `grw0:`) | pending |
+| USB storage (`uma0:`) | pending |
 | PC-side MLSD server | pending |
 | PC-side LIST-only server | pending |
 | External login site | pending |
@@ -385,9 +388,11 @@ evidence are recorded here. The project therefore stays `building`.
 ## Matrix
 
 Rows are added with the behavior they prove and executed once at v1 code
-freeze (D95). M17-M23 cover the surfaces the first sixteen rows did not
+freeze (D95). M17-M27 cover the surfaces the first sixteen rows did not
 exercise, and the remote-recursion rows land with R22/R23. A row's title names
-the behavior; the build it was observed on lives in its evidence.
+the behavior; the build it was observed on lives in its evidence. M24's
+`imc0:` leg is BLOCKED on the PCH-1000: the test console cannot mount that
+volume, so it stays host-only evidence and is never PASS.
 
 | Row | Setup | Expected | Observed | Evidence | Result |
 |---|---|---|---|---|---|
@@ -414,6 +419,10 @@ the behavior; the build it was observed on lives in its evidence.
 | M21 | Server lifecycle, port, and visibility | Start and stop the server, edit the port, turn Wi-Fi off and try to start, and hold a port in use; visit every screen while the server is ON with a client attached. Passes when: OFF at launch; START turns ON with the local IP, port, and ACCESS READ-WRITE; the ON state and client count stay visible on every screen; stop closes the listener and reports; start without a network errors and stays OFF; a port in use leaves it OFF and names the port; the edited port survives a relaunch | pending | pending | PENDING |
 | M22 | Reconnect and queue clear | Connect to a site, queue three downloads, clear the queue from the dock, then drop Wi-Fi during a session and reconnect. Passes when: SELECT on the dock with items queued opens CLEAR QUEUE, names the count, and removes only the queued items; a dropped connection marks the session lost, stops the active transfer with an error, keeps the local pane usable, and RECONNECT returns to the same site | pending | pending | PENDING |
 | M23 | Risk marks and writable tai | Browse `ux0:tai` and `ur0:tai`, copy a file in, rename it, delete it, and try `boot_config.txt` from the local pane. Passes when: the yellow risk mark and the ACTIONS risk text appear on the tai rows; the copy, rename, and delete inside tai succeed; `boot_config.txt` is refused by name and nothing is created; no system directory is removed | pending | pending | PENDING |
+| M24 | Every user mount and the read-only value | `ALL DRIVES` with `ux0:`, `ur0:`, and `app0:` present, a memory card for `gro0:`/`grw0:`, and a PCH-2000 for `imc0:`. Passes when: every present mount appears once in table order and an absent mount is an absent row, not an error; `gro0:` and `app0:` read `DRIVE RO`; a write, create, paste, rename, move, or delete there is refused with `READ-ONLY MOUNT` and changes nothing while COPY stays live; `savedata0:`, `vs0:`, and `os0:` never appear; free space is a value on `ux0:` and `--` where the platform cannot report it | pending; the `imc0:` leg is BLOCKED on the PCH-1000 and is covered only by the host fakes | `test_path`, `test_uistate`, `test_integration`, `test_render_workspace`; host run | PENDING |
+| M25 | Second local view and the switch | A connected site at a folder with two marks and a running download; two local folders. Passes when: `SWITCH TO LOCAL` and `SWITCH TO REMOTE` appear last in the right pane's seven-row ACTIONS and never on the left; a switch preserves the session, folder, cursor, scroll, marks, and the running transfer; the right local view opens at `ALL DRIVES` then returns to its last folder; a copy in one pane pastes into the other pane's folder and both keep their places; UPLOAD is dim on both local panes with `NO REMOTE VIEW`, the hint is `X TO OPEN` on a folder and `NO REMOTE VIEW` on a file, and the dock never reads `REMOTE`; a change in one local view reloads the other only when its exact folder changed, and a vanished folder falls back to `ALL DRIVES` | pending | `test_uistate`, `test_handoff`, `test_integration`, `test_app_thread`, `test_render_workspace`, `test_render_screens`; host run | PENDING |
+| M26 | Connect return and failure reasons | SITES holding a good site, a site with a bad password, an unresolvable host, and a refused port. Passes when: a success started from SITES closes SITES and returns to the WORKSPACE with the remote view active and its listing requested; a failure of every class stays on SITES with its reason; a success after the user left SITES switches the right view without changing the screen or focus, and the reason for a later failure appears in the dock and on the site card; a new attempt replaces the old session and a failed attempt leaves none | pending | `test_uistate`, `test_integration`, `test_render_screens`; host run | PENDING |
+| M27 | Stick, wrap, and the site book | A 40-row folder; a site book longer than six rows; an active network transfer. Passes when: the stick moves the selection one row at the deadzone edge, up to five at full deflection, at the 100 ms cadence, and the view follows; Up on the first row selects the last and Down on the last selects the first; Down on the last row focuses the dock only while a lane has an active or queued item; the site book wraps at both ends and resets its six-row window; ACTIONS, CONFIRM, and the editor still clamp | pending | `test_input`, `test_uistate`, `test_integration`; host run | PENDING |
 
 ## Install and launch
 

@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vitaFTPShell — local workspace states</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #060709;
+    color: #b9bbc6;
+    font: 13.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1024px; margin: 0 auto; padding: 44px 32px 80px; }
+  .sheet-head { border-bottom: 1px solid #1b1c23; padding-bottom: 22px; margin-bottom: 40px; }
+  .sheet-head h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; color: #ededf0; letter-spacing: .005em; }
+  .sheet-head p { margin: 0; color: #838592; max-width: 68ch; }
+  .spec { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 16px; color: #6e707e; font-size: 12px; }
+  .spec b { color: #a9abb6; font-weight: 500; }
+  .dir { margin: 0 0 60px; }
+  .dir-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .dir-key {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border: 1px solid #2b2d36; color: #ededf0;
+    font-size: 11px; font-weight: 600;
+  }
+  .dir-name { color: #ededf0; font-weight: 600; font-size: 14px; }
+  .dir p { margin: 0 0 16px; color: #838592; max-width: 74ch; }
+  .dir p em { color: #b9bbc6; font-style: normal; }
+  canvas { display: block; width: 960px; height: 544px; background: #000; box-shadow: 0 0 0 1px #1b1c23; }
+  .foot { border-top: 1px solid #1b1c23; margin-top: 8px; padding-top: 20px; color: #6e707e; font-size: 12.5px; }
+  .foot p { margin: 0 0 8px; max-width: 78ch; }
+  .foot b { color: #a9abb6; font-weight: 500; }
+
+  body.only { background: #000; }
+  body.only .sheet { padding: 0; max-width: none; }
+  body.only .sheet-head, body.only .foot { display: none; }
+  body.only .dir { display: none; margin: 0; }
+  body.only .dir.on { display: block; }
+  body.only .dir-head, body.only .dir p { display: none; }
+  body.only canvas { box-shadow: none; }
+  body.only.big canvas { width: 1920px; height: 1088px; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="sheet-head">
+    <h1>vitaFTPShell — local workspace, states</h1>
+    <p>Both panes local, the seven-mount ALL DRIVES, and the right pane's seven-row ACTIONS. The left pane stays the local anchor; the right pane switches between the remote view and a second local view over one FTP session (D97).</p>
+    <div class="spec">
+      <span><b>960 × 544</b></span>
+      <span><b>panes</b> 456 × 352</span>
+      <span><b>actions</b> 552 × 360</span>
+      <span><b>target</b> 360 × 360</span>
+      <span><b>dock</b> 64 px</span>
+      <span><b>type</b> 5×7 face, 1.5 / 2 / 3 / 5 px</span>
+    </div>
+  </div>
+
+  <section class="dir" data-scene="s1">
+    <div class="dir-head"><span class="dir-key">1</span><span class="dir-name">Both panes local</span></div>
+    <p>The right pane shows a second local folder. Both bands read <em>LOCAL</em>; the active outline and the cyan cursor slab tell them apart. The dock names the active local pane and its path, reads <em>NO REMOTE VIEW</em> on a file, and the legend drops the <em>SEND</em> half of the first key.</p>
+    <canvas id="s1" aria-label="WORKSPACE with both panes local"></canvas>
+  </section>
+
+  <section class="dir" data-scene="s2">
+    <div class="dir-head"><span class="dir-key">2</span><span class="dir-name">ALL DRIVES with seven mounts</span></div>
+    <p>Every mounted user volume appears in table order. An absent mount is absent, not an error row; <em>savedata0:</em>, <em>vs0:</em>, and <em>os0:</em> never appear. The read-only mounts carry <em>DRIVE RO</em>; COPY stays live there and every write is refused with <em>READ-ONLY MOUNT</em> (D96).</p>
+    <canvas id="s2" aria-label="ALL DRIVES with seven volumes and the read-only value"></canvas>
+  </section>
+
+  <section class="dir" data-scene="s3">
+    <div class="dir-head"><span class="dir-key">3</span><span class="dir-name">ACTIONS on the right local view</span></div>
+    <p>The right ledger holds seven rows, with the switch last; the left keeps six. UPLOAD is dim with <em>NO REMOTE VIEW</em>, and that reason wins over no selection. The target reads <em>PANE</em> and its destination <em>--</em>; the switch stays live while the remote view is lost or disconnected.</p>
+    <canvas id="s3" aria-label="ACTIONS on the right local view with seven rows"></canvas>
+  </section>
+
+  <div class="foot">
+    <p><b>Settled in this pass:</b> the left pane is always local; the right pane shows the remote view or a second local view; each view keeps its folder, cursor, scroll, marks, and listing; a switch preserves the session and a running transfer; both local bands read <em>LOCAL</em>; the right ACTIONS ledger has seven rows at a 44 px pitch inside a 360 px panel; the switch target reads <em>PANE</em>; ALL DRIVES lists the seven user mounts in table order with <em>DRIVE RO</em> on <em>app0:</em> and <em>gro0:</em>; a same-folder paste asks CANCEL or SAVE DUPLICATES (D98).</p>
+    <p><b>Not shown:</b> the remote view, the duplicate CONFIRM, the site book, and the read-only refusal text in the pane band. The matrix rows are M24-M27; the <em>imc0:</em> leg is BLOCKED on the PCH-1000.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  const COL = {
+    field: '#000000', panel: '#0D0E12', hair: '#1C1D24', dim: '#6E707E',
+    white: '#EDEDF0', yellow: '#FCEE0A', cyan: '#2AD8E8', cyanDim: '#19818B',
+    green: '#3BE07A', greenDim: '#2FA85C', red: '#FF2E4D'
+  };
+  const PX = { micro: 1.5, label: 2, value: 3, hero: 4, primary: 5 };
+  const W = 960, H = 544, M = 18, GAP = 12;
+
+  const GLYPHS = {
+    A: [0x0E,0x11,0x11,0x1F,0x11,0x11,0x11],
+    B: [0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E],
+    C: [0x0E,0x11,0x10,0x10,0x10,0x11,0x0E],
+    D: [0x1E,0x11,0x11,0x11,0x11,0x11,0x1E],
+    E: [0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F],
+    F: [0x1F,0x10,0x10,0x1E,0x10,0x10,0x10],
+    G: [0x0E,0x11,0x10,0x17,0x11,0x11,0x0E],
+    H: [0x11,0x11,0x11,0x1F,0x11,0x11,0x11],
+    I: [0x1F,0x04,0x04,0x04,0x04,0x04,0x1F],
+    J: [0x07,0x02,0x02,0x02,0x02,0x12,0x0C],
+    K: [0x11,0x12,0x14,0x18,0x14,0x12,0x11],
+    L: [0x10,0x10,0x10,0x10,0x10,0x10,0x1F],
+    M: [0x11,0x1B,0x15,0x15,0x11,0x11,0x11],
+    N: [0x11,0x19,0x15,0x13,0x11,0x11,0x11],
+    O: [0x0E,0x11,0x11,0x11,0x11,0x11,0x0E],
+    P: [0x1E,0x11,0x11,0x1E,0x10,0x10,0x10],
+    Q: [0x0E,0x11,0x11,0x11,0x15,0x12,0x0D],
+    R: [0x1E,0x11,0x11,0x1E,0x14,0x12,0x11],
+    S: [0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E],
+    T: [0x1F,0x04,0x04,0x04,0x04,0x04,0x04],
+    U: [0x11,0x11,0x11,0x11,0x11,0x11,0x0E],
+    V: [0x11,0x11,0x11,0x11,0x11,0x0A,0x04],
+    W: [0x11,0x11,0x11,0x15,0x15,0x1B,0x11],
+    X: [0x11,0x11,0x0A,0x04,0x0A,0x11,0x11],
+    Y: [0x11,0x11,0x0A,0x04,0x04,0x04,0x04],
+    Z: [0x1F,0x01,0x02,0x04,0x08,0x10,0x1F],
+    '0': [0x0E,0x13,0x15,0x15,0x15,0x19,0x0E],
+    '1': [0x04,0x0C,0x04,0x04,0x04,0x04,0x0E],
+    '2': [0x0E,0x11,0x01,0x06,0x08,0x10,0x1F],
+    '3': [0x1F,0x02,0x04,0x02,0x01,0x11,0x0E],
+    '4': [0x02,0x06,0x0A,0x12,0x1F,0x02,0x02],
+    '5': [0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E],
+    '6': [0x06,0x08,0x10,0x1E,0x11,0x11,0x0E],
+    '7': [0x1F,0x01,0x02,0x04,0x08,0x08,0x08],
+    '8': [0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E],
+    '9': [0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C],
+    ' ': [0,0,0,0,0,0,0],
+    ':': [0x00,0x04,0x04,0x00,0x04,0x04,0x00],
+    '.': [0x00,0x00,0x00,0x00,0x00,0x04,0x04],
+    '%': [0x19,0x1A,0x02,0x04,0x08,0x0B,0x13],
+    '/': [0x01,0x02,0x02,0x04,0x08,0x08,0x10],
+    '-': [0x00,0x00,0x00,0x1F,0x00,0x00,0x00],
+    '+': [0x00,0x04,0x04,0x1F,0x04,0x04,0x00],
+    ',': [0x00,0x00,0x00,0x00,0x0C,0x04,0x08],
+    '_': [0,0,0,0,0,0,0x1F],
+    '[': [0x0E,0x08,0x08,0x08,0x08,0x08,0x0E],
+    ']': [0x0E,0x02,0x02,0x02,0x02,0x02,0x0E]
+  };
+
+  function text(g, s, x, y, px, color, track = 0) {
+    g.fillStyle = color;
+    let cx = x;
+    for (const raw of String(s).toUpperCase()) {
+      const rows = GLYPHS[raw];
+      if (rows) {
+        for (let r = 0; r < 7; r++) {
+          const bits = rows[r];
+          if (!bits) continue;
+          let c = 0;
+          while (c < 5) {
+            if (!(bits & (1 << (4 - c)))) { c++; continue; }
+            const st = c;
+            while (c < 5 && (bits & (1 << (4 - c)))) c++;
+            g.fillRect(cx + st * px, y + r * px, (c - st) * px, px);
+          }
+        }
+      }
+      cx += 6 * px + track;
+    }
+    return cx;
+  }
+
+  function tw(s, px, track = 0) {
+    const n = String(s).length;
+    if (!n) return 0;
+    return n * (6 * px + track) - px - track;
+  }
+
+  function right(g, s, xr, y, px, color, track = 0) {
+    text(g, s, xr - tw(s, px, track), y, px, color, track);
+  }
+
+  function hair(g, x, y, w, color = COL.hair, h = 1) {
+    g.fillStyle = color;
+    g.fillRect(x, y, w, h);
+  }
+
+  function panelPath(g, x, y, w, h, cut) {
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w - cut, y);
+    g.lineTo(x + w, y + cut);
+    g.lineTo(x + w, y + h);
+    g.lineTo(x, y + h);
+    g.closePath();
+  }
+
+  function panel(g, x, y, w, h, accent, opts = {}) {
+    const cut = opts.hero ? 28 : 14;
+    panelPath(g, x, y, w, h, cut);
+    g.fillStyle = COL.panel;
+    g.fill();
+    g.save();
+    g.globalAlpha = 0.45;
+    g.strokeStyle = accent;
+    g.lineWidth = 1;
+    g.stroke();
+    g.restore();
+  }
+
+  function wash(g, x, y, w, h, a = 0.06) {
+    g.fillStyle = `rgba(237,237,240,${a})`;
+    g.fillRect(x, y, w, h);
+  }
+
+  function keycap(g, x, y, shape) {
+    const w = 18, h = 16, c = 3;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w - c, y);
+    g.lineTo(x + w, y + c);
+    g.lineTo(x + w, y + h);
+    g.lineTo(x, y + h);
+    g.closePath();
+    g.strokeStyle = COL.white;
+    g.lineWidth = 1;
+    g.stroke();
+
+    const cx = x + w / 2, cy = y + h / 2;
+    g.strokeStyle = COL.white;
+    g.lineWidth = 1.5;
+    g.lineCap = 'butt';
+    g.beginPath();
+    if (shape === 'x') {
+      g.moveTo(cx - 3.5, cy - 3.5); g.lineTo(cx + 3.5, cy + 3.5);
+      g.moveTo(cx + 3.5, cy - 3.5); g.lineTo(cx - 3.5, cy + 3.5);
+    } else if (shape === 'o') {
+      g.arc(cx, cy, 4.2, 0, Math.PI * 2);
+    } else if (shape === 'square') {
+      g.rect(cx - 3.5, cy - 3.5, 7, 7);
+    } else {
+      g.moveTo(cx, cy - 4.2);
+      g.lineTo(cx + 4.2, cy + 3.5);
+      g.lineTo(cx - 4.2, cy + 3.5);
+      g.closePath();
+    }
+    g.stroke();
+  }
+
+  function textRects(s, x, y, px, track = 0) {
+    const out = [];
+    let cx = x;
+    for (const raw of String(s).toUpperCase()) {
+      const rows = GLYPHS[raw];
+      if (rows) {
+        for (let r = 0; r < 7; r++) {
+          const bits = rows[r];
+          if (!bits) continue;
+          let c = 0;
+          while (c < 5) {
+            if (!(bits & (1 << (4 - c)))) { c++; continue; }
+            const st = c;
+            while (c < 5 && (bits & (1 << (4 - c)))) c++;
+            out.push([cx + st * px, y + r * px, (c - st) * px, px]);
+          }
+        }
+      }
+      cx += 6 * px + track;
+    }
+    return out;
+  }
+
+  function blit(g, rects, dx, dy, color, alpha = 1, additive = false) {
+    g.save();
+    g.globalAlpha = alpha;
+    if (additive) g.globalCompositeOperation = 'lighter';
+    g.fillStyle = color;
+    for (const [x, y, w, h] of rects) g.fillRect(x + dx, y + dy, w, h);
+    g.restore();
+  }
+
+  function diamond(g, x, y, color, size = 3) {
+    g.fillStyle = color;
+    g.beginPath();
+    g.moveTo(x, y - size);
+    g.lineTo(x + size, y);
+    g.lineTo(x, y + size);
+    g.lineTo(x - size, y);
+    g.closePath();
+    g.fill();
+  }
+
+  // ---------- WORKSPACE chrome ----------
+
+  function drawHeader(g, name) {
+    const wm = textRects('VITAFTPSHELL', M, 8, PX.hero);
+    for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) {
+      blit(g, wm, dx, dy, COL.yellow, 0.10, true);
+    }
+    blit(g, wm, -2, 0, COL.yellow, 0.45);
+    blit(g, wm, 2, 0, COL.cyan, 0.35);
+    blit(g, wm, 0, 0, COL.yellow);
+
+    text(g, name, M, 42, PX.label, COL.white, 1);
+    right(g, 'NOT CONNECTED', 942, 25.5, PX.micro, COL.dim);
+    right(g, 'SERVER OFF', 942, 45.5, PX.micro, COL.dim);
+  }
+
+  function drawPane(g, p) {
+    panel(g, p.x, p.y, 456, 352, COL.cyan);
+    if (p.active) {
+      g.save();
+      g.strokeStyle = COL.yellow;
+      g.lineWidth = 1;
+      g.globalAlpha = 0.9;
+      panelPath(g, p.x, p.y, 456, 352, 14);
+      g.stroke();
+      g.globalAlpha = 0.12;
+      g.lineWidth = 3;
+      panelPath(g, p.x - 2, p.y - 2, 460, 356, 16);
+      g.stroke();
+      g.restore();
+    }
+    text(g, 'LOCAL', p.x + 14, p.y + 8, PX.label, p.active ? COL.yellow : COL.dim, 2);
+    text(g, p.path, p.x + 14, p.y + 26, PX.micro, COL.cyanDim);
+    if (p.marks > 0) {
+      const label = `${p.marks} MARKED`;
+      right(g, label, p.x + 442, p.y + 9, PX.micro, COL.yellow);
+    }
+    hair(g, p.x + 14, p.y + 43, 428);
+
+    p.rows.forEach((row, i) => {
+      const y = p.y + 48 + i * 30;
+      const selected = p.active && i === p.selected;
+      if (selected) {
+        g.fillStyle = COL.cyan;
+        g.fillRect(p.x + 1, y - 4, 454, 28);
+      } else if (!p.active && i === p.selected) {
+        wash(g, p.x + 17, y - 4, 422, 28, 0.025);
+        g.fillStyle = COL.hair;
+        g.fillRect(p.x + 8, y - 2, 2, 24);
+      }
+      const ink = selected ? COL.field : COL.white;
+      const inkDim = selected ? COL.field : COL.dim;
+      if (row.mark) {
+        g.fillStyle = COL.yellow;
+        g.fillRect(p.x + 19, y + 3, 6, 6);
+      }
+      if (row.risk) diamond(g, p.x + 27, y + 6, COL.yellow);
+      text(g, row.name, p.x + 40, y, PX.label, row.dim ? inkDim : ink);
+      const valueColor = selected ? COL.field
+        : (row.value === 'DIR' || row.value === 'UP' || row.value === 'DRIVE RO' ? COL.dim : COL.white);
+      right(g, row.value, p.x + 442, y + 2, PX.micro, valueColor);
+    });
+  }
+
+  function drawDock(g, d) {
+    panel(g, 18, 440, 924, 64, COL.cyan);
+    text(g, d.word, 32, 450, PX.label, COL.dim, 2);
+    text(g, d.subject, 32 + tw(d.word, PX.label, 2) + 16, 450, PX.label, COL.white);
+    text(g, d.path, 32 + tw(d.word, PX.label, 2) + tw(d.subject, PX.label) + 28, 453, PX.micro, COL.cyanDim);
+    right(g, d.right, 928, 453, PX.micro, COL.dim);
+    text(g, d.hint, 32, 483, PX.micro, d.hintColor || COL.dim);
+  }
+
+  function drawWorkspaceLegend(g, openOnly) {
+    let x = M;
+    const cap = (shape, label) => {
+      keycap(g, x, 510, shape);
+      x += 22;
+      text(g, label, x, 512, PX.micro, COL.dim);
+      x += tw(label, PX.micro) + 18;
+    };
+    cap('x', openOnly ? 'OPEN' : 'OPEN/SEND');
+    cap('o', 'UP');
+    cap('square', 'MARK');
+    cap('triangle', 'ACTIONS');
+    text(g, 'L/R', x, 512, PX.micro, COL.dim); x += tw('L/R', PX.micro) + 6;
+    text(g, 'PANE', x, 512, PX.micro, COL.dim); x += tw('PANE', PX.micro) + 18;
+    text(g, 'START', x, 512, PX.micro, COL.dim); x += tw('START', PX.micro) + 6;
+    text(g, 'SERVER', x, 512, PX.micro, COL.dim); x += tw('SERVER', PX.micro) + 18;
+    text(g, 'SELECT', x, 512, PX.micro, COL.dim); x += tw('SELECT', PX.micro) + 6;
+    text(g, 'SITES', x, 512, PX.micro, COL.dim);
+  }
+
+  // ---------- ACTIONS chrome ----------
+
+  function drawActionsLegend(g) {
+    let x = M;
+    const cap = (shape, label) => {
+      keycap(g, x, 510, shape);
+      x += 22;
+      text(g, label, x, 512, PX.micro, COL.dim);
+      x += tw(label, PX.micro) + 18;
+    };
+    cap('x', 'RUN');
+    cap('o', 'CLOSE');
+    text(g, 'UP/DOWN', x, 512, PX.micro, COL.dim);
+    x += tw('UP/DOWN', PX.micro) + 6;
+    text(g, 'ACTION', x, 512, PX.micro, COL.dim);
+  }
+
+  function drawActionRow(g, a, x, y, w, h, selected) {
+    if (selected) {
+      g.fillStyle = COL.cyan;
+      g.fillRect(x + 1, y, w - 2, h);
+    } else if (a.disabled) {
+      wash(g, x + 1, y, w - 2, h, 0.02);
+    }
+    const labelColor = selected ? COL.field : (a.disabled ? COL.dim : COL.white);
+    const descColor = selected ? COL.field : (a.disabled ? COL.dim : (a.danger ? COL.yellow : COL.dim));
+    text(g, a.label, x + 32, y + 5, PX.label, labelColor);
+    text(g, a.desc, x + 32, y + 23, PX.micro, descColor);
+  }
+
+  function drawActionPanel(g, s) {
+    panel(g, 18, 76, 552, 360, COL.cyan);
+    text(g, s.paneTitle, 32, 84, PX.label, COL.dim, 2);
+    text(g, s.path, 32, 102, PX.micro, COL.cyan);
+    right(g, s.band, 556, 87.5, PX.micro, s.bandColor);
+    hair(g, 32, 119, 524);
+    s.actions.forEach((a, i) => drawActionRow(g, a, 18, 124 + i * 44, 552, 44, i === s.selected));
+  }
+
+  function drawTarget(g, s) {
+    panel(g, 582, 76, 360, 360, COL.cyan);
+    text(g, 'TARGET', 596, 84, PX.label, COL.dim, 2);
+    text(g, s.pane, 596, 108, PX.label, COL.cyan);
+    text(g, s.targetPath || s.path, 596, 126, PX.micro, COL.cyanDim);
+    text(g, s.summary.name, 596, 148, PX.value, COL.white);
+    text(g, s.summary.label, 596, 178, PX.label, s.summary.labelColor || COL.yellow);
+    hair(g, 596, 210, 332);
+    text(g, 'DESTINATION', 596, 224, PX.label, COL.dim);
+    right(g, s.dest, 928, 224, PX.label, COL.white);
+    text(g, s.consequence1, 596, 300, PX.label, COL.white);
+    text(g, s.consequence2, 596, 320, PX.micro, COL.dim);
+    text(g, s.note, 596, 400, PX.micro, s.noteColor);
+  }
+
+  // ---------- states ----------
+
+  const BOTH_LOCAL = {
+    panes: [
+      {
+        x: 18, path: 'UX0:/DATA/', active: false, selected: 1, marks: 1,
+        rows: [
+          { name: '..', value: 'UP', dim: true },
+          { name: 'BACKUP', value: 'DIR' },
+          { name: 'CONFIG.TXT', value: '1.2 KB' },
+          { name: 'NOTES.TXT', value: '4.1 KB', mark: true },
+          { name: 'SAVE.DAT', value: '128 KB', risk: true },
+          { name: 'VITAFTPSHELL', value: 'DIR' }
+        ]
+      },
+      {
+        x: 486, path: 'UMA0:/GAMES/', active: true, selected: 1, marks: 0,
+        rows: [
+          { name: '..', value: 'UP', dim: true },
+          { name: 'ACTION.VPK', value: '12.4 MB' },
+          { name: 'HOMEBREW', value: 'DIR' },
+          { name: 'PATCHES', value: 'DIR' },
+          { name: 'README.TXT', value: '2.1 KB' },
+          { name: 'SAVES', value: 'DIR' }
+        ]
+      }
+    ],
+    dock: {
+      word: 'IDLE', subject: 'LOCAL', path: 'UMA0:/GAMES/',
+      right: '0 MARKED', hint: 'NO REMOTE VIEW', hintColor: COL.yellow
+    }
+  };
+
+  const ALL_DRIVES = {
+    panes: [
+      {
+        x: 18, path: 'ALL DRIVES', active: true, selected: 6, marks: 0,
+        rows: [
+          { name: 'UX0:', value: 'DRIVE', risk: true },
+          { name: 'UR0:', value: 'DRIVE', risk: true },
+          { name: 'UMA0:', value: 'DRIVE', risk: true },
+          { name: 'IMC0:', value: 'DRIVE', risk: true },
+          { name: 'GRO0:', value: 'DRIVE RO', risk: true },
+          { name: 'GRW0:', value: 'DRIVE', risk: true },
+          { name: 'APP0:', value: 'DRIVE RO', risk: true }
+        ]
+      },
+      {
+        x: 486, path: 'UX0:/DATA/', active: false, selected: 2, marks: 2,
+        rows: [
+          { name: '..', value: 'UP', dim: true },
+          { name: 'BACKUP', value: 'DIR' },
+          { name: 'CONFIG.TXT', value: '1.2 KB', mark: true },
+          { name: 'NOTES.TXT', value: '4.1 KB', mark: true },
+          { name: 'SAVE.DAT', value: '128 KB', risk: true }
+        ]
+      }
+    ],
+    dock: {
+      word: 'IDLE', subject: 'LOCAL', path: 'ALL DRIVES',
+      right: '0 MARKED', hint: 'X TO OPEN'
+    }
+  };
+
+  const RIGHT_LOCAL_ACTIONS = {
+    paneTitle: 'LOCAL ACTIONS', pane: 'PANE', path: 'UMA0:/GAMES/', targetPath: '--',
+    band: '1 ITEM', bandColor: COL.dim, selected: 6,
+    actions: [
+      { label: 'UPLOAD', desc: 'NO REMOTE VIEW', disabled: true },
+      { label: 'COPY', desc: 'TO THIS FOLDER' },
+      { label: 'MOVE', desc: 'TO THIS FOLDER' },
+      { label: 'NEW FOLDER', desc: 'IN THIS FOLDER' },
+      { label: 'RENAME', desc: 'NEW NAME' },
+      { label: 'DELETE', desc: 'CANNOT BE UNDONE', danger: true },
+      { label: 'SWITCH TO REMOTE', desc: 'THE RIGHT PANE' }
+    ],
+    summary: { name: '--', label: 'PANE' },
+    dest: '--',
+    consequence1: 'SWITCH TO REMOTE',
+    consequence2: 'THE OTHER VIEW KEEPS ITS PLACE.',
+    note: 'THE SESSION AND ITS TRANSFER STAY', noteColor: COL.dim,
+    dock: { word: 'READY', subject: 'SWITCH TO REMOTE', path: '', right: 'PANE', hint: 'X TO RUN' }
+  };
+
+  const STATES = { s1: BOTH_LOCAL, s2: ALL_DRIVES, s3: RIGHT_LOCAL_ACTIONS };
+
+  function drawWorkspace(g, s) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawHeader(g, 'WORKSPACE');
+    s.panes.forEach(p => drawPane(g, p));
+    drawDock(g, s.dock);
+    drawWorkspaceLegend(g, true);
+  }
+
+  function drawActions(g, s) {
+    g.fillStyle = COL.field; g.fillRect(0, 0, W, H);
+    drawHeader(g, 'ACTIONS');
+    drawActionPanel(g, s);
+    drawTarget(g, s);
+    drawDock(g, s.dock);
+    drawActionsLegend(g);
+  }
+
+  function render(id) {
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+    const scale = 2;
+    canvas.width = W * scale;
+    canvas.height = H * scale;
+    const g = canvas.getContext('2d');
+    g.scale(scale, scale);
+    g.imageSmoothingEnabled = false;
+    if (id === 's3') drawActions(g, STATES[id]);
+    else drawWorkspace(g, STATES[id]);
+  }
+
+  for (const id of Object.keys(STATES)) render(id);
+
+  const params = new URLSearchParams(location.search);
+  const only = params.get('only');
+  if (only && STATES[only]) {
+    document.body.classList.add('only');
+    if (params.get('big')) document.body.classList.add('big');
+    document.querySelectorAll('.dir').forEach(el => {
+      el.classList.toggle('on', el.dataset.scene === only);
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -104,6 +104,7 @@ invent a second alert colour, a new type size, or a decorative icon.
 | 2026-11-15 | [Launcher icon](2026-11-15-launcher-icon.md) | Settled: two-arrow mark, mask-safe (D84) |
 | 2026-11-15 | [Launcher icon render](2026-11-15-launcher-icon.png) | 4× record, true black field |
 | 2026-11-15 | [Launcher icon with bubble mask](2026-11-15-launcher-icon-bubble.png) | 4× record, 26 px corner cut |
+| 2026-11-17 | [Local workspace states](2026-11-17-local-workspace-states.html) | Both-local workspace, seven-mount ALL DRIVES, seven-row ACTIONS |
 
 The HTML sheets draw at 1:1 with the real 5×7 face; open them in a browser. The
 PNGs are the same canvases at 2× for records.
@@ -114,3 +115,9 @@ the server accepts four sessions with one data transfer at a time (D86). The
 removes the SERVER warning panel and gives the client panel the full right
 column (D88). The 2026-11-08 SERVER sheets remain the historical one-client and
 warning record.
+
+**2026-11-17 amendment:** the local workspace adds the right pane's second local
+view, the seven user mounts with `DRIVE RO` on `app0:` and `gro0:`, and the
+right ACTIONS ledger's seventh switch row at a 360 px panel height (D96-D99).
+The 2026-11-08 WORKSPACE and ACTIONS sheets remain the historical three-mount,
+six-row record.

@@ -20,12 +20,14 @@ hardware screenshot.*
 
 <!-- status:begin -->
 `building`. vitaFTPShell is one PS Vita app with three roles: a passive FTP
-client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
-volumes, and an anonymous read-write FTP server. The seven screens, the
+client, a local file manager over every mounted user volume, and an anonymous
+read-write FTP server on `ux0:`, `ur0:`, and `uma0:`. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
-suites pass. R22 and R23, remote recursive download and upload, are the
-remaining v1 requirements; the console matrix runs once at v1 code freeze
-(D95), so the project is `building`, not `verified`.
+suites pass. The local workspace — a second local pane, the seven user mounts,
+the connect return, and list navigation — is host-complete. R22 and R23, remote
+recursive download and upload, remain the unbuilt v1 requirements; the console
+matrix runs once at v1 code freeze (D95), so the project is `building`, not
+`verified`.
 
 The live state and the single next action are on [the board](PROJECTS.md); the
 hardware evidence is in [the evidence record](docs/VERIFICATION.md).
@@ -36,8 +38,8 @@ hardware evidence is in [the evidence record](docs/VERIFICATION.md).
 | Role | Behavior |
 |---|---|
 | **FTP client** | Saved sites with anonymous or login credentials, passive FTP only, remote browsing, download, upload, create, rename, and delete. MLSD first, LIST fallback, Unix and DOS listings. Remote recursive transfer is a v1 requirement that is planned, not built (R22/R23, D65). |
-| **File manager** | Browse the mounted `ux0:`, `ur0:`, and `uma0:` volumes, multi-select, local recursive folder copy, move, and delete, with protected-path rules and explicit confirmations. |
-| **FTP server** | Anonymous read-write FTP on the mounted volumes while the app is open. OFF at launch, up to four clients with one data transfer at a time, with the ON state and client count visible on every screen. |
+| **File manager** | Browse every mounted user volume (`ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, `app0:`), with `app0:` and `gro0:` read-only; a second local pane on the right; multi-select, local recursive folder copy, move, and delete, with protected-path rules and explicit confirmations. |
+| **FTP server** | Anonymous read-write FTP on the mounted `ux0:`, `ur0:`, and `uma0:` volumes while the app is open. OFF at launch, up to four clients with one data transfer at a time, with the ON state and client count visible on every screen. |
 | **Transfer dock** | One network transfer and one local job may run together, each with its own queue. Progress, size, speed, and cancel without blocking the workspace; a failed item is retried by running it again. |
 
 Not in v1: SFTP, FTPS, HTTP, WebDAV, SMB, resume, sync, background transfers,
@@ -97,7 +99,7 @@ file. To install manually, copy the VPK from `build/` to `ux0:data/` and open it
 in VitaShell.
 
 Installing requires **Enable Unsafe Homebrew**. The server and the local file
-manager need unrestricted access to `ur0:` and `uma0:`, which the safe authid
+manager need unrestricted access to the mounted volumes, which the safe authid
 refuses (D32).
 
 ## Safety model
@@ -114,11 +116,15 @@ land:
 - The local manager may write inside `ur0:tai` and `ux0:tai` without the
   retired high-risk prompt. Nothing in the app writes, renames, or deletes
   `ur0:tai/boot_config.txt`.
-- Volume roots, `ur0:data`, `ux0:data`, and the `tai` folders cannot be renamed,
-  moved, or deleted. Every check uses the canonical path, and a rename checks
-  both operands.
+- Volume roots, `ur0:data`, `ux0:data`, `imc0:data`, and the `tai` folders cannot
+  be renamed, moved, or deleted. Every check uses the canonical path, and a
+  rename checks both operands.
+- `app0:` and `gro0:` are read-only: a write, create, paste, rename, move,
+  delete, or download destination there is refused and changes nothing (D96).
 - Every destructive action confirms and names its items. Cancel changes
   nothing.
+- A paste whose items already live in the destination asks CANCEL or SAVE
+  DUPLICATES; a mixed batch asks once and skips the items already there (D98).
 - Saved passwords are stored unencrypted on the console and are never written to
   the session log.
 - One network transfer and one local job may run together when their paths do not overlap; a collision asks WAIT/SKIP/CANCEL (D72).

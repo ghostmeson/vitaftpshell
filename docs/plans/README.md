@@ -12,7 +12,7 @@ unit; do not use this folder as a scratchpad.
 | Plan | Kind | Status |
 |---|---|---|
 | [`2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | Implementation-ready unified plan | Behavior source of truth; the 2026-11-14 and 2026-11-16 correction passes applied; R22/R23 are planned and not built, and the console matrix is the open row |
-| [`2026-11-16-2011-feat-local-workspace-plan.md`](2026-11-16-2011-feat-local-workspace-plan.md) | Implementation-ready unified plan | Enriched in place with the Planning Contract and nine implementation units; ready for `ce-work` |
+| [`2026-11-16-2011-feat-local-workspace-plan.md`](2026-11-16-2011-feat-local-workspace-plan.md) | Implementation-ready unified plan | Implemented on the host through its nine units; matrix rows M24-M27 are pending (the `imc0:` leg is BLOCKED on the PCH-1000) |
 
 Completed plans move to [`archive/`](archive/README.md), one index row each.
 A plan is archived only after its units are absorbed by `../DECISIONS.md`,

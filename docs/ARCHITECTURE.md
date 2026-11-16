@@ -169,7 +169,7 @@ arena.
 - `src/core/handoff.c` carries commands and events across fixed rings. A server
   stop and a cancel have dedicated slots and are never lost to a full command
   ring; progress is a coalesced seqlock latch, so a terminal state cannot be
-  overwritten; each pane has three listing generations; the site book uses a
+  overwritten; each view has three listing generations; the site book uses a
   16 KiB bulk lane (D49); the server state and a worker confirmation are
   latched; the query result is a fixed record.
 
@@ -177,17 +177,17 @@ arena.
 
 - `src/ui/` is a pure presentation layer. `render.c` dispatches the current
   screen, draws the shared header, and never includes a platform header.
-  `workspace.c` and `dock.c` own the two panes and the five dock states; the
-  other five files own SITES, SITE EDITOR, ACTIONS, SERVER, CONFIRM, and the
-  text-entry notice. `parts.c` holds the shared frame, keycap, wash, and slab
-  primitives.
+  `workspace.c` and `dock.c` own the two pane slots, the three views, and the
+  dock states; the other five files own SITES, SITE EDITOR, ACTIONS, SERVER,
+  CONFIRM, and the text-entry notice. `parts.c` holds the shared frame, keycap,
+  wash, and slab primitives.
 - `font_set_trace` is a host-only trace hook: the render suites assert the
   string, position, and colour, because glyph rectangles alone cannot name a
   label. The app leaves the hook NULL.
 - `src/app/app.c` owns the frame loop and `UiState`; `src/app/worker.c` owns the
   client, server, queue, local executor, site book, settings, and log. The app
   polls input, decodes repeat, feeds the reducer, pushes commands, drains
-  events, acquires one listing generation per pane per frame, draws, and
+  events, acquires one listing generation per view per frame, draws, and
   releases. It never opens a socket or touches a file.
 - In the product the worker runs on a POSIX thread. The host integration test
   passes `worker_thread = 0` and calls `worker_step` inline through `app_tick`;
@@ -256,7 +256,7 @@ on its own):
   wins, a torn record is retried, and an older sample is dropped when a newer
   terminal event is delivered. The server state is latched separately and stays
   readable after the ring drains.
-- **Listings** do not cross the rings. Each pane has three generations; the
+- **Listings** do not cross the rings. Each view has three generations; the
   worker reserves a slot the reader does not hold, fills it, and publishes it
   with a release store. The UI keeps one generation until it releases it at a
   frame boundary, so a draw cannot see rows change under it. The app applies a
@@ -281,10 +281,11 @@ Every unverified Vita behaviour is a `[C]` comment in the adapter that owns it:
   `net_link` converts with `ntohl` (D59). The 4 MiB pool and 128 backlog match
   the working ftpvitalib shape.
 - `psp2_fs.c`: the `0x3001` devctl free-space call is proven only on `ux0:`;
-  `ur0:`/`uma0:` report unknown and the worker caches the value per volume
-  (D59); `mtime` is reported unknown; `sceIoRename` replace-on-existing is
-  unverified, so `rename_replaces()` returns 0 and the aside fallback is always
-  used (D48).
+  every other mount, including `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, and
+  `app0:`, reports unknown and the worker caches the value per volume so the UI
+  renders `--` (D59); `mtime` is reported unknown; `sceIoRename`
+  replace-on-existing is unverified, so `rename_replaces()` returns 0 and the
+  aside fallback is always used (D48).
 - `psp2_input.c`: the plain peek reports shoulders as L1/R1; the wide analog
   mode reports 0..255 centred at 128.
 - `psp2_ime.c`: the adapter follows the SDK IME sample — `sceAppUtilInit`, then
@@ -344,18 +345,35 @@ One module owns this and all three roles call it.
   write, create, rename, and delete in the app data folder and the `tai`
   folders; only the system-path denials and `boot_config.txt` remain (D87). A
   rename checks both operands.
-- **Protected:** volume roots, `ur0:data`, `ux0:data`, and the `tai` directories
-  cannot be renamed, moved, or deleted, by any role.
+- **Volume table:** the local panes and the server read one table in
+  `src/core/path.c`: `ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, and
+  `app0:` in display order, each with a server-exposure flag, a read-only flag,
+  and a protected-data flag. The local list is every table row whose mount
+  answers, built on entry; save data (`savedata0:`) and the system partitions
+  (`vs0:`, `os0:`) are not in the table (D96).
+- **Read-only:** `gro0:` and `app0:` return `PATH_READ_ONLY` from the shared
+  write check, which the core maps to `READ-ONLY MOUNT`; a read and a copy from
+  the mount stay allowed. The read-only row value reads `DRIVE RO`.
+- **Protected:** volume roots, `ur0:data`, `ux0:data`, `imc0:data`, and the
+  `tai` directories cannot be renamed, moved, or deleted, by any role.
 - **Risk mark for the local manager:** the `tai` folders and their contents,
-  volume roots, `ur0:data` and `ux0:data` themselves, and the files that control
-  loading (`config.txt`, `plugins.txt`, `*.skprx`, `*.suprx`) stay classified
-  high-risk and carry the yellow row mark. The high-risk confirmation is
-  retired; protected paths and `boot_config.txt` are hard denials (D87).
+  volume roots, `ur0:data`, `ux0:data`, and `imc0:data` themselves, and the
+  files that control loading (`config.txt`, `plugins.txt`, `*.skprx`,
+  `*.suprx`) stay classified high-risk and carry the yellow row mark. The
+  high-risk confirmation is retired; protected paths and `boot_config.txt` are
+  hard denials (D87).
+- **`app0:` alias:** `app0:` and `ux0:app/VFTPSHELL` compare as one location for
+  the same-folder, ancestry, and reservation checks, while canonical and
+  display paths keep the spelling the user typed. The install tree stays
+  writable through its `ux0:` spelling and a write through `app0:` is refused
+  as read-only (D99). The equality is a `[C]` platform claim.
 - A remote-supplied name containing `/`, `\`, `:`, NUL, or a `..` segment is
   refused before any local path is built.
 
-The server's virtual root is `/`, holding `UX0:`, `UR0:`, and `UMA0:`. There is no
-path from an FTP client to any other mount.
+The server's virtual root is `/`, holding `UX0:`, `UR0:`, and `UMA0:`; it filters
+the same volume table on the server-exposure flag in both its path mapping and
+its root listing, so there is no path from an FTP client to any other mount and
+nothing on another mount is created (D96).
 
 ## Persistence and log
 
@@ -388,7 +406,10 @@ Passwords appear in `sites.cfg` by design and never in the log.
 
 The planner produces a plan before anything is touched: the ordered creates,
 copies, renames, and deletes, the conflict decision, and the rollback list. The
-executor walks the plan and reports progress; it makes no policy decisions.
+executor walks the plan and reports progress; it makes no policy decisions. A
+same-folder paste reports a duplicate need rather than a step: SAVE DUPLICATES
+asks the plan again with the free copy name, while a mixed batch records the
+already-here items as skipped and asks the one conflict question (D98).
 The executor is resumable (D72, KTD20): a heap-owned `FsOpRun` holds the step
 cursor, the applied-step list, the copy sub-phase, the open handles, progress,
 and the copy buffer. `fsop_run_step` advances by a byte budget and a bounded
@@ -490,23 +511,32 @@ asserts:
 - every refusal of the dependency rule (a `psp2/` or `vita2d.h` include
   anywhere under `src/` outside the seven-file allowlist fails the run);
 - replies, multiline replies, PASV, and the three listing formats;
-- path joining, parent, volume matching, the risk table, and the denial table;
+- path joining, parent, volume matching, the volume table and its read-only
+  flag, the risk table, and the denial table;
+- the server's three-mount exposure and its refusal of a path on any other
+  mount;
 - site round-trip, corrupt-file handling, atomic save, log formatting, and
   rotation;
 - the client and the server against a scripted peer in each direction;
 - queue order, the active network item, the conflict decision, and
   the fake-job walk;
 - planner order, merge, the conflict gate, the copy-into-itself refusal, the
-  volume-root refusal, protected deletes, and the plan caps;
+  volume-root and read-only refusals, protected deletes, the copy-name rule,
+  the same-folder duplicate question, the mixed batch, and the plan caps;
 - executor overwrite with and without replace-on-rename, stale-aside recovery,
   cancel mid-copy, a kill at each write step, the destination sync, per-file
   move semantics, rollback, partial delete reporting, and `MOVE INCOMPLETE`;
-- the input repeat decoder, every input-table row, marks across CWD/L/R, volume
-  and connection clearing, dock focus, confirm scrolling, IME cancel, and the
-  volume-root delete refusal;
+- the input repeat decoder, every input-table row, the stick step, list wrapping,
+  marks across CWD/L/R and a view switch, volume and connection clearing, dock
+  focus, the SITES stick and window reset, confirm scrolling, IME cancel, and
+  the volume-root delete refusal;
 - the handoff: a producer faster than the consumer, a full ring, a coalesced
-  progress stream, a latched server state, three listing generations, and the
-  UI log ring;
+  progress stream, a latched server state, three listing generations per view,
+  and the UI log ring;
+- the three views: per-view folder, cursor, scroll, marks, and listing; the
+  switch preserving the session and a running transfer; the download target;
+  the upload target while the remote view is shown; and the cross-view reload
+  with its vanished-folder fallback;
 - the log format: every event family, the three-generation rotation, the
   percent-encoded fields, and that a password sentinel never appears;
 - `tools/test/tsan.sh` builds the handoff with plain stores and requires a

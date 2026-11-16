@@ -2155,3 +2155,174 @@ pass is fixed, and the affected rows run again on the new build.
 board's next action is the remaining code, not a console run. The matrix grows
 as v1 completes, including the remote-recursion rows when R22/R23 land, and the
 plan points at the matrix instead of duplicating it, so a new row cannot drift.
+
+## D96. The local panes list every user-accessible mount
+
+**Date:** 2026-11-17
+**Status:** accepted; user-directed. It supersedes D53's three-volume list and
+the three-volume local-manager scope in `AGENTS.md`, `README.md`, and
+`docs/PROJECT.md`. The FTP server's exposure is not superseded.
+
+**Context:** The local side was narrower than the console. `ALL DRIVES` offered
+`ux0:`, `ur0:`, and `uma0:` only, so a user with an internal card, a game card,
+or a reason to inspect the app folder needed another tool. A file manager that
+cannot reach the console's storage is a transfer tool with a browser attached,
+which is not the product's reason to exist. An anonymous server, however, must
+not gain new writable surfaces because the local list grew.
+
+**Decision:** One volume table in `src/core/path.c` serves every role. The local
+panes list `ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, and `app0:` in
+that order when mounted. An absent mount is an absent row, not an error, and
+the list is built on entry so a mount inserted or removed while it is open
+appears on the next entry. Save data (`savedata0:`) and the protected system
+partitions (`vs0:`, `os0:`) are not in the table and never appear.
+
+`gro0:` and `app0:` are read-only. Their row value reads `DRIVE RO`; a write,
+create, paste, rename, move, delete, or download destination there is refused
+with `READ-ONLY MOUNT` and changes nothing, while a copy from the mount and a
+read stay allowed. The mount spelling decides, so the install tree stays
+writable through its `ux0:` spelling (D99).
+
+Every listed volume root is protected from rename, move, and delete. `ux0:data`,
+`ur0:data`, and `imc0:data` are protected as system data roots; the `ur0:tai`
+and `ux0:tai` rules are unchanged. Free space is queried at the volume root and
+cached per volume (D59); a value the platform cannot report renders `--`.
+
+The FTP server keeps a fixed three-mount allowlist, `ux0:`, `ur0:`, and
+`uma0:`, independent of the local list. It filters the same table in both its
+path mapping and its root listing, so a server path on `imc0:`, `gro0:`,
+`grw0:`, or `app0:` is refused and creates nothing.
+
+**Consequences:** The local workspace reaches every user-accessible mount while
+the anonymous server's writable surface is unchanged. A read-only destination
+fails before a plan exists instead of surfacing an adapter error. `gro0:` is
+assumed read-only and `grw0:` is assumed writable; both are `[C]` until the
+console confirms them, and a refused `grw0:` write surfaces the platform reason
+rather than a read-only promise. The PCH-1000 cannot mount `imc0:`, so that
+volume's matrix leg is BLOCKED and the host fakes are its only coverage.
+
+## D97. The right pane has local and remote views over one session
+
+**Date:** 2026-11-17
+**Status:** accepted; user-directed. It extends D53's start view and supersedes
+its single-local-pane assumption. It does not change the FTP session rules.
+
+**Context:** Moving files between two folders forced the single local window to
+walk back and forth, losing the source selection and the place in the list. A
+second FTP session or a switchable left pane would double the remote state the
+UI and the worker have to keep coherent. The user asked for a right-pane switch
+that keeps the session and its work alive.
+
+**Decision:** The UI has three views: the left local view, the right remote
+view, and a right local view. The left view is always local and is the stable
+anchor; the right pane shows one of its two views, selected by `right_view`.
+`UiPane` is the view key, so each view owns its folder, cursor, scroll, marks,
+and listing. The left-local value stays at index 0.
+
+The switch is a view change, not a disconnect. The FTP session, its folder,
+cursor, scroll, marks, and any running transfer are preserved, and switching
+back restores the view. The right local view opens at `ALL DRIVES` the first
+time and returns to its last folder for the session; a view whose folder no
+longer exists falls back to `ALL DRIVES` when the failure is discovered. The
+mode is session state: every launch starts left local plus right remote, and
+the mode and the right local folder are not persisted.
+
+The right local view is a full peer of the left: the same actions, marks, free
+space, protection, and one shared clipboard. A download targets the left local
+view; an upload targets the remote view only while it is shown. With both panes
+local, UPLOAD is dim on both with `NO REMOTE VIEW`, Cross on a file starts no
+transfer, the idle hint is row-aware (`X TO OPEN` on a folder or volume,
+`NO REMOTE VIEW` on a file or marked set), and the dock never prints `REMOTE`.
+
+The switch is an ACTIONS row only on the right pane: `SWITCH TO LOCAL` on the
+remote view, `SWITCH TO REMOTE` on the local view. The right panel grows to
+seven rows and both panels grow to 360 px, with the 44 px pitch kept and the
+target panel aligned. A switch is handled in the reducer, emits no worker
+command, and stays live while the remote view is lost or disconnected.
+
+A successful connection started from SITES closes SITES, returns to the
+WORKSPACE, and activates the remote view; when the user has already left SITES,
+the view switches but the current screen and focus stay put. A failed connection
+stays on SITES with its reason.
+
+A local operation reloads any other local view whose folder is the exact parent
+of a changed path, restores the cursor by name, and prunes marks for names that
+are gone; a view showing an unaffected folder stays as it is.
+
+**Consequences:** A user copies between two local folders without losing either
+place, and one FTP session stays singular. Three row arenas total about 5.04 MB
+against the named 6 MB listing-arena budget, asserted by a host test; a fourth
+view is not planned. The ACTIONS panel is 8 px taller than before and still
+clears the dock by 4 px. A hidden view can lose its folder; the fallback happens
+when the view is next listed or shown, not by polling.
+
+## D98. A same-folder paste asks duplicate or cancel
+
+**Date:** 2026-11-17
+**Status:** accepted; user-directed. It supersedes D60's silent same-folder copy
+and its "cross-pane movement remains UPLOAD/DOWNLOAD, not COPY/MOVE" clause.
+
+**Context:** Copying a file into the folder it came from is the sharpest paste
+case: the destination already exists and is the source, so overwrite cannot mean
+anything. The build silently created `A copy.TXT` without telling the user,
+which looks like the copy did nothing or that the original changed. A mixed
+batch made it worse: a prompt that counted already-here items as replacements
+would ask about destinations that can never be replaced.
+
+**Decision:** A paste whose items all already live in the destination asks
+`ITEMS ALREADY HERE` with CANCEL and SAVE DUPLICATES. CANCEL changes nothing.
+SAVE DUPLICATES names each item with the copy rule (`A copy.TXT`, then
+`A copy 2.TXT`) and never overwrites the source; a folder duplicates
+recursively. The duplicate prompt is its own confirm: the destination folder is
+the context line, the item list is the sources, `SAVE DUPLICATES KEEPS THE
+ORIGINAL.` is the warning, CANCEL is focused first, and SAVE DUPLICATES is the
+yellow slab.
+
+A same-folder MOVE stays refused with `ALREADY IN THIS FOLDER` before a plan
+exists. Any other paste with at least one existing destination asks the existing
+OVERWRITE ALL, SKIP EXISTING, and CANCEL prompt once. That prompt counts only
+the destinations that would be replaced; an already-here item is named in the
+list as `STAYS`, counts as skipped, and offers no duplicate choice. In a mixed
+MOVE an already-here item stays in place instead of failing the batch.
+
+The question is decided by the destination path, so it fires in either local
+pane, including a paste in the other pane at the folder the items came from. One
+exported copy-name function is the only owner of the `A copy` rule, so the
+prompt, the preflight, and the plan cannot disagree. A self-copy step is never
+planned.
+
+**Consequences:** A same-folder copy is a visible choice, and a cancel is truly
+a no-op. A batch asks one question and its terminal counts the already-here
+items as skipped. The preflight must see a same-folder item as a destination,
+not skip it: the parent comparison uses the canonical path identity rather than
+`strcmp`, so a case variant or the `app0:` alias is recognised. The current
+build has no overwrite-onto-itself path.
+
+## D99. `app0:` is a comparison-only alias for the install tree
+
+**Date:** 2026-11-17
+**Status:** accepted; the platform equality is a `[C]` claim until the console
+confirms it.
+
+**Context:** `app0:` is how the console names the running application's install
+tree, and `ux0:app/VFTPSHELL` is the same tree through the memory card. Copying
+between the two spellings would otherwise look like a copy between two folders,
+and a same-folder check would miss it. The install tree must stay writable
+through the memory-card spelling so a user can repair a file or replace the
+app's assets, but `app0:` is a read-only mount by platform contract (D96).
+
+**Decision:** `app0:` and `ux0:app/VFTPSHELL` compare as one location for the
+same-folder, ancestry, and reservation checks. Canonical and display paths keep
+the spelling the user typed, so navigation, error text, and the log never
+rewrite a path. The identity is comparison-only: it is not a second name for
+the mount and it creates no writable surface. A write through `app0:` is
+refused as `READ-ONLY MOUNT`; the same path written through its `ux0:` spelling
+is writable. A copy or move between the two spellings is treated as the same
+folder, so a copy duplicates instead of replacing and a move is refused.
+
+**Consequences:** The alias prevents a self-copy or self-move that spelling
+alone would hide, and a reservation on one spelling blocks the other. The
+equality is `[C]`: `app0:` is assumed to resolve to `ux0:app/VFTPSHELL` on 3.65
+Enso. Matrix M24 confirms the mount and its read-only refusal; if the console
+reports a different target, the alias constant moves and the decision is
+superseded.

@@ -15,6 +15,12 @@ deepened: 2026-11-14
 
 **Product Contract preservation (2026-11-14 correction pass):** changed: R35, R38, R39, R40, R67, R68; added R74 and a copy/move Key Decision; updated the "Serialize transfers" and "Multi-select" Key Decisions, the multiple-transfer boundary, AE8, F2, the connect-to-first-listing budget, and the dock Select binding for the existing clear-queue command. The user reported five behavior and visual defects and chose the corrections: cursor-based COPY/MOVE, operation-accurate dock words with one batch result, full local cancel, a cyan cursor slab, an active-pane glow, and red failures. b41 also allows one local job beside one network transfer, superseding the single-slot rule. No other requirement changed.
 
+**Behavior source correction (2026-11-17):** the [local workspace
+plan](2026-11-16-2011-feat-local-workspace-plan.md) settles the volume scope,
+the second local view over one FTP session, the same-folder duplicate prompt,
+and the `app0:` alias (D96-D99). A2, R5, R10, and R28 below describe the shipped
+behavior; the server's three-mount exposure is unchanged.
+
 File paths are repo-relative; this repository is the app.
 
 ## Goal Capsule
@@ -66,7 +72,9 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 ### Actors
 
 - A1. **Vita user.** The anonymous-first collector or the Vita-as-a-drive user, operating the console with a controller.
-- A2. **Local filesystem.** The mounted volumes `ux0:`, `ur0:`, and `uma0:`, including absent volumes.
+- A2. **Local filesystem.** The mounted user volumes `ux0:`, `ur0:`, `uma0:`,
+  `imc0:`, `gro0:`, `grw0:`, and `app0:`, including absent volumes; save data
+  and the system partitions are excluded (D96).
 - A3. **Remote FTP server.** A public archive, personal server, or test server the Vita connects to.
 - A4. **Remote FTP client.** A desktop or other client that connects to the Vita's server mode.
 - A5. **System text input.** The Vita IME used for site fields, paths, and names.
@@ -79,12 +87,12 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 - R2. The local pane starts at the virtual `ALL DRIVES` root that lists the mounted volumes (D53); opening a volume shows its folders. The last local path is remembered for the upload fallback when it still exists. The pane shows only volumes that respond.
 - R3. The remote pane starts at the server's working directory after login; before a connection it shows a not-connected state and no stale rows. While loading it names the path being read; an empty folder says it is empty; after a control-channel drop it keeps its rows but disables row actions until reconnect.
 - R4. The active pane shows its full path; the remote pane also shows the site name and `host:port`.
-- R5. Up and Down move the row selection; the left stick scrolls the active list without changing selection; the selection stays visible.
+- R5. Up and Down move the row selection and wrap at both ends, except that Down on the last row focuses the transfer dock while either lane has an active or queued item; the left stick moves the selection by its deflection, one row at the deadzone edge up to five at full deflection, at the 100 ms cadence, with the view following; the selection stays visible.
 - R6. Cross opens the selected directory; on a file or marked set it transfers to the other pane when the other side is connected. A directory under the cursor opens even when marks exist. With no remote session, it reports NOT CONNECTED, starts no transfer, and does not auto-connect.
 - R7. Circle goes to the parent directory; at a volume root or remote `/` it does nothing and says so.
 - R8. L and R switch the active pane and preserve each pane's path and selection.
 - R9. Square marks or unmarks the selected row; the header shows the marked count and total known size. Marks are pane-scoped and persist across directory changes and L/R switches; when the cursor is not on a directory, Cross acts on the marked set whenever the count is above zero, and marks clear when the pane's connection or volume root changes.
-- R10. Triangle opens SITES, Start opens SERVER, and Select opens ACTIONS for the active pane. The per-screen bindings below are authoritative; every screen lists its controls in the dock or strip.
+- R10. Triangle opens ACTIONS, Start opens SERVER, and Select opens SITES. The per-screen bindings below are authoritative; every screen lists its controls in the dock or strip.
 
 | Screen | Up and Down | Accept | Back or cancel |
 |---|---|---|---|
@@ -122,7 +130,7 @@ The cost is not one slow transfer. It is the habit of leaving the console to do 
 
 **Local file manager**
 
-- R28. The local pane lists files and directories on the mounted subset of `ux0:`, `ur0:`, and `uma0:`; an absent volume is absent, not an error row, and no other mount is listed. The pane names a loading path, an empty folder, and an unavailable volume instead of showing a blank list.
+- R28. The local pane lists files and directories on every mounted user volume — `ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, and `app0:` in that order — while save data and the system partitions never appear; `gro0:` and `app0:` are read-only and the pane names the read-only value (D96). An absent volume is absent, not an error row, and the list is built on entry. The pane names a loading path, an empty folder, and an unavailable volume instead of showing a blank list.
 - R29. Local operations include create folder, rename, delete, copy, and move, on one item or a multi-selection.
 - R30. Folder copy, move, and delete recurse; the confirmation names the item count and total known size.
 - R31. Copy and move work across volumes; a copy or move from a path into itself or its descendant is refused.

@@ -8,12 +8,14 @@ anything.
 
 <!-- status:begin -->
 `building`. vitaFTPShell is one PS Vita app with three roles: a passive FTP
-client, a local file manager over the mounted `ux0:`, `ur0:`, and `uma0:`
-volumes, and an anonymous read-write FTP server. The seven screens, the
+client, a local file manager over every mounted user volume, and an anonymous
+read-write FTP server on `ux0:`, `ur0:`, and `uma0:`. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
-suites pass. R22 and R23, remote recursive download and upload, are the
-remaining v1 requirements; the console matrix runs once at v1 code freeze
-(D95), so the project is `building`, not `verified`.
+suites pass. The local workspace — a second local pane, the seven user mounts,
+the connect return, and list navigation — is host-complete. R22 and R23, remote
+recursive download and upload, remain the unbuilt v1 requirements; the console
+matrix runs once at v1 code freeze (D95), so the project is `building`, not
+`verified`.
 
 The live state and the single next action are on [the board](PROJECTS.md); the
 hardware evidence is in [the evidence record](docs/VERIFICATION.md).
@@ -47,6 +49,10 @@ shape; the transfer dock is where work is visible.
 ## Settled scope — do not reopen without new evidence
 
 - v1 ships all three roles: client, local file manager, and FTP server.
+- The local panes list every mounted user volume — `ux0:`, `ur0:`, `uma0:`,
+  `imc0:`, `gro0:`, `grw0:`, and `app0:` in table order — with `app0:` and
+  `gro0:` read-only; save data and the system partitions are excluded (D96).
+  The right pane can become a second local view over one FTP session (D97).
 - The server is anonymous read-write on the mounted `ux0:`, `ur0:`, and `uma0:`
   volumes, OFF at launch, and accepts up to four clients with one data transfer
   at a time (D86).
@@ -65,8 +71,8 @@ shape; the transfer dock is where work is visible.
 - The visual layout is settled in `docs/DESIGN.md`. Do not invent pane geometry,
   dock height, or screen composition in code.
 - GPLv3. Keep the license and the third-party notices intact.
-- One `UNSAFE` eboot. The server and the local pane need all three volumes, and
-  the safe authid refuses them (D32).
+- One `UNSAFE` eboot. The server and the local panes need the mounted volumes,
+  and the safe authid refuses them (D32).
 - The local manager and the server may write inside `ur0:tai` and `ux0:tai`;
   the server exposes the app's own data folder. `ur0:tai/boot_config.txt` is
   denied for every role (D87).
@@ -145,11 +151,16 @@ Policy and UI state must run on the host against fake `NetPort`, `FsPort`,
 - reply parsing, multiline replies, and passive-mode parsing;
 - Unix, DOS, and MLSD listing parsing;
 - path joining, parent, and the protected-path rules;
+- the volume table, the seven-token path rules, the read-only refusals, and the
+  server's three-mount exposure;
 - batch conflict decisions and queue order;
 - local recursive folder planning and the copy-into-itself refusal;
+- the same-folder duplicate prompt, the mixed batch, and the copy-name rule;
 - cancellation and partial-file cleanup decisions;
 - server command handling and path denial;
 - the input reducer and screen transitions;
+- the stick step, list wrapping, the site-book window, and the dock entry;
+- the three views, the right-pane switch, and the cross-view reload;
 - the transfer slot, the local plan and rollback, and the handoff rings.
 
 A test that only proves a function returns a constant is not a test. A hardware
@@ -173,16 +184,17 @@ run is the only evidence that promotes the project to `verified`.
    the `ACCESS READ-WRITE` readout, and the client count stay visible. The SERVER
    warning panel is removed (D88); the README and project docs still state the
    anonymous exposure and the `ur0:tai/boot_config.txt` denial.
-4. **Protected paths.** Volume roots, `ur0:data`, `ux0:data`, `ur0:tai`, and
-   `ux0:tai` cannot be renamed, moved, or deleted. The server and the local
-   manager may read and write inside the app data folder and the `tai` folders;
-   `ur0:tai/boot_config.txt` stays denied for every role (D87). The local
-   high-risk confirmation is retired; the yellow risk mark remains a warning.
-   Every check uses the canonical path from D42, and a rename checks both
-   operands.
-5. **Never delete or recreate a system directory.** `ur0:`, `ux0:`, `uma0:`,
-   `ur0:data`, `ux0:data`, `ur0:tai`, and `ux0:tai` belong to the console. The
-   app creates only its own data folder.
+4. **Protected paths.** Volume roots, `ur0:data`, `ux0:data`, `imc0:data`,
+   `ur0:tai`, and `ux0:tai` cannot be renamed, moved, or deleted. The server and
+   the local manager may read and write inside the app data folder and the `tai`
+   folders; `ur0:tai/boot_config.txt` stays denied for every role (D87). The
+   local high-risk confirmation is retired; the yellow risk mark remains a
+   warning. Every check uses the canonical path from D42, and a rename checks
+   both operands.
+5. **Never delete or recreate a system directory.** Every volume root —
+   `ur0:`, `ux0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, and `app0:` — and
+   `ur0:data`, `ux0:data`, `imc0:data`, `ur0:tai`, and `ux0:tai` belong to the
+   console. The app creates only its own data folder.
 6. **Destructive actions confirm.** The confirmation names the items and says
    delete cannot be undone. Cancel changes nothing.
 7. **No secrets in logs.** Passwords never enter the session log or an error
@@ -272,7 +284,8 @@ remote-pane session/action rules, and the remote refresh/name/upload/folder
 rules; D85-D91 record the server sessions, access policy, warning removal, kept
 download, owner metadata, and the SIZE upload fallback; D92-D94 record the
 per-session data ports, the one-fact-one-home rule, and the documentation gate;
-D95 records the one-pass verification sequencing.
+D95 records the one-pass verification sequencing; D96-D99 record the volume
+scope, the right-pane view model, the same-folder prompt, and the `app0:` alias.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
@@ -323,7 +336,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D95
+    DECISIONS.md       numbered decisions, D1-D99
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     VERIFICATION.md    hardware matrix, build evidence, and the test record
     THIRD_PARTY.md     reused code, licenses, protocol references
