@@ -2,6 +2,8 @@
 
 #include "core/ftp/server.h"
 
+#include "core/ftp/limits.h"
+
 #include "core/fmt.h"
 
 #include <stdarg.h>
@@ -11,7 +13,6 @@
 #include <time.h>
 
 #define SERVER_TX_MAX 16384
-#define SERVER_MAX_CLIENTS 4
 #define SERVER_DATA_BUF 8192
 #define SERVER_DATA_BYTES_PER_TICK (32u * 1024u)
 #define SERVER_DATA_SLICE_MS 6
@@ -23,10 +24,11 @@
 #define SERVER_ACCEPT_BATCH 4
 #define SERVER_TX_HIGH_WATER (SERVER_TX_MAX * 3 / 4)
 #define SERVER_LINK_CHECK_MS 1000
-/* Four data ports follow the control port, so 65531 is the highest control
- * port whose last slot port (control+4) still fits uint16_t (R6). */
-#define SERVER_PORT_MIN 1024
-#define SERVER_PORT_MAX 65531
+/* The slot count and the port range live in core/ftp/limits.h, so the
+ * server, the settings loader, and the port editor cannot disagree. */
+#define SERVER_MAX_CLIENTS FTP_SERVER_MAX_CLIENTS
+#define SERVER_PORT_MIN FTP_SERVER_PORT_MIN
+#define SERVER_PORT_MAX FTP_SERVER_PORT_MAX
 
 typedef enum {
     SDATA_LIST = 0,

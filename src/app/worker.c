@@ -7,6 +7,7 @@
 
 #include "core/cause.h"
 #include "core/fmt.h"
+#include "core/ftp/limits.h"
 #include "core/fsop_plan.h"
 #include "core/fsop_run.h"
 #include "core/logev.h"
@@ -31,10 +32,10 @@
 #define WORKER_LOCAL_SLICE_MS 6
 #define WORKER_LOCAL_STEPS_MAX 16
 #define WORKER_CONFIRM_ITEMS HANDOFF_CONFIRM_ITEMS
-/* Four data ports follow the control port, so 65531 is the highest startable
- * port; the editor and the start path use the same ceiling (R6). */
-#define WORKER_SERVER_PORT_MIN 1024
-#define WORKER_SERVER_PORT_MAX 65531
+/* The editor and the start path share the server's own range, so a port the
+ * user can enter is a port the server can bind. */
+#define WORKER_SERVER_PORT_MIN FTP_SERVER_PORT_MIN
+#define WORKER_SERVER_PORT_MAX FTP_SERVER_PORT_MAX
 
 /* Which prompt owns the answer. A bare int let the local-action arm vanish
  * without a compiler warning; the enum makes a missing case loud. */
@@ -226,6 +227,7 @@ static void log_error(Worker *worker, UiPane pane, const char *text,
 static void log_detail(Worker *worker, LogEvent kind, const char *detail);
 static void enqueue_transfer(Worker *worker, const UiCommand *command);
 static void pump_queue(Worker *worker);
+static void upload_preflight_clear(Worker *worker);
 static void start_transfer_item(Worker *worker, const XferItem *item);
 static void pump_remote_actions(Worker *worker);
 static void worker_list_local(Worker *worker, const char *path);
@@ -2102,14 +2104,8 @@ static void batch_reset(Worker *worker)
     worker->batch_conflict_decided = 0;
     worker->batch_conflict = XFER_CONFLICT_NONE;
     /* A probe belongs to one batch; a result that arrives after its batch
-     * ended must not decide the next one. The token is what makes that true,
-     * so an answer cannot match even the same destination path again (KTD3). */
-    worker->upload_stat_active = 0;
-    worker->upload_stat_ready = 0;
-    worker->upload_stat_token++;
-    worker->upload_stat_refresh_used = 0;
-    worker->upload_stat_refresh_active = 0;
-    worker->upload_stat_refresh_done = 0;
+     * ended must not decide the next one (KTD3). */
+    upload_preflight_clear(worker);
 }
 
 /*
@@ -2488,17 +2484,28 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
  * captured here, not when the answer arrives: `batch_reset` moves the token on
  * while the probe flies, and the answer must still say which item it was asked
  * for (KTD3). */
-static void upload_stat_begin(Worker *worker, const char *destination,
-                              int use_size)
+/* A probe belongs to one item and one batch.  Dropping it moves the token on
+ * and clears the refresh latches together, so an answer that outlives its item
+ * matches nothing, even when the next item reuses the same destination path
+ * (KTD3).  One helper because three sites drop a preflight and a missed latch
+ * stalls the lane. */
+static void upload_preflight_clear(Worker *worker)
 {
-    worker->upload_stat_token++;
-    worker->upload_stat_answer_token = worker->upload_stat_token;
-    worker->upload_stat_active = 1;
+    worker->upload_stat_active = 0;
     worker->upload_stat_ready = 0;
-    worker->upload_stat_used_size = use_size;
+    worker->upload_stat_token++;
     worker->upload_stat_refresh_used = 0;
     worker->upload_stat_refresh_active = 0;
     worker->upload_stat_refresh_done = 0;
+}
+
+static void upload_stat_begin(Worker *worker, const char *destination,
+                              int use_size)
+{
+    upload_preflight_clear(worker);
+    worker->upload_stat_answer_token = worker->upload_stat_token;
+    worker->upload_stat_active = 1;
+    worker->upload_stat_used_size = use_size;
     fmt_copy(worker->upload_stat_path, sizeof(worker->upload_stat_path),
              destination);
 }
@@ -3243,11 +3250,7 @@ static void cancel_network_transfer(Worker *worker)
         /* A preflight answer that outlived its item must not decide the next
          * one (the client op, if still active, is ignored on arrival). */
         worker->upload_stat_ready = 0;
-        worker->upload_stat_active = 0;
-        worker->upload_stat_refresh_used = 0;
-        worker->upload_stat_refresh_active = 0;
-        worker->upload_stat_refresh_done = 0;
-        worker->upload_stat_token++;
+        upload_preflight_clear(worker);
         (void)xfer_cancel_active(&worker->queue, NULL);
         worker->batch_done++;
         batch_finish(worker);
