@@ -30,11 +30,11 @@
 #include "fake_clock.h"
 #include "fake_ftp_client.h"
 #include "fake_fs.h"
-#include "fake_ftpd.h"
 #include "fake_ime.h"
 #include "fake_input.h"
 #include "fake_log.h"
 #include "fake_net.h"
+#include "fake_peer.h"
 
 static int s_failures;
 
@@ -82,171 +82,27 @@ static ClockPort s_clock = {NULL, paced_now, paced_sleep};
 #define TICK_LIMIT 4000
 #define PEER_SPIN_LIMIT 5000000u
 
-enum {
-    MLST_NORMAL = 0,
-    MLST_UNSUPPORTED
-};
-
+/*
+ * The peer thread and its stop flag. The flag is the only value the two
+ * threads share: the scripted peer and the fake sockets under it are touched
+ * by this thread and by the app's worker, and fake_net's own mutex covers the
+ * sockets both of them use.
+ */
 typedef struct {
-    const char *listing;
-    /* The second listing the upload preflight asks for; NULL serves `listing`
-     * again. */
-    const char *refresh_listing;
-    const char *payload;
-    const char *exists_path;
-    uint64_t exists_size;
-    int mlst_mode;
-    int size_supported;
-    int hold_data;
-    int dir_on_refresh;
-} PeerConfig;
-
-typedef struct {
-    PeerConfig cfg;
-    FakeFtpd server;
-    NetSocket *control;
-    NetSocket *data;
-    NetSocket *stor_data;
-    int listings;
-    int sizes;
-    int retrs;
-    int aborts;
-    int stors;
+    FakePeer *peer;
     int stop;
-} Peer;
-
-static void peer_serve(Peer *peer)
-{
-    char line[512];
-
-    if (peer->stor_data != NULL) {
-        char sink[512];
-        while (fake_net_read_tx(peer->stor_data, sink, sizeof(sink)) > 0) {
-        }
-        if (!fake_net_is_open(peer->stor_data)) {
-            fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
-            peer->stor_data = NULL;
-        }
-    }
-
-    while (fake_ftpd_next_command(&peer->server, line, sizeof(line)) == 1) {
-        if (strcmp(line, "USER anonymous") == 0) {
-            fake_ftpd_reply(&peer->server, 331, "Password required.");
-        } else if (strncmp(line, "PASS ", 5) == 0) {
-            fake_ftpd_reply(&peer->server, 230, "Logged in.");
-        } else if (strcmp(line, "TYPE I") == 0) {
-            fake_ftpd_reply(&peer->server, 200, "Type set.");
-        } else if (strcmp(line, "PWD") == 0) {
-            fake_ftpd_reply(&peer->server, 257,
-                            "\"/\" is the current directory.");
-        } else if (strcmp(line, "FEAT") == 0) {
-            fake_ftpd_send_raw(&peer->server,
-                               "211-Features:\r\n"
-                               " MLST type*;size*;modify*;\r\n"
-                               "211 End\r\n");
-        } else if (strcmp(line, "PASV") == 0) {
-            fake_ftpd_reply(&peer->server, 227,
-                            "Entering Passive Mode (192,168,1,42,19,140).");
-            peer->data = NULL;
-        } else if (strncmp(line, "CWD ", 4) == 0) {
-            fake_ftpd_reply(&peer->server, 250, "Directory changed.");
-        } else if (strncmp(line, "NOOP", 4) == 0) {
-            fake_ftpd_reply(&peer->server, 200, "Still here.");
-        } else if (strncmp(line, "MLST ", 5) == 0) {
-            const char *path = line + 5;
-            if (peer->cfg.mlst_mode == MLST_UNSUPPORTED) {
-                fake_ftpd_reply(&peer->server, 502, "Not implemented.");
-            } else if (peer->cfg.exists_path != NULL &&
-                       strcmp(path, peer->cfg.exists_path) == 0) {
-                char reply_text[640];
-                snprintf(reply_text, sizeof(reply_text),
-                         "250-Listing %s\r\n"
-                         " type=file;size=%llu; %s\r\n"
-                         "250 End\r\n",
-                         path, (unsigned long long)peer->cfg.exists_size, path);
-                fake_ftpd_send_raw(&peer->server, reply_text);
-            } else {
-                fake_ftpd_reply(&peer->server, 550, "Not found.");
-            }
-        } else if (strncmp(line, "STOR ", 5) == 0) {
-            peer->stors++;
-            peer->stor_data = fake_net_last_connected();
-            if (peer->stor_data == peer->control)
-                peer->stor_data = NULL;
-            fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
-        } else if (strncmp(line, "MLSD ", 5) == 0 ||
-                   strncmp(line, "LIST ", 5) == 0) {
-            const char *listing = peer->cfg.listing;
-            if (peer->cfg.dir_on_refresh && peer->listings >= 1)
-                listing = peer->cfg.refresh_listing;
-            peer->data = fake_net_last_connected();
-            if (peer->data == peer->control)
-                peer->data = NULL;
-            fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
-            if (listing != NULL && peer->data != NULL) {
-                fake_net_queue_rx(peer->data, listing, strlen(listing));
-                fake_net_shutdown(peer->data);
-            }
-            fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
-            peer->listings++;
-            peer->data = NULL;
-        } else if (strncmp(line, "SIZE ", 5) == 0) {
-            const char *path = line + 5;
-            peer->sizes++;
-            if (peer->cfg.size_supported && peer->cfg.exists_path != NULL &&
-                strcmp(path, peer->cfg.exists_path) == 0) {
-                char size[32];
-                snprintf(size, sizeof(size), "%llu",
-                         (unsigned long long)peer->cfg.exists_size);
-                fake_ftpd_reply(&peer->server, 213, size);
-            } else if (peer->cfg.size_supported) {
-                fake_ftpd_reply(&peer->server, 550, "Not found.");
-            } else {
-                fake_ftpd_reply(&peer->server, 502, "Not implemented.");
-            }
-        } else if (strncmp(line, "RETR ", 5) == 0) {
-            peer->data = fake_net_last_connected();
-            if (peer->data == peer->control)
-                peer->data = NULL;
-            fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
-            peer->retrs++;
-            if (!peer->cfg.hold_data && peer->cfg.payload != NULL &&
-                peer->data != NULL) {
-                fake_net_queue_rx(peer->data, peer->cfg.payload,
-                                  strlen(peer->cfg.payload));
-                fake_net_shutdown(peer->data);
-                fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
-                peer->data = NULL;
-            }
-        } else if (strcmp(line, "ABOR") == 0) {
-            fake_ftpd_reply(&peer->server, 426, "Transfer aborted.");
-            fake_ftpd_reply(&peer->server, 226, "Abort successful.");
-            peer->aborts++;
-        } else if (strcmp(line, "QUIT") == 0) {
-            fake_ftpd_reply(&peer->server, 221, "Bye.");
-        } else {
-            fake_ftpd_reply(&peer->server, 200, "OK.");
-        }
-    }
-}
-
-static void peer_begin(Peer *peer, NetSocket *control)
-{
-    peer->control = control;
-    fake_ftpd_init(&peer->server, control);
-    fake_ftpd_reply(&peer->server, 220, "Welcome.");
-}
+} PeerThread;
 
 static void *peer_thread_main(void *arg)
 {
-    Peer *peer = arg;
-    while (!__atomic_load_n(&peer->stop, __ATOMIC_ACQUIRE)) {
-        if (peer->control == NULL) {
+    PeerThread *state = arg;
+    while (!__atomic_load_n(&state->stop, __ATOMIC_ACQUIRE)) {
+        if (fake_peer_control(state->peer) == NULL) {
             NetSocket *control = fake_net_last_connected();
             if (control != NULL)
-                peer_begin(peer, control);
+                fake_peer_attach(state->peer, control);
         } else {
-            peer_serve(peer);
+            fake_peer_serve(state->peer);
         }
         sched_yield();
     }
@@ -425,14 +281,15 @@ static int wait_net_cancelled(App *app)
     return 0;
 }
 
-static int start_peer_thread(Peer *peer, pthread_t *thread)
+static int start_peer_thread(PeerThread *state, pthread_t *thread)
 {
-    return pthread_create(thread, NULL, peer_thread_main, peer) == 0;
+    state->stop = 0;
+    return pthread_create(thread, NULL, peer_thread_main, state) == 0;
 }
 
-static void stop_peer_thread(Peer *peer, pthread_t thread)
+static void stop_peer_thread(PeerThread *state, pthread_t thread)
 {
-    __atomic_store_n(&peer->stop, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&state->stop, 1, __ATOMIC_RELEASE);
     CHECK(pthread_join(thread, NULL) == 0);
 }
 
@@ -447,12 +304,14 @@ static void test_download_completes(void)
         "type=file;size=5;modify=20240101000000; TEST.BIN\r\n"
         "type=file;size=100;modify=20240101000000; BIG.BIN\r\n";
 
-    Peer peer;
-    memset(&peer, 0, sizeof(peer));
-    peer.cfg.listing = listing;
-    peer.cfg.payload = "HELLO";
+    PeerThread script;
+    memset(&script, 0, sizeof(script));
+    script.peer = fake_peer_create();
+    CHECK(script.peer != NULL);
+    fake_peer_set_listing(script.peer, listing);
+    fake_peer_set_payload(script.peer, "HELLO");
     pthread_t thread;
-    int peer_started = start_peer_thread(&peer, &thread);
+    int peer_started = start_peer_thread(&script, &thread);
     CHECK(peer_started);
 
     connect_site(app);
@@ -467,9 +326,10 @@ static void test_download_completes(void)
     CHECK(app_state(app)->dock.active == 0);
 
     if (peer_started)
-        stop_peer_thread(&peer, thread);
-    CHECK(peer.retrs == 1);
-    CHECK(peer.aborts == 0);
+        stop_peer_thread(&script, thread);
+    CHECK(fake_peer_retr_count(script.peer) == 1);
+    CHECK(fake_peer_abort_count(script.peer) == 0);
+    fake_peer_destroy(script.peer);
     app_destroy(app);
 
     CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
@@ -489,17 +349,19 @@ static void test_upload_refresh_refusal(void)
         "type=file;size=5;modify=20240101000000; F.BIN\r\n"
         "type=file;size=5;modify=20240101000000; G.BIN\r\n";
 
-    Peer peer;
-    memset(&peer, 0, sizeof(peer));
-    peer.cfg.listing = listing;
-    peer.cfg.refresh_listing = "type=dir;modify=20240101000000; UP.TXT\r\n";
-    peer.cfg.dir_on_refresh = 1;
-    peer.cfg.mlst_mode = MLST_UNSUPPORTED;
-    peer.cfg.size_supported = 1;
-    peer.cfg.exists_path = "/UP.TXT";
-    peer.cfg.exists_size = 5;
+    PeerThread script;
+    memset(&script, 0, sizeof(script));
+    script.peer = fake_peer_create();
+    CHECK(script.peer != NULL);
+    fake_peer_set_listing(script.peer, listing);
+    fake_peer_set_refresh_listing(script.peer,
+                                  "type=dir;modify=20240101000000; UP.TXT\r\n");
+    fake_peer_set_mlst(script.peer, FAKE_PEER_MLST_UNSUPPORTED);
+    fake_peer_set_size_supported(script.peer, 1);
+    fake_peer_set_exists_path(script.peer, "/UP.TXT");
+    fake_peer_set_exists_size(script.peer, 5);
     pthread_t thread;
-    int peer_started = start_peer_thread(&peer, &thread);
+    int peer_started = start_peer_thread(&script, &thread);
     CHECK(peer_started);
 
     connect_site(app);
@@ -515,11 +377,12 @@ static void test_upload_refresh_refusal(void)
     CHECK(strstr(app_state(app)->status, "DESTINATION IS A FOLDER") != NULL);
 
     if (peer_started)
-        stop_peer_thread(&peer, thread);
-    CHECK(peer.sizes == 1);
+        stop_peer_thread(&script, thread);
+    CHECK(fake_peer_size_count(script.peer) == 1);
     /* The open listing plus the one refresh; no listing loop after it. */
-    CHECK(peer.listings == 2);
-    CHECK(peer.stors == 0);
+    CHECK(fake_peer_listing_count(script.peer) == 2);
+    CHECK(fake_peer_stor_count(script.peer) == 0);
+    fake_peer_destroy(script.peer);
     app_destroy(app);
 }
 
@@ -534,13 +397,15 @@ static void test_cancel_stalled_transfer(void)
         "type=file;size=5;modify=20240101000000; TEST.BIN\r\n"
         "type=file;size=100;modify=20240101000000; BIG.BIN\r\n";
 
-    Peer peer;
-    memset(&peer, 0, sizeof(peer));
-    peer.cfg.listing = listing;
-    peer.cfg.payload = "HELLO";
-    peer.cfg.hold_data = 1;
+    PeerThread script;
+    memset(&script, 0, sizeof(script));
+    script.peer = fake_peer_create();
+    CHECK(script.peer != NULL);
+    fake_peer_set_listing(script.peer, listing);
+    fake_peer_set_payload(script.peer, "HELLO");
+    fake_peer_set_hold_data(script.peer, 1);
     pthread_t thread;
-    int peer_started = start_peer_thread(&peer, &thread);
+    int peer_started = start_peer_thread(&script, &thread);
     CHECK(peer_started);
 
     connect_site(app);
@@ -566,9 +431,10 @@ static void test_cancel_stalled_transfer(void)
     CHECK(app_state(app)->dock.active == 0);
 
     if (peer_started)
-        stop_peer_thread(&peer, thread);
-    CHECK(peer.retrs == 1);
-    CHECK(peer.aborts > 0);
+        stop_peer_thread(&script, thread);
+    CHECK(fake_peer_retr_count(script.peer) == 1);
+    CHECK(fake_peer_abort_count(script.peer) > 0);
+    fake_peer_destroy(script.peer);
     app_destroy(app);
 
     CHECK(!fake_fs_exists("ux0:data/TEST.BIN"));
