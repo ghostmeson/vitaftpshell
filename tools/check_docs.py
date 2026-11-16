@@ -748,15 +748,20 @@ def check_traceability(tree):
 
 
 def phrase_allowed(rel, line):
-    """Archived files, dated plans, and evidence table rows keep history.
+    """Archived files, dated plans, evidence rows, and the decision record keep
+    their wording.
 
-    A historical row is where a fixed defect or a passed run records what was
-    true then.  Live prose in the same file is still checked, because that is
+    A decision entry states what was decided at the time; rewriting it to the
+    new wording would erase the history DR3 protects, and the superseding entry
+    is where the current rule lives.  A historical evidence row is the same
+    shape.  Live prose in every other file is still checked, because that is
     where a stale claim reads as current.
     """
     if "/archive/" in "/" + rel:
         return True
     if is_dated_plan(rel):
+        return True
+    if rel == "docs/DECISIONS.md":
         return True
     if rel in ("docs/FIXES.md", "docs/VERIFICATION.md"):
         return line.lstrip().startswith("|")
