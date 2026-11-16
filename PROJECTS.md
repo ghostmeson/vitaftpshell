@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-16 — b72 closes the non-hardware residual sweep: app listing-slot hold, queue reconnect, dropped-PASS and owner-RETR tests, truthful cancel and FEAT wording, PASV address refresh, per-lane cancel slots, `ASIDE` debris and aside-cleanup notice, dead queue latches removed, shared confirm resolver, TSan app run, and the SIZE upload-preflight fallback (D91) | Install `vitaftpshell-v01.00-b72.vpk` and run the M1-M13 matrix | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b72.vpk` (265,072 bytes, SHA-256 `9bb0ae6c…`). M5 PART; b72 host-tested, console pending; not yet `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-16 — b72 closes the non-hardware residual sweep (listing-slot hold, queue reconnect, dropped-PASS and owner-RETR tests, cancel and FEAT wording, PASV refresh, per-lane cancels, `ASIDE` mark and notice, dead queue latches, confirm resolver, TSan app run, SIZE fallback, D91). A requirements plan now scopes the three remaining host-provable residuals: per-session data ports, a listing refresh in the SIZE preflight, and a threaded transfer test under TSan | Plan and build the three items from `docs/plans/2026-11-16-0643-fix-residual-network-closure-plan.md`, then run M1-M13 on that build | GPLv3. One UNSAFE eboot. VPK `vitaftpshell-v01.00-b72.vpk` (265,072 bytes, SHA-256 `9bb0ae6c…`) is superseded as the matrix target once the three land. M5 PART; not yet `verified`. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
