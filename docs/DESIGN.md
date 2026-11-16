@@ -141,8 +141,9 @@ allowed outside the hazard band.
   and puts `ASIDE CLEANUP FAILED - OLD COPY KEPT AS ...` on line three in
   yellow; the rename did happen, so the dock never reads `FAILED`.
 - **Failed:** `FAILED` red; filename; `n OF m`; the bar stops at the failure
-  point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure ends
-  with `X TO RETRY`; a control failure leaves the reconnect to the pane.
+  point in dim; the reason in white; `NO PARTIAL KEPT` dim. A data failure leaves
+  the item failed and is retried by running it again; a control failure leaves
+  the reconnect to the pane.
 - **No session:** `IDLE` dim; `REMOTE`; `NO MARKS`; `NO SELECTION`.
 - **Status:** a status message replaces the idle hint on line three until the
   next key: red for a failure or refusal, yellow for a warning. The rest of the
@@ -189,7 +190,8 @@ allowed outside the hazard band.
   marks clear, the header reads `NOT CONNECTED`, and the dock keeps the failed
   transfer.
 - **Data-channel failure with a healthy control channel:** the rows stay; the
-  dock shows FAILED and the retry; the session stays connected.
+  dock shows FAILED and says the item is retried by running it again; the
+  session stays connected.
 
 ### Input
 
@@ -572,8 +574,9 @@ keyboard. The three states are in
 | New folder | `NEW FOLDER NAME` | No | 255 |
 | Rename | `RENAME` | No | 255 |
 
-The port is validated by the app at 1024–65534, so the data port at control plus one
-stays valid (D39). Names and hosts follow the field rules; an empty password is
+The port is validated by the app at 1024–65531, so no session slot's data port
+exceeds 65535 when the server derives it from the control port and the slot
+index (D92). Names and hosts follow the field rules; an empty password is
 allowed (D24).
 
 ### States

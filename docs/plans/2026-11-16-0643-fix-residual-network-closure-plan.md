@@ -159,7 +159,7 @@ Both are recorded as accepted limits, and neither shows up as a routine failure.
 ### Sources / Research
 
 - `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md` — R41 (probe order), R50 (four clients, one transfer), R54 (peer-address rule), KTD6 and U7 (the single-port text this plan replaces).
-- `docs/DECISIONS.md` — D39 (the decision that set `control+1` and the 1024–65534 editor bound), D59 and D63 (single `control+1` in their consequence text, kept deliberately), D86 (four sessions, one transfer), D91 (MLST then SIZE).
+- `docs/DECISIONS.md` — D39 (the decision that set `control+1` and the 1024–65534 editor bound), D92 (the per-session rule that supersedes it and amends D59's and D63's port clause; the record landed in the documentation truth sweep), D86 (four sessions, one transfer), D91 (MLST then SIZE).
 - `docs/FIXES.md` — the recorded U4 residual and the b72 SIZE-only folder note.
 - `docs/plans/2026-11-15-2311-fix-b67-open-issues-plan.md` — the earlier decision gate that kept the fixed port; this plan reverses its outcome with a different shape (a fixed port per session, not an ephemeral port per PASV).
 - `src/core/ftp/server.c` — single `data_port`, the address-only accept test, and the 425/450 reply paths.
@@ -239,7 +239,7 @@ stateDiagram-v2
 
 ### Sequencing
 
-U1 and U3 can proceed independently. U2 follows U1 because it shares the bind helper and the start path. U5 lands last and records what U1-U4 prove.
+U1 and U3 can proceed independently. U2 follows U1 because it shares the bind helper and the start path. U5 lands last and records the matrix rows for what U1-U4 prove.
 
 ---
 
@@ -332,20 +332,17 @@ U1 and U3 can proceed independently. U2 follows U1 because it shares the bind he
 
 ### U5. Records and matrix
 
-- Goal: The decision record, fix index, verification record, and v1 plan state the per-session rule and the new evidence.
-- Requirements: R13, R14.
+- Goal: The console matrix carries the per-session port rows for the build that lands the change.
+- Requirements: R14 (its evidence and matrix clauses; the decision and v1-plan clauses landed with D92 in the documentation truth sweep).
 - Dependencies: U1, U2, U3, U4.
-- Files: `docs/DECISIONS.md`, `docs/FIXES.md`, `docs/VERIFICATION.md`, `docs/DESIGN.md`, `docs/ARCHITECTURE.md`, `docs/plans/2026-11-08-1103-feat-vitaftpshell-v1-plan.md`, `PROJECTS.md`, `AGENTS.md`, `BUILD_NUMBER`.
+- Files: `docs/FIXES.md`, `docs/VERIFICATION.md`.
+- Note: the port record landed as D92 in the documentation truth sweep (`docs/plans/2026-11-16-0845-docs-documentation-truth-sweep-plan.md`); this unit keeps only the console-matrix rows.
 - Approach:
-  - Add one decision entry that supersedes D39's port rule and amends the single-port sentences in D59, D63, and D86, preserving their other rules.
-  - Amend KTD6, U7, R50, R49, and the resolved-questions row as R13 specifies, including KTD6's editor bound at 65531.
-  - Rewrite the DESIGN port sentence to 1024–65531 and the ARCHITECTURE listener sentence to the per-session ports.
   - Record M5 against per-session ports, and give it the same-address transfer that proves the slot port.
   - Rewrite M7's second-client expectation to an accepted session, with 450 reserved for a fifth session or a data command during the owner's transfer.
   - Add the trailing-dot/space probe to the matrix record.
-  - Update the tracker and the build number with the artifact.
-- Test scenarios: `Test expectation: none -- record updates; the docs link and code-fence check plus the asset guard cover them.`
-- Verification: every superseded sentence is rewritten rather than appended to, and the docs check reports no broken links or odd fences.
+- Test scenarios: `Test expectation: none -- matrix rows only; the console run produces them.`
+- Verification: M5 and M7 name the per-session ports, and the trailing-dot/space probe has its result recorded.
 
 ---
 
@@ -365,8 +362,8 @@ U1 and U3 can proceed independently. U2 follows U1 because it shares the bind he
 ## Definition of Done
 
 - Every unit's tests pass under the host suites and ASan, and the threaded transfer passes the TSan gate.
-- U1-U4 land with the behavior R1-R12 state, and U5 records it with the preservation note intact.
+- U1-U4 land with the behavior R1-R12 state, and U5 records its matrix rows; the document record landed as D92 in the documentation truth sweep.
 - `./build.sh` emits one `vitaftpshell-v01.00-b<build>.vpk`, increments `BUILD_NUMBER`, leaves the unstripped ELF, and passes the worker stack check.
-- `docs/FIXES.md`, `docs/VERIFICATION.md`, `docs/DECISIONS.md`, `docs/DESIGN.md`, `docs/ARCHITECTURE.md`, the v1 plan, `PROJECTS.md`, and `AGENTS.md` reflect the change; the project stays `building` until the console matrix passes.
+- `docs/FIXES.md` and `docs/VERIFICATION.md` reflect the evidence; D92 and the documentation truth sweep carry the decision, the v1 plan, `docs/DESIGN.md`, `docs/ARCHITECTURE.md`, and the summaries. The project stays `building` until the console matrix passes.
 - No `[C]` claim escapes the adapters: the per-slot design adds none.
 - Abandoned experiments and dead helpers from the implementation are removed, not left in the diff.

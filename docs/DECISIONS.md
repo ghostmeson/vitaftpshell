@@ -134,8 +134,9 @@ harder to prove on a console with one screen and one user.
 A server-side transfer occupies the same slot. The server accepts one client at
 a time and refuses a second with a busy reply.
 
-**Consequences:** The dock is the single place where transfer state lives. A
-second server client is a future feature, not a hidden queue.
+**Consequences:** The dock is the single place where transfer state lives. The
+one-client context is historical: D86's four-session rule and R50 govern, and a
+second server client is an accepted session, not a future feature.
 
 ## D10. First run seeds an anonymous example site
 
@@ -592,7 +593,8 @@ one more press per item.
 ## D35. A failed data-channel transfer offers one-press retry
 
 **Date:** 2026-11-08
-**Status:** accepted
+**Status:** accepted; superseded in part: one-press retry is retired for v1, and
+a failed item is retried by running it again.
 
 **Context:** R26 distinguishes a dropped data channel from a dropped control
 channel. Without resume, the useful recovery for the first is to run the item
@@ -604,6 +606,11 @@ failure routes to reconnect instead.
 
 **Consequences:** The dock gains one transition; resume stays out of v1. A retry
 of a large file starts from zero and says so.
+
+**Superseded (2026-11-16):** One-press retry is retired for v1. No retry command
+was built, and the dock no longer offers `X TO RETRY`; a failed item is retried
+by running it again. The decision above stays as the record of what was chosen
+at the time.
 
 ## D36. A cross-volume move is all-or-nothing
 
@@ -658,7 +665,8 @@ to hand off and no direct call from the UI into the engine.
 ## D39. The server's passive data port is the control port plus one
 
 **Date:** 2026-11-08
-**Status:** accepted
+**Status:** accepted; the port rule is superseded by D92, and the entry stays as
+history.
 
 **Context:** The server runs one data transfer at a time, so a single data
 port cannot collide with itself. An ephemeral port would work on the LAN but makes
@@ -670,6 +678,11 @@ so the pair stays valid.
 
 **Consequences:** A home router needs two rules, not a range. A bind failure on
 either port is reported on the same error line, naming both.
+
+**Superseded (2026-11-16):** D92 replaces the single-port rule. The server binds
+only the control port at start and gives each session slot its own data port on
+that slot's first PASV; a control-port bind at start leaves the server OFF, and
+a data-port bind at PASV answers 425 and leaves the server ON.
 
 ## D40. The FTP server is written in the core; nothing is vendored
 
@@ -1193,8 +1206,9 @@ and the UI renders `--`.
 
 **Consequences:** The SERVER panel shows the address the console actually has,
 so a PC can reach the control port. Other volumes lose a free-space number but
-no longer trigger repeated card-slot devctl calls. The PASV data listener is
-still `control+1`; VitaShell creates an ephemeral PASV socket per command. If
+no longer trigger repeated card-slot devctl calls. Each session now has its own
+PASV data listener (D92), where the old rule was one listener on `control+1`;
+VitaShell creates an ephemeral PASV socket per command. If
 the control connection works but PASV does not, that is the next server change.
 The control accept still uses the non-blocking `select` on the worker; if it
 does not accept at the corrected address, the fallback is `ftpvitalib`'s
@@ -1307,8 +1321,9 @@ server still advertises its LAN address; the client ignores it and connects to
 the control peer, which is correct for both `127.0.0.1` and the LAN IP. If an
 external data connection still times out at the advertised port, the network is
 blocking the passive data port; test a LAN FTP server before changing the
-client again. The server's data listener remains `control+1` (1338), not an
-ephemeral PASV port.
+client again. The server's data listener is a per-session port (D92), not an
+ephemeral PASV port, so the port a transfer connects to is the one the 227
+reply named.
 
 ## D64. Remote sessions are explicit, refreshable, and self-healing
 
@@ -1381,7 +1396,9 @@ unbound to an action.
 ## D65. Remote refresh, unsafe names, upload preflight, and the folder-transfer limit
 
 **Date:** 2026-11-13
-**Status:** accepted; R22/R23 deferred by the user's choice.
+**Status:** accepted; remote recursive transfer is a v1 requirement that is
+planned, not built, and R22/R23 stay active. The current build still refuses a
+folder source as described in item 3.
 
 **Context:** The b32 remote pane fixed navigation, disconnect, and remote
 mutations. Four gaps remained: R21 had a `UI_CMD_REFRESH` with no action, R44
@@ -1401,11 +1418,14 @@ silently overwrote an existing remote file. A recursive folder transfer
    yellow risk diamond; DOWNLOAD, RENAME, and DELETE show `UNSAFE NAME`, and
    Cross/Square return `UNSAFE NAME` without building any local path. The worker
    repeats the name check before a single-file download as a backstop.
-3. **Folder transfers are refused, not mis-queued.** R22/R23 are deferred.
-   A local folder UPLOAD and a remote folder DOWNLOAD are dim with `FOLDER NOT
-   SUPPORTED`; a marked set containing a folder refuses the whole transfer with
-   the same status. The worker refuses a `UI_ROW_DIR` source as a backstop. A
-   file transfer still works; the plan's recursive requirement remains open.
+3. **Folder transfers are refused by the current build; remote recursion is
+   planned v1.** R22/R23 require a local folder UPLOAD and a remote folder
+   DOWNLOAD to transfer recursively. That behavior is planned under its own
+   design and not built yet. Until it lands, the current build refuses a folder
+   source: those two actions are dim with `FOLDER NOT SUPPORTED`; a marked set
+   containing a folder refuses the whole transfer with the same status, and the
+   worker refuses a `UI_ROW_DIR` source as a backstop. A file transfer still
+   works.
 4. **Uploads preflight the remote destination.** When FEAT advertises MLST, the
    client sends `MLST <destination>` before a STOR. A file that exists asks
    OVERWRITE ALL / SKIP EXISTING / CANCEL once per batch; SKIP drops each
@@ -1423,10 +1443,11 @@ silently overwrote an existing remote file. A recursive folder transfer
 
 **Consequences:** Remote browsing now has a refresh path, unsafe names cannot
 become local paths, uploads ask before replacing an existing file on an MLST
-server, and a partly-known download shows its size. Recursive transfers remain
-the one plan item deliberately left out; the UI refuses them instead of sending
-a folder as one RETR/STOR. Adding recursion later should reuse the same name,
-total, and conflict rules.
+server, and a partly-known download shows its size. Remote recursion is a v1
+requirement, not a deferred one: R22/R23 own the behavior, it is planned under
+its own design, and the UI refuses a folder instead of sending it as one
+RETR/STOR until that behavior lands. The implementation should reuse the same
+name, total, and conflict rules.
 
 ## D66. A session teardown owns the batch, and the queue pump iterates
 
@@ -1899,18 +1920,19 @@ app's own client and its server worked. The user chose to allow multiple clients
 
 **Decision:** The server accepts up to four control sessions
 (`SERVER_MAX_CLIENTS`). Each session owns its login, current directory, line
-reader, reply buffer, idle deadline, last command, and rename state. One data
-transfer owns the single PASV/data port at a time; a second session's data or
-`PASV` command answers 450 `Another client is transferring`, and closing a
-non-owner session does not abort the owner's transfer. A fifth control
-connection gets `450 Busy` and is closed. The SERVER panel shows the client
-count and the most recent peer.
+reader, reply buffer, idle deadline, last command, and rename state, plus its own
+passive data port, bound on that slot's first PASV and held until stop (D92).
+One data transfer runs at a time; a second session's data or `PASV` command
+answers 450 `Another client is transferring`, and closing a non-owner session
+does not abort the owner's transfer. A fifth control connection gets `450 Busy`
+and is closed. The SERVER panel shows the client count and the most recent peer.
 
 **Consequences:** FileZilla can hold its browse and transfer connections, and
 the app's own client can stay connected while a PC browses. Concurrent file
 transfers still serialize on the one data slot; that is the next extension if
 it is needed. D9's one-client clause and R50's "one client at a time" text are
-superseded.
+superseded. The single passive-port sentence above is amended by D92; the
+four-session and ownership rules stay in force.
 
 ## D87. Access is unrestricted except boot_config and system roots
 
@@ -2025,3 +2047,82 @@ relies on the server's STOR refusal.
 one-per-batch overwrite prompt instead of a silent replace. D65 section 4 is
 superseded; D65's other clauses and D41's server-side overwrite stay in force.
 R41 is amended to name both probes.
+
+## D92. The server gives each session slot its own passive data port
+
+**Date:** 2026-11-16
+**Status:** accepted; host-tested; console pending. Supersedes D39's port rule
+and amends the single-port sentences in D59, D63, and D86; their other rules
+stay in force.
+
+**Context:** The server held one passive listener on the control port plus one
+and told its sessions apart only by the control peer's address. Two sessions
+from one PC (FileZilla's browse and transfer connections) share that address,
+so a data connection arriving on the shared port could not be attributed to the
+session that armed it. The port editor also accepted 65534 as a control port,
+which leaves no room for four consecutive data ports.
+
+**Decision:** The server binds only the control port at start. Each of the four
+session slots owns `control + 1 + slot`, bound on that slot's first PASV and
+held until the server stops. A PASV reply advertises the arming session's own
+port, and a data connection is attributed by the port it arrives on. When a
+slot's data-port bind fails, that PASV answers 425 and the server stays ON with
+no session armed; a control-port bind failure at start leaves the server OFF.
+The SERVER port editor and the settings loader accept 1024–65531, so the last
+slot's port cannot exceed 65535.
+
+**Consequences:** A router forward for the server becomes four ports, one per
+slot; session slot 0 keeps the old port, one above the control port, so a
+single-client setup is unchanged. A data-port conflict costs that one PASV
+instead of stopping the server. D39 is superseded, and D59's and D63's port
+clauses and D86's single-PASV-port sentence are amended; the address,
+client-PASV, four-session, and ownership rules in those entries stand.
+
+## D93. One fact, one home
+
+**Date:** 2026-11-16
+**Status:** accepted; user-directed.
+
+**Context:** Status prose was copied into every summary, each copy pinned to a
+different build, so a build left at least two of them false. The scope statements
+drifted the same way. A fact written twice is a fact with two versions.
+
+**Decision:** Each kind of fact has exactly one owner: `PROJECTS.md` the board,
+`docs/VERIFICATION.md` the hardware evidence, `docs/FIXES.md` the defect index,
+`docs/DECISIONS.md` the choices, the v1 plan the behavior, `STRATEGY.md` the
+direction, and `docs/DESIGN.md` the layout. `docs/README.md` carries the
+ownership table. Every other document links to the owner and carries only a
+short current state. History stays in git, dated plans, and the evidence and
+fix records.
+
+**Consequences:** A summary that copies a volatile fact is a defect, not an
+update. Changing a fact edits its owner and the links to it. Structural drift is
+checkable, and `tools/check_docs.py` reports a markdown file missing from the
+ownership table.
+
+## D94. The documentation gate is the mechanical check on the docs
+
+**Date:** 2026-11-16
+**Status:** accepted; user-directed.
+
+**Context:** The only link and fence check lived in the workspace-root
+instructions and ran by hand; the host suite checked layering, tests, previews,
+and assets, never prose. Nothing caught a summary drifting from its owner.
+
+**Decision:** `tools/check_docs.py` is authoritative for broken markdown links
+and cited `docs/` paths, unbalanced fences, plan and design indexing, the
+ownership table, R/U/KTD/D references and whole-set ranges, build tokens outside
+their owners, the shared status block, the traceability table, and the
+retired-phrase list. It runs from `tools/test/run.sh` and CI and fails on a
+finding. While the sweep is in progress, `docs/drift-baseline.txt` records the
+violations that predate the gate: entries key on file, check, and matched text,
+may only be removed, and a regeneration that would add one fails; the file is
+deleted when the count reaches zero. Archived files, dated plan bodies, and
+historical evidence rows are exempt from the phrase check, and the decision
+record keeps its own wording so superseded history survives.
+
+**Consequences:** A documentation change is checked like code, and the baseline
+is a count of remaining drift that the sweep drives to zero before deleting the
+file. The gate proves structure and known wording, not the truth of prose nobody
+has written; a new scope claim still needs review, and the gate does not claim
+otherwise.

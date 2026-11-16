@@ -73,11 +73,12 @@ VitaShell or libftpvita is vendored (D40).
 - **Client:** resolve, connect, read the greeting, log in (anonymous or
   user/password), set binary mode, read the working directory, list, browse,
   download, upload, create, rename, delete, and quit. Passive only.
-- **Server:** listen on the control port and the data port, accept up to four
-  control sessions with one data transfer at a time, log
-  in anonymously, list, change directory, download, upload, create, rename,
-  delete, and quit. Passive only. Every path resolves through the shared table and
-  is re-checked after normalization.
+- **Server:** bind only the control port at start, and give each session slot
+  its own passive data port on that slot's first PASV (D92). Accept up to four
+  control sessions with one data transfer at a time, log in anonymously, list,
+  change directory, download, upload, create, rename, delete, and quit. Passive
+  only. Every path resolves through the shared table and is re-checked after
+  normalization.
 - **Shared:** reply parsing, multiline replies, PASV parsing, path joining and
   parent rules, the risk table, the denial table, the conflict gate, and the
   temp-and-rename write.
@@ -117,15 +118,18 @@ arena.
 - **Server:** `FtpServer` reports `STATE`, `CLIENT`, `PROGRESS`,
   `TRANSFER_DONE`, and `ERROR`. The machine is `OFF`, `BINDING`, `ON`,
   `SESSION`, `REFUSING`, or `STOPPING`; the data side uses the same five
-  sub-states. It binds control and control+1 on the LAN address, accepts up to
-  four clients with one data transfer at a time (D86), answers 450 to a fifth,
-  drains the data backlog at every PASV,
-  accepts a data peer only when its address equals the control peer's, and
-  disarms on every non-data command and every refusal. A transfer holds the one
-  slot; a data or mutating command during it answers 450. `STOR` writes a temp
-  and renames on close; a reset or timeout aborts the temp and leaves the
-  previous destination byte-identical. Network loss closes both listeners and
-  returns `OFF`.
+  sub-states. It binds the control port on the LAN address at start and binds
+  each session slot's data port on that slot's first PASV, holding it until
+  stop; a data connection is attributed by the port it arrives on (D92). It
+  accepts up to four clients with one data transfer at a time (D86), answers
+  450 to a fifth, drains the data backlog at every PASV, accepts a data peer
+  only when its address equals the control peer's, and disarms on every
+  non-data command and every refusal. A control-port bind failure at start
+  leaves the server `OFF`; a slot's data-port bind failure answers 425 and
+  leaves it `ON`. A transfer holds the one slot; a data or mutating command
+  during it answers 450. `STOR` writes a temp and renames on close; a reset or
+  timeout aborts the temp and leaves the previous destination byte-identical.
+  Network loss closes both listeners and returns `OFF`.
 
 **Operations and state (U8/U16/U17/U9/U15).**
 
