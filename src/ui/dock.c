@@ -164,13 +164,13 @@ static const char *direction_done_word(XferDirection direction)
 
 static const char *pane_name(UiPane pane)
 {
-    return pane == UI_PANE_LOCAL ? "LOCAL" : "REMOTE";
+    return ui_pane_is_local(pane) ? "LOCAL" : "REMOTE";
 }
 
 static void idle_dock(const UiState *state, DockPanel *p)
 {
     const UiPaneState *pane = &state->panes[state->active_pane];
-    int no_session = !state->panes[UI_PANE_REMOTE].connected;
+    int no_session = !state->panes[ui_pane_remote_view()].connected;
 
     p->word = "IDLE";
     p->word_color = C_DIM;
@@ -210,14 +210,14 @@ static void idle_dock(const UiState *state, DockPanel *p)
         p->left = "NO SELECTION";
     } else if (pane->mark_count > 0) {
         snprintf(left, sizeof(left), "X TO %s %d ITEM%s",
-                 state->active_pane == UI_PANE_LOCAL ? "UPLOAD" : "DOWNLOAD",
+                 ui_pane_is_local(state->active_pane) ? "UPLOAD" : "DOWNLOAD",
                  pane->mark_count, pane->mark_count == 1 ? "" : "S");
         p->left = left;
     } else {
         const UiRow *row = ui_state_selected_row(state, state->active_pane);
         if (row != NULL && row->type == UI_ROW_FILE) {
             snprintf(left, sizeof(left), "X TO %s",
-                     state->active_pane == UI_PANE_LOCAL ? "UPLOAD"
+                     ui_pane_is_local(state->active_pane) ? "UPLOAD"
                                                          : "DOWNLOAD");
         } else {
             snprintf(left, sizeof(left), "X TO OPEN");

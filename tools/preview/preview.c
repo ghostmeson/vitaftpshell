@@ -158,6 +158,7 @@ static void save_state(const char *name, const UiState *state)
 static UiRow s_rows[16];
 static UiMark s_local_marks[16];
 static UiMark s_remote_marks[16];
+static UiMark s_local_right_marks[16];
 
 static void row(int i, const char *name, UiRowType type, uint64_t size,
                 int known, int risk)
@@ -176,8 +177,12 @@ static void base(UiState *state)
     memset(s_rows, 0, sizeof(s_rows));
     memset(s_local_marks, 0, sizeof(s_local_marks));
     memset(s_remote_marks, 0, sizeof(s_remote_marks));
+    memset(s_local_right_marks, 0, sizeof(s_local_right_marks));
 
-    ui_state_init(state, s_local_marks, 16, s_remote_marks, 16);
+    UiMark *marks[UI_PANE_COUNT] = {s_local_marks, s_remote_marks,
+                                    s_local_right_marks};
+    int caps[UI_PANE_COUNT] = {16, 16, 16};
+    ui_state_init(state, marks, caps);
 
     row(0, "..", UI_ROW_UP, 0, 0, 0);
     row(1, "VITAFTPSHELL", UI_ROW_DIR, 0, 0, 0);
@@ -237,6 +242,21 @@ static void workspace_states(void)
     state.panes[UI_PANE_REMOTE].marked_bytes = 124468429;
     state.panes[UI_PANE_REMOTE].marked_bytes_known = 1;
     save_state("workspace-idle", &state);
+
+    /* U3: the right slot holding the second local view. The switch row is U4,
+     * so this state is constructed directly. */
+    base(&state);
+    state.right_view = UI_PANE_LOCAL_RIGHT;
+    state.active_pane = UI_PANE_LOCAL_RIGHT;
+    UiPaneState *right = &state.panes[UI_PANE_LOCAL_RIGHT];
+    snprintf(right->path, sizeof(right->path), "ur0:data");
+    snprintf(right->free_text, sizeof(right->free_text), "3.1 GB");
+    right->free_known = 1;
+    right->selected = 2;
+    ui_state_set_rows(&state, UI_PANE_LOCAL_RIGHT, s_rows, 9, 0);
+    state.dock.state = UI_DOCK_IDLE;
+    snprintf(state.dock.message, sizeof(state.dock.message), "IDLE");
+    save_state("workspace-local-local", &state);
 
     base(&state);
     state.active_pane = UI_PANE_REMOTE;

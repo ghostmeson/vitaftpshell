@@ -82,7 +82,7 @@ void header_draw(const UiState *state)
     font_text_tracked(ui_screen_name(state->screen), (float)LAYOUT_MARGIN,
                       HEADER_NAME_Y, PX_LABEL, C_WHITE, 1.0f);
 
-    int connected = state->panes[UI_PANE_REMOTE].connected;
+    int connected = state->panes[ui_pane_remote_view()].connected;
     ui_header_identity(state->site_host, state->site_port, "CONNECTED",
                        connected);
     server_line(state);

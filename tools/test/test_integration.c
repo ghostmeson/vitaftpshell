@@ -2614,6 +2614,116 @@ static void test_local_rename_conflict(void)
     app_destroy(app);
 }
 
+/* U3: the right local view's ALL DRIVES listing is ready at start, so the
+ * first switch has rows without a reducer command. */
+static void test_third_local_view_at_start(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    for (int i = 0; i < 80 && right->row_count == 0; ++i)
+        (void)app_tick(app);
+
+    CHECK(strcmp(right->path, "*") == 0);
+    CHECK(right->row_count > 0);
+    CHECK(app_state(app)->panes[UI_PANE_LOCAL].row_count > 0);
+    CHECK(right->rows != app_state(app)->panes[UI_PANE_LOCAL].rows);
+    CHECK(right->connected == 1);
+
+    app_destroy(app);
+}
+
+/* A listing in the right local view must not touch the left view's rows,
+ * cursor, or marks (KTD1). */
+static void test_right_local_listing_keeps_left(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+
+    enter_ux0_data(app);
+    UiPaneState *left = &app_state(app)->panes[UI_PANE_LOCAL];
+    for (int i = 0; i < 40 && left->row_count < 2; ++i)
+        (void)app_tick(app);
+    CHECK(strcmp(left->path, "ux0:data") == 0);
+    CHECK(left->row_count >= 2);
+    if (left->row_count < 2) {
+        app_destroy(app);
+        return;
+    }
+    const UiRow *left_rows = left->rows;
+    int left_count = left->row_count;
+    int left_selected = left->selected;
+
+    UiCommand open;
+    memset(&open, 0, sizeof(open));
+    open.type = UI_CMD_OPEN_PATH;
+    open.pane = UI_PANE_LOCAL_RIGHT;
+    snprintf(open.path, sizeof(open.path), "ur0:tai");
+    CHECK(handoff_command_push(app_handoff(app), &open) == 1);
+
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        if (strcmp(right->path, "ur0:tai") == 0 && !right->loading &&
+            right->row_count > 0)
+            break;
+    }
+    CHECK(strcmp(right->path, "ur0:tai") == 0);
+    CHECK(right->row_count > 0);
+
+    left = &app_state(app)->panes[UI_PANE_LOCAL];
+    CHECK(strcmp(left->path, "ux0:data") == 0);
+    CHECK(left->rows == left_rows);
+    CHECK(left->row_count == left_count);
+    CHECK(left->selected == left_selected);
+
+    app_destroy(app);
+}
+
+/* A refused local action paints the pane that issued it, not the left pane. */
+static void test_right_local_error_on_right(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    pump(app, NULL, 10);
+
+    UiPaneState *left = &app_state(app)->panes[UI_PANE_LOCAL];
+    UiPaneState *right = &app_state(app)->panes[UI_PANE_LOCAL_RIGHT];
+    CHECK(left->error[0] == '\0');
+    CHECK(right->error[0] == '\0');
+
+    UiCommand open;
+    memset(&open, 0, sizeof(open));
+    open.type = UI_CMD_OPEN_PATH;
+    open.pane = UI_PANE_LOCAL_RIGHT;
+    snprintf(open.path, sizeof(open.path), "bogus");
+    CHECK(handoff_command_push(app_handoff(app), &open) == 1);
+    pump(app, NULL, 10);
+
+    CHECK(strcmp(right->error, "INVALID PATH") == 0);
+    CHECK(left->error[0] == '\0');
+
+    /* The issuing view survives the local run/plan path too: a refused
+     * protected action paints the right local pane, not the left. */
+    UiCommand remove;
+    memset(&remove, 0, sizeof(remove));
+    remove.type = UI_CMD_RUN_ACTION;
+    remove.pane = UI_PANE_LOCAL_RIGHT;
+    remove.action = UI_ACTION_DELETE;
+    snprintf(remove.path, sizeof(remove.path), "ux0:");
+    CHECK(handoff_command_push(app_handoff(app), &remove) == 1);
+    pump(app, NULL, 10);
+
+    CHECK(strcmp(right->error, "VOLUME ROOT") == 0);
+    CHECK(left->error[0] == '\0');
+
+    app_destroy(app);
+}
+
 int main(void)
 {
     test_download_destination_failure();
@@ -2622,6 +2732,9 @@ int main(void)
     test_wait_resume_rechecks();
     test_connect_list_download();
     test_app_listing_slot_held();
+    test_third_local_view_at_start();
+    test_right_local_listing_keeps_left();
+    test_right_local_error_on_right();
     test_aside_debris_row();
     test_remote_navigation();
     test_remote_mutations();

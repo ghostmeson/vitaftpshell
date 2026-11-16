@@ -19,6 +19,7 @@ static int s_failures;
 static UiState s_state;
 static UiMark s_local_marks[16];
 static UiMark s_remote_marks[16];
+static UiMark s_local_right_marks[16];
 static UiCommand s_commands[8];
 static int s_command_count;
 
@@ -26,6 +27,12 @@ static UiRow s_local_rows[] = {
     {.name = "..", .type = UI_ROW_UP},
     {.name = "folder", .type = UI_ROW_DIR},
     {.name = "A.TXT", .type = UI_ROW_FILE, .size = 10, .size_known = 1},
+};
+
+static UiRow s_local_right_rows[] = {
+    {.name = "..", .type = UI_ROW_UP},
+    {.name = "RIGHTDIR", .type = UI_ROW_DIR},
+    {.name = "C.TXT", .type = UI_ROW_FILE, .size = 7, .size_known = 1},
 };
 
 static UiRow s_remote_rows[] = {
@@ -57,14 +64,22 @@ static void reset(void)
     memset(&s_state, 0, sizeof(s_state));
     memset(s_local_marks, 0, sizeof(s_local_marks));
     memset(s_remote_marks, 0, sizeof(s_remote_marks));
+    memset(s_local_right_marks, 0, sizeof(s_local_right_marks));
     memset(s_commands, 0, sizeof(s_commands));
     s_command_count = 0;
 
-    ui_state_init(&s_state, s_local_marks, 16, s_remote_marks, 16);
+    UiMark *marks[UI_PANE_COUNT] = {s_local_marks, s_remote_marks,
+                                    s_local_right_marks};
+    int caps[UI_PANE_COUNT] = {16, 16, 16};
+    ui_state_init(&s_state, marks, caps);
     snprintf(s_state.panes[UI_PANE_LOCAL].path,
              sizeof(s_state.panes[UI_PANE_LOCAL].path), "ux0:data");
+    snprintf(s_state.panes[UI_PANE_LOCAL_RIGHT].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL_RIGHT].path), "ur0:data");
     ui_state_set_rows(&s_state, UI_PANE_LOCAL, s_local_rows, 3, 0);
     ui_state_set_rows(&s_state, UI_PANE_REMOTE, s_remote_rows, 3, 0);
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL_RIGHT, s_local_right_rows, 3,
+                      0);
     s_state.panes[UI_PANE_REMOTE].connected = 1;
 }
 
@@ -1686,9 +1701,277 @@ static void test_cursor_copy_folder(void)
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
 }
 
+static void test_three_view_model(void)
+{
+    memset(&s_state, 0, sizeof(s_state));
+    memset(s_local_marks, 0, sizeof(s_local_marks));
+    memset(s_remote_marks, 0, sizeof(s_remote_marks));
+    memset(s_local_right_marks, 0, sizeof(s_local_right_marks));
+
+    UiMark *marks[UI_PANE_COUNT] = {s_local_marks, s_remote_marks,
+                                    s_local_right_marks};
+    int caps[UI_PANE_COUNT] = {16, 16, 16};
+    ui_state_init(&s_state, marks, caps);
+
+    CHECK(UI_PANE_LOCAL == 0);
+    CHECK(UI_PANE_COUNT == 3);
+    CHECK(s_state.right_view == UI_PANE_REMOTE);
+    CHECK(ui_pane_right_view(&s_state) == UI_PANE_REMOTE);
+    CHECK(ui_pane_remote_view() == UI_PANE_REMOTE);
+    CHECK(ui_pane_is_local(UI_PANE_LOCAL) == 1);
+    CHECK(ui_pane_is_local(UI_PANE_LOCAL_RIGHT) == 1);
+    CHECK(ui_pane_is_local(UI_PANE_REMOTE) == 0);
+
+    CHECK(strcmp(s_state.panes[UI_PANE_LOCAL].path, "*") == 0);
+    CHECK(s_state.panes[UI_PANE_LOCAL].connected == 1);
+    CHECK(strcmp(s_state.panes[UI_PANE_REMOTE].path, "/") == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].connected == 0);
+    CHECK(strcmp(s_state.panes[UI_PANE_LOCAL_RIGHT].path, "*") == 0);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].connected == 1);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].marks == s_local_right_marks);
+}
+
+/* L/R moves between the left slot and the right slot's current view, and each
+ * view keeps its folder, cursor, scroll, and marks (KTD1). */
+static void test_views_keep_state(void)
+{
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    s_state.panes[UI_PANE_LOCAL].scroll = 1;
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
+
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    s_state.panes[UI_PANE_LOCAL_RIGHT].selected = 2;
+    s_state.panes[UI_PANE_LOCAL_RIGHT].scroll = 1;
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_LOCAL_RIGHT) == 1);
+    CHECK(ui_state_is_marked(&s_state, UI_PANE_LOCAL_RIGHT, "ur0:data/C.TXT"));
+
+    s_state.right_view = UI_PANE_REMOTE;
+    s_state.active_pane = UI_PANE_REMOTE;
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.active_pane = UI_PANE_LOCAL;
+    send_key(UI_KEY_L1);
+    CHECK(s_state.active_pane == UI_PANE_LOCAL_RIGHT);
+    CHECK(strcmp(s_state.panes[UI_PANE_LOCAL].path, "ux0:data") == 0);
+    CHECK(strcmp(s_state.panes[UI_PANE_LOCAL_RIGHT].path, "ur0:data") == 0);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 2);
+    CHECK(s_state.panes[UI_PANE_LOCAL].scroll == 1);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].selected == 2);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].scroll == 1);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
+    CHECK(mark_count(UI_PANE_LOCAL_RIGHT) == 1);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+
+    send_key(UI_KEY_R1);
+    CHECK(s_state.active_pane == UI_PANE_LOCAL);
+
+    s_state.right_view = UI_PANE_REMOTE;
+    s_state.active_pane = UI_PANE_LOCAL;
+    send_key(UI_KEY_L1);
+    CHECK(s_state.active_pane == UI_PANE_REMOTE);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].selected == 2);
+    CHECK(mark_count(UI_PANE_LOCAL_RIGHT) == 1);
+}
+
+/* A listing in the right local view publishes into its own slot and leaves the
+ * left view's rows, cursor, and marks untouched. */
+static void test_right_local_listing_independent(void)
+{
+    reset();
+    const UiRow *left_rows = s_state.panes[UI_PANE_LOCAL].rows;
+    int left_count = s_state.panes[UI_PANE_LOCAL].row_count;
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
+
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_BEGIN;
+    event.pane = UI_PANE_LOCAL_RIGHT;
+    snprintf(event.path, sizeof(event.path), "ur0:data/sub");
+    send_event(&event);
+    CHECK(s_state.panes[UI_PANE_LOCAL].row_count == left_count);
+    CHECK(s_state.panes[UI_PANE_LOCAL].rows == left_rows);
+    CHECK(s_state.panes[UI_PANE_LOCAL].selected == 2);
+
+    UiRow sub_rows[] = {
+        {.name = "..", .type = UI_ROW_UP},
+        {.name = "SUB.TXT", .type = UI_ROW_FILE, .size = 1, .size_known = 1},
+    };
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_SET_ROWS;
+    event.pane = UI_PANE_LOCAL_RIGHT;
+    event.rows = sub_rows;
+    event.row_count = 2;
+    send_event(&event);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].row_count == 2);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].rows == sub_rows);
+    CHECK(s_state.panes[UI_PANE_LOCAL].rows == left_rows);
+    CHECK(s_state.panes[UI_PANE_LOCAL].row_count == left_count);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
+
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_LISTING_END;
+    event.pane = UI_PANE_LOCAL_RIGHT;
+    event.ok = 1;
+    send_event(&event);
+    CHECK(strcmp(s_state.panes[UI_PANE_LOCAL_RIGHT].path,
+                 "ur0:data/sub") == 0);
+    CHECK(strcmp(s_state.panes[UI_PANE_LOCAL].path, "ux0:data") == 0);
+
+    /* An eager local open that fails clears its own READING latch. */
+    s_state.panes[UI_PANE_LOCAL_RIGHT].loading = 1;
+    snprintf(s_state.panes[UI_PANE_LOCAL_RIGHT].pending_path,
+             sizeof(s_state.panes[UI_PANE_LOCAL_RIGHT].pending_path),
+             "ur0:bad");
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_ERROR;
+    event.pane = UI_PANE_LOCAL_RIGHT;
+    snprintf(event.text, sizeof(event.text), "INVALID PATH");
+    send_event(&event);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].loading == 0);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].pending_path[0] == '\0');
+    CHECK(strcmp(s_state.panes[UI_PANE_LOCAL_RIGHT].error,
+                 "INVALID PATH") == 0);
+    CHECK(s_state.panes[UI_PANE_LOCAL].error[0] == '\0');
+}
+
+/* A download always targets the left local view; an upload targets the remote
+ * view only while the right slot shows it (KTD1, AE10). */
+static void test_transfer_targets(void)
+{
+    reset();
+    snprintf(s_state.panes[UI_PANE_LOCAL_RIGHT].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL_RIGHT].path), "ur0:other");
+
+    s_state.active_pane = UI_PANE_REMOTE;
+    s_state.panes[UI_PANE_REMOTE].selected = 2; /* B.BIN */
+    send_key(UI_KEY_CROSS);
+    UiCommand *download = command(UI_CMD_TRANSFER);
+    CHECK(download != NULL);
+    if (download != NULL) {
+        CHECK(download->pane == UI_PANE_REMOTE);
+        CHECK(strcmp(download->path2, "ux0:data") == 0);
+    }
+
+    s_state.active_pane = UI_PANE_LOCAL;
+    s_state.panes[UI_PANE_LOCAL].selected = 2; /* A.TXT */
+    send_key(UI_KEY_CROSS);
+    UiCommand *upload = command(UI_CMD_TRANSFER);
+    CHECK(upload != NULL);
+    if (upload != NULL) {
+        CHECK(upload->pane == UI_PANE_LOCAL);
+        CHECK(strcmp(upload->path2, "/") == 0);
+    }
+
+    /* The right local view uploads to the shown remote view. */
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    s_state.panes[UI_PANE_LOCAL_RIGHT].selected = 2; /* C.TXT */
+    send_key(UI_KEY_CROSS);
+    upload = command(UI_CMD_TRANSFER);
+    CHECK(upload != NULL);
+    if (upload != NULL) {
+        CHECK(upload->pane == UI_PANE_LOCAL_RIGHT);
+        CHECK(strcmp(upload->path2, "/") == 0);
+    }
+
+    /* With both panes local there is no upload target. */
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    s_state.panes[UI_PANE_LOCAL_RIGHT].selected = 2;
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_TRANSFER) == NULL);
+    CHECK(strcmp(s_state.status, "NO REMOTE VIEW") == 0);
+
+    /* ACTIONS names the same target and dims UPLOAD in both-local mode. */
+    s_state.right_view = UI_PANE_REMOTE;
+    s_state.active_pane = UI_PANE_LOCAL;
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    ui_actions_prepare(&s_state);
+    CHECK(strcmp(s_state.actions.other, "/") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 1);
+
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.other[0] == '\0');
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_UPLOAD], "NO REMOTE VIEW") ==
+          0);
+
+    /* The right local view's ledger follows the same target rule. */
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.pane == UI_PANE_LOCAL_RIGHT);
+    CHECK(s_state.actions.other[0] == '\0');
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+
+    s_state.right_view = UI_PANE_REMOTE;
+    s_state.active_pane = UI_PANE_REMOTE;
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    ui_actions_prepare(&s_state);
+    CHECK(strcmp(s_state.actions.other, "ux0:data") == 0);
+
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    s_state.panes[UI_PANE_LOCAL_RIGHT].selected = 2;
+    ui_actions_prepare(&s_state);
+    CHECK(strcmp(s_state.actions.other, "/") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 1);
+}
+
+/* A lost session clears only the remote view's marks; both local views keep
+ * their rows, cursor, and marks. */
+static void test_session_loss_only_remote(void)
+{
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    send_key(UI_KEY_SQUARE);
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    s_state.panes[UI_PANE_LOCAL_RIGHT].selected = 2;
+    send_key(UI_KEY_SQUARE);
+    s_state.right_view = UI_PANE_REMOTE;
+    s_state.active_pane = UI_PANE_REMOTE;
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
+    CHECK(mark_count(UI_PANE_LOCAL_RIGHT) == 1);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+
+    const UiRow *right_rows = s_state.panes[UI_PANE_LOCAL_RIGHT].rows;
+    int right_count = s_state.panes[UI_PANE_LOCAL_RIGHT].row_count;
+    int right_selected = s_state.panes[UI_PANE_LOCAL_RIGHT].selected;
+
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_SESSION_LOST;
+    event.pane = UI_PANE_REMOTE;
+    snprintf(event.text, sizeof(event.text), "CONTROL LOST");
+    send_event(&event);
+
+    CHECK(mark_count(UI_PANE_REMOTE) == 0);
+    CHECK(mark_count(UI_PANE_LOCAL) == 1);
+    CHECK(mark_count(UI_PANE_LOCAL_RIGHT) == 1);
+    CHECK(s_state.panes[UI_PANE_REMOTE].connected == 0);
+    CHECK(s_state.panes[UI_PANE_LOCAL].connected == 1);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].connected == 1);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].rows == right_rows);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].row_count == right_count);
+    CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].selected == right_selected);
+}
+
 int main(void)
 {
     test_workspace_nav();
+    test_three_view_model();
+    test_views_keep_state();
+    test_right_local_listing_independent();
+    test_transfer_targets();
+    test_session_loss_only_remote();
     test_stick_scroll();
     test_marks();
     test_open_and_parent();

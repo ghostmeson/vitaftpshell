@@ -25,6 +25,7 @@ static UiState s_state;
 static UiRow s_rows[16];
 static UiMark s_local_marks[16];
 static UiMark s_remote_marks[16];
+static UiMark s_local_right_marks[16];
 static UiConfirmItem s_items[12];
 
 static void row_init(int i, const char *name, UiRowType type, uint64_t size,
@@ -43,8 +44,12 @@ static void setup(void)
     memset(s_rows, 0, sizeof(s_rows));
     memset(s_local_marks, 0, sizeof(s_local_marks));
     memset(s_remote_marks, 0, sizeof(s_remote_marks));
+    memset(s_local_right_marks, 0, sizeof(s_local_right_marks));
 
-    ui_state_init(&s_state, s_local_marks, 16, s_remote_marks, 16);
+    UiMark *marks[UI_PANE_COUNT] = {s_local_marks, s_remote_marks,
+                                    s_local_right_marks};
+    int caps[UI_PANE_COUNT] = {16, 16, 16};
+    ui_state_init(&s_state, marks, caps);
     row_init(0, "..", UI_ROW_UP, 0, 0);
     row_init(1, "FILE.BIN", UI_ROW_FILE, 1024, 1);
     row_init(2, "FOLDER", UI_ROW_DIR, 0, 0);
@@ -299,6 +304,19 @@ static void test_actions(void)
     CHECK(trace_text_at("DELETE", 50.0f, 262.0f));
     CHECK(trace_text_at("REFRESH", 50.0f, 306.0f));
     CHECK(trace_text_at("DISCONNECT", 50.0f, 350.0f));
+
+    /* The right local view is still a LOCAL ledger and a LOCAL target. */
+    setup();
+    s_state.screen = UI_SCREEN_ACTIONS;
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    s_state.panes[UI_PANE_LOCAL_RIGHT].selected = 1;
+    ui_actions_prepare(&s_state);
+    render();
+    CHECK(trace_text_at("LOCAL ACTIONS", 32.0f, 84.0f));
+    CHECK(trace_text_at("LOCAL", 596.0f, 108.0f));
+    CHECK(trace_text_at("COPY", 50.0f, 130.0f));
+    CHECK(trace_text_at("UPLOAD", 50.0f, 218.0f));
 }
 
 static void test_server(void)

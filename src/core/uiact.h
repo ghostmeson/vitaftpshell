@@ -13,9 +13,16 @@
  * is a value, never a callback: the UI never calls the engine directly.
  */
 
+/*
+ * The view key, not the slot. UI_PANE_LOCAL is the left slot and is always
+ * local; the right slot shows either UI_PANE_REMOTE or UI_PANE_LOCAL_RIGHT,
+ * selected by UiState.right_view (KTD1). The left keeps index 0 so every
+ * existing local reference keeps its meaning.
+ */
 typedef enum {
     UI_PANE_LOCAL = 0,
     UI_PANE_REMOTE,
+    UI_PANE_LOCAL_RIGHT,
     UI_PANE_COUNT
 } UiPane;
 

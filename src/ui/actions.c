@@ -122,7 +122,8 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
     Rect panel = {(float)r->x, (float)r->y, (float)r->w, (float)r->h};
     ui_panel_frame(panel, 0, C_CYAN);
 
-    font_text_tracked(pane == UI_PANE_LOCAL ? "LOCAL ACTIONS" : "REMOTE ACTIONS",
+    font_text_tracked(ui_pane_is_local(pane) ? "LOCAL ACTIONS"
+                                             : "REMOTE ACTIONS",
                       32.0f, 84.0f, PX_LABEL, C_DIM, 2.0f);
     font_text(actions->path, 32.0f, 102.0f, PX_MICRO, C_CYAN);
 
@@ -221,7 +222,7 @@ static void target_draw(const UiState *state, const LayoutRect *r)
     ui_panel_frame(panel, 0, C_CYAN);
 
     font_text("TARGET", 596.0f, 84.0f, PX_MICRO, C_DIM);
-    font_text(pane == UI_PANE_LOCAL ? "LOCAL" : "REMOTE", 596.0f, 108.0f,
+    font_text(ui_pane_is_local(pane) ? "LOCAL" : "REMOTE", 596.0f, 108.0f,
               PX_LABEL, C_WHITE);
     font_text(actions->dest, 596.0f, 126.0f, PX_MICRO, C_CYAN);
 
@@ -276,7 +277,7 @@ static void target_draw(const UiState *state, const LayoutRect *r)
             ? "--"
             : ((selected == UI_ACTION_COPY || selected == UI_ACTION_MOVE)
                    ? "CLIPBOARD"
-                   : (pane == UI_PANE_LOCAL ? actions->dest : actions->other));
+                   : (ui_pane_is_local(pane) ? actions->dest : actions->other));
     font_text_right(destination, 928.0f, 224.0f, PX_MICRO, C_CYAN);
 
     font_text(action_label(selected), 596.0f, 300.0f, PX_LABEL, C_WHITE);

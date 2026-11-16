@@ -32,6 +32,9 @@
  */
 
 #define WORKER_LIST_CAP 2000
+/* KTD8: every view's listing arena must fit inside this named ceiling:
+ * UI_PANE_COUNT * HANDOFF_LIST_GENS * WORKER_LIST_CAP * sizeof(UiRow). */
+#define WORKER_LISTING_ARENA_BUDGET_BYTES (6u * 1024u * 1024u)
 #define WORKER_FACTS_MAX 1024
 
 typedef struct {

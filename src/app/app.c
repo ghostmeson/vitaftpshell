@@ -33,6 +33,7 @@ struct App {
     UiState state;
     UiMark local_marks[APP_MARK_CAP];
     UiMark remote_marks[APP_MARK_CAP];
+    UiMark local_right_marks[APP_MARK_CAP];
     InputRepeat repeat;
 
     int worker_thread;
@@ -350,14 +351,14 @@ static void drain_events(App *app)
         case HANDOFF_EVT_SESSION:
             if (event.connected) {
                 ui.kind = UI_EVT_SESSION_OK;
-                ui.pane = UI_PANE_REMOTE;
+                ui.pane = ui_pane_remote_view();
                 fmt_copy(ui.site, sizeof(ui.site), event.detail);
                 fmt_copy(ui.host, sizeof(ui.host), event.path);
                 ui.port = event.port;
                 feed(app, &ui);
             } else {
                 ui.kind = UI_EVT_SESSION_LOST;
-                ui.pane = UI_PANE_REMOTE;
+                ui.pane = ui_pane_remote_view();
                 fmt_copy(ui.text, sizeof(ui.text), event.detail);
                 feed(app, &ui);
 
@@ -538,8 +539,10 @@ App *app_create(const AppPorts *ports, int worker_thread)
     }
     worker_start(app->worker);
 
-    ui_state_init(&app->state, app->local_marks, APP_MARK_CAP,
-                  app->remote_marks, APP_MARK_CAP);
+    UiMark *marks[UI_PANE_COUNT] = {app->local_marks, app->remote_marks,
+                                    app->local_right_marks};
+    int caps[UI_PANE_COUNT] = {APP_MARK_CAP, APP_MARK_CAP, APP_MARK_CAP};
+    ui_state_init(&app->state, marks, caps);
     input_repeat_init(&app->repeat);
 
     const Settings *settings = worker_settings(app->worker);

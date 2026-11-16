@@ -57,9 +57,19 @@ static UiCommand *emit(UiCommand *out, int max, int *count,
     return command;
 }
 
-static UiPane other_pane(UiPane pane)
+UiPane ui_pane_right_view(const UiState *state)
 {
-    return pane == UI_PANE_LOCAL ? UI_PANE_REMOTE : UI_PANE_LOCAL;
+    return state != NULL ? state->right_view : UI_PANE_REMOTE;
+}
+
+int ui_pane_is_local(UiPane pane)
+{
+    return pane == UI_PANE_LOCAL || pane == UI_PANE_LOCAL_RIGHT;
+}
+
+UiPane ui_pane_remote_view(void)
+{
+    return UI_PANE_REMOTE;
 }
 
 /* Every command in one reducer emission carries the same batch id, so the
@@ -180,7 +190,7 @@ static void leave_editor(UiState *state)
 static int join_path(UiPane pane, const UiPaneState *pane_state,
                      const char *name, char *out, size_t cap)
 {
-    if (pane == UI_PANE_LOCAL) {
+    if (ui_pane_is_local(pane)) {
         if (strchr(name, ':') != NULL) {
             int n = snprintf(out, cap, "%s", name);
             return n > 0 && (size_t)n < cap;
@@ -250,7 +260,7 @@ static int volume_changed(UiPane pane, const char *old_path,
         new_path[0] == '\0')
         return 0;
 
-    if (pane == UI_PANE_LOCAL) {
+    if (ui_pane_is_local(pane)) {
         Volume old_volume;
         Volume new_volume;
         if (!path_volume(old_path, &old_volume) ||
@@ -540,7 +550,7 @@ static void close_confirm(UiState *state, int return_to_editor)
 
 static int action_for_pane(UiPane pane, UiAction action, UiClipMode clip)
 {
-    if (pane == UI_PANE_LOCAL) {
+    if (ui_pane_is_local(pane)) {
         if (action == UI_ACTION_DOWNLOAD || action == UI_ACTION_REFRESH ||
             action == UI_ACTION_DISCONNECT)
             return 0;
@@ -594,6 +604,8 @@ void ui_actions_prepare(UiState *state)
 
     UiActions *actions = &state->actions;
     UiPane pane_index = state->active_pane;
+    int local_pane = ui_pane_is_local(pane_index);
+    UiPane remote_view = ui_pane_remote_view();
     UiPaneState *pane = &state->panes[pane_index];
     /* Never read the row arena while a listing is being written. */
     const UiRow *row = pane->loading ? NULL : selected_row(state, pane_index);
@@ -626,24 +638,35 @@ void ui_actions_prepare(UiState *state)
     actions->marked = pane->mark_count;
     fmt_copy(actions->path, sizeof(actions->path), source);
     fmt_copy(actions->dest, sizeof(actions->dest), pane->path);
-    fmt_copy(actions->other, sizeof(actions->other), state->panes[other_pane(pane_index)].path);
+    /* A local upload targets the remote view only while it is shown; a
+     * download always lands in the left local view (KTD1). */
+    if (local_pane) {
+        if (state->right_view == remote_view)
+            fmt_copy(actions->other, sizeof(actions->other),
+                     state->panes[remote_view].path);
+        else
+            actions->other[0] = '\0';
+    } else {
+        fmt_copy(actions->other, sizeof(actions->other),
+                 state->panes[UI_PANE_LOCAL].path);
+    }
 
     /*
      * The lock belongs to the selected item, not to the folder the cursor is
      * in. A file inside ux0: is not the volume root; treating it as one made
      * every action unavailable while browsing a volume root.
      */
-    int virtual_root = pane_index == UI_PANE_LOCAL &&
+    int virtual_root = local_pane &&
                        strcmp(pane->path, "*") == 0;
     int source_is_root =
         has_selection &&
-        (pane_index == UI_PANE_LOCAL
+        (local_pane
              ? (strcmp(source, "*") == 0 || path_is_volume_root(source))
              : strcmp(source, "/") == 0);
     int protected_source = 0;
     int read_only_source = 0;
     PathRisk risk = PATH_RISK_NORMAL;
-    if (has_selection && pane_index == UI_PANE_LOCAL && source[0] != '\0') {
+    if (has_selection && local_pane && source[0] != '\0') {
         PathResult check = path_check_delete(source, 0, &risk);
         if (check == PATH_PROTECTED || check == PATH_DENIED)
             protected_source = 1;
@@ -661,7 +684,7 @@ void ui_actions_prepare(UiState *state)
         source_is_dir = 1;
     }
 
-    if (pane_index == UI_PANE_LOCAL) {
+    if (local_pane) {
         if (!has_selection) {
             disable(actions, UI_ACTION_COPY, "NO SELECTION");
             disable(actions, UI_ACTION_MOVE, "NO SELECTION");
@@ -750,25 +773,33 @@ void ui_actions_prepare(UiState *state)
             disable(actions, UI_ACTION_DISCONNECT, "TRANSFER IN PROGRESS");
     }
 
-    if (has_selection &&
-        ((pane_index == UI_PANE_LOCAL &&
-          !state->panes[UI_PANE_REMOTE].connected) ||
-         (pane_index == UI_PANE_REMOTE && !pane->connected)))
-        disable(actions, UI_ACTION_UPLOAD, "NOT CONNECTED");
-    if (pane_index == UI_PANE_LOCAL && has_selection &&
-        state->panes[UI_PANE_REMOTE].loading)
-        disable(actions, UI_ACTION_UPLOAD, "REMOTE READING");
+    if (local_pane) {
+        /* UPLOAD exists as a row in both-local mode but has no target, so it
+         * is dim even with no selection (AE8). The reason is applied last so
+         * NO SELECTION cannot mask it. */
+        if (state->right_view != remote_view)
+            disable(actions, UI_ACTION_UPLOAD, "NO REMOTE VIEW");
+        else if (has_selection && !state->panes[remote_view].connected)
+            disable(actions, UI_ACTION_UPLOAD, "NOT CONNECTED");
+        else if (has_selection && state->panes[remote_view].loading)
+            disable(actions, UI_ACTION_UPLOAD, "REMOTE READING");
+    }
 }
 
 static void handle_workspace_key(UiState *state, const UiStateEvent *event,
                                  UiCommand *out, int max, int *count)
 {
     UiPaneState *pane = &state->panes[state->active_pane];
-    UiPane other = other_pane(state->active_pane);
+    int local_pane = ui_pane_is_local(state->active_pane);
+    UiPane remote_view = ui_pane_remote_view();
     UiKey key = event->key;
 
     if (key == UI_KEY_L1 || key == UI_KEY_R1) {
-        state->active_pane = other;
+        /* L/R moves between the left slot and whichever view the right slot
+         * shows; it is a slot move, never a session action (KTD1). */
+        state->active_pane = state->active_pane == UI_PANE_LOCAL
+                                 ? state->right_view
+                                 : UI_PANE_LOCAL;
         set_focus(state, UI_FOCUS_LIST);
         return;
     }
@@ -802,7 +833,7 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
 
     if (pane->loading &&
         (key == UI_KEY_CROSS || key == UI_KEY_SQUARE)) {
-        if (state->active_pane == UI_PANE_REMOTE)
+        if (!local_pane)
             set_status(state, "READING");
         return;
     }
@@ -850,11 +881,11 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         }
 
         if (is_dir) {
-            if (state->active_pane == UI_PANE_REMOTE && !pane->connected) {
+            if (!local_pane && !pane->connected) {
                 set_status(state, "NOT CONNECTED");
                 return;
             }
-            if (state->active_pane == UI_PANE_REMOTE && pane->loading) {
+            if (!local_pane && pane->loading) {
                 set_status(state, "READING");
                 return;
             }
@@ -868,12 +899,23 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
             return;
         }
 
-        if ((state->active_pane == UI_PANE_REMOTE && !pane->connected) ||
-            (state->active_pane == UI_PANE_LOCAL &&
-             !state->panes[other].connected)) {
+        if (local_pane) {
+            /* A local transfer is an upload. Without the remote view on
+             * screen there is no target to name (AE10). */
+            if (state->right_view != remote_view) {
+                set_status(state, "NO REMOTE VIEW");
+                return;
+            }
+            if (!state->panes[remote_view].connected) {
+                set_status(state, "NOT CONNECTED");
+                return;
+            }
+        } else if (!pane->connected) {
             set_status(state, "NOT CONNECTED");
             return;
         }
+
+        UiPane target_view = local_pane ? remote_view : UI_PANE_LOCAL;
 
         if (pane->mark_count > 0) {
             for (int i = 0; i < pane->mark_count; ++i) {
@@ -892,7 +934,8 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
                 c->total = pane->marks[i].size;
                 c->total_known = pane->marks[i].size_known;
                 fmt_copy(c->path, sizeof(c->path), pane->marks[i].path.text);
-                fmt_copy(c->path2, sizeof(c->path2), state->panes[other].path);
+                fmt_copy(c->path2, sizeof(c->path2),
+                         state->panes[target_view].path);
                 c->value = pane->mark_count;
             }
             return;
@@ -905,34 +948,32 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
             c->total = row->size;
             c->total_known = row->size_known;
             fmt_copy(c->path, sizeof(c->path), full);
-            fmt_copy(c->path2, sizeof(c->path2), state->panes[other].path);
+            fmt_copy(c->path2, sizeof(c->path2),
+                     state->panes[target_view].path);
             c->value = 0;
         }
         return;
     }
     case UI_KEY_CIRCLE:
-        if (state->active_pane == UI_PANE_LOCAL &&
-            strcmp(pane->path, "*") == 0) {
+        if (local_pane && strcmp(pane->path, "*") == 0) {
             set_status(state, "AT ROOT");
             return;
         }
-        if (state->active_pane == UI_PANE_LOCAL &&
-            path_is_volume_root(pane->path)) {
+        if (local_pane && path_is_volume_root(pane->path)) {
             UiCommand *c = emit(out, max, count, UI_CMD_GO_PARENT);
             if (c != NULL)
                 c->pane = state->active_pane;
             return;
         }
-        if (state->active_pane == UI_PANE_REMOTE && !pane->connected) {
+        if (!local_pane && !pane->connected) {
             set_status(state, "NOT CONNECTED");
             return;
         }
-        if (state->active_pane == UI_PANE_REMOTE && pane->loading) {
+        if (!local_pane && pane->loading) {
             set_status(state, "READING");
             return;
         }
-        if (state->active_pane == UI_PANE_REMOTE &&
-            strcmp(pane->path, "/") == 0) {
+        if (!local_pane && strcmp(pane->path, "/") == 0) {
             set_status(state, "AT ROOT");
             return;
         }
@@ -978,7 +1019,7 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
 
 static void clear_remote_session(UiState *state)
 {
-    UiPaneState *remote = &state->panes[UI_PANE_REMOTE];
+    UiPaneState *remote = &state->panes[ui_pane_remote_view()];
 
     remote->connected = 0;
     remote->session_lost = 0;
@@ -1007,7 +1048,7 @@ static void clear_remote_session(UiState *state)
 static void begin_remote_connect(UiState *state)
 {
     clear_remote_session(state);
-    state->panes[UI_PANE_REMOTE].loading = 1;
+    state->panes[ui_pane_remote_view()].loading = 1;
     state->sites.connecting = 1;
 }
 
@@ -1496,7 +1537,7 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
             if (c != NULL) {
                 c->action = action;
-                c->pane = UI_PANE_REMOTE;
+                c->pane = ui_pane_remote_view();
             }
             leave_screen(state);
             set_status(state, "DISCONNECTED");
@@ -1506,7 +1547,7 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
         if (action == UI_ACTION_REFRESH) {
             UiCommand *c = emit(out, max, count, UI_CMD_REFRESH);
             if (c != NULL)
-                c->pane = UI_PANE_REMOTE;
+                c->pane = ui_pane_remote_view();
             leave_screen(state);
             return;
         }
@@ -1554,7 +1595,7 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
          * reject every remote delete as INVALID PATH. Remote deletes are
          * confirmed here and executed by the FTP client. */
         if (action == UI_ACTION_DELETE &&
-            state->active_pane == UI_PANE_LOCAL) {
+            ui_pane_is_local(state->active_pane)) {
             for (int i = 0; i < source_count; ++i) {
                 PathResult result = path_check_delete(sources[i], 0, NULL);
                 if (result != PATH_OK) {
@@ -1698,7 +1739,7 @@ static int resolve_confirm_answer(UiState *state, const UiConfirm *c,
                                                    : UI_CMD_CANCEL_LOCAL;
     }
     if (c->kind == UI_CONFIRM_PATH_BUSY && choice == UI_CHOICE_WAIT) {
-        if (c->pane == UI_PANE_REMOTE) {
+        if (c->pane == (int)ui_pane_remote_view()) {
             state->dock.waiting = 1;
             state->dock_primary = UI_DOCK_LANE_NETWORK;
         } else {
@@ -1891,8 +1932,8 @@ static void handle_key(UiState *state, const UiStateEvent *event,
     }
 }
 
-void ui_state_init(UiState *state, UiMark *local_marks, int local_cap,
-                   UiMark *remote_marks, int remote_cap)
+void ui_state_init(UiState *state, UiMark *marks[UI_PANE_COUNT],
+                   const int caps[UI_PANE_COUNT])
 {
     if (state == NULL)
         return;
@@ -1903,19 +1944,22 @@ void ui_state_init(UiState *state, UiMark *local_marks, int local_cap,
     state->confirm_return = UI_SCREEN_WORKSPACE;
     state->editor_return = UI_SCREEN_WORKSPACE;
     state->active_pane = UI_PANE_LOCAL;
+    state->right_view = ui_pane_remote_view();
     state->focus = UI_FOCUS_LIST;
 
-    UiPaneState *local = &state->panes[UI_PANE_LOCAL];
-    snprintf(local->path, sizeof(local->path), "*");
-    local->connected = 1;
-    local->marks = local_marks;
-    local->mark_cap = local_cap;
-
-    UiPaneState *remote = &state->panes[UI_PANE_REMOTE];
-    snprintf(remote->path, sizeof(remote->path), "/");
-    remote->connected = 0;
-    remote->marks = remote_marks;
-    remote->mark_cap = remote_cap;
+    for (int pane = 0; pane < UI_PANE_COUNT; ++pane) {
+        UiPaneState *view = &state->panes[pane];
+        if (ui_pane_is_local((UiPane)pane)) {
+            /* Both local views open at the virtual ALL DRIVES root. */
+            snprintf(view->path, sizeof(view->path), "*");
+            view->connected = 1;
+        } else {
+            snprintf(view->path, sizeof(view->path), "/");
+            view->connected = 0;
+        }
+        view->marks = marks != NULL ? marks[pane] : NULL;
+        view->mark_cap = caps != NULL ? caps[pane] : 0;
+    }
 
     state->dock.state = UI_DOCK_IDLE;
     state->sites.count = 0;
@@ -1992,7 +2036,7 @@ void ui_state_set_rows(UiState *state, UiPane pane, const UiRow *rows,
     p->truncated = truncated;
     p->loading = 0;
     p->empty = count == 0;
-    prune_marks(p, pane == UI_PANE_REMOTE);
+    prune_marks(p, !ui_pane_is_local(pane));
     clamp_pane(p);
 }
 
@@ -2122,7 +2166,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             clear_marks(pane);
         }
         if (state->screen == UI_SCREEN_ACTIONS &&
-            state->active_pane == UI_PANE_REMOTE) {
+            state->active_pane == ui_pane_remote_view()) {
             /* The ledger's enabled flags describe the dead session. Return to
              * the workspace and its SESSION LOST prompt. */
             state->screen = UI_SCREEN_WORKSPACE;
@@ -2143,20 +2187,29 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             state->site_port = event->port > 0 ? event->port : 21;
             state->site_known = 1;
             state->sites.login_failed = 0;
-            snprintf(state->panes[UI_PANE_REMOTE].site,
-                     sizeof(state->panes[UI_PANE_REMOTE].site), "%s",
+            snprintf(state->panes[ui_pane_remote_view()].site,
+                     sizeof(state->panes[ui_pane_remote_view()].site), "%s",
                      event->site);
         }
         break;
     case UI_EVT_ERROR:
-        if (event->pane == UI_PANE_REMOTE) {
+        if (event->pane == (int)ui_pane_remote_view()) {
             state->sites.connecting = 0;
             /* A command can fail before any LISTING_END exists (busy client,
              * refused CWD, not connected). Clear the eager READING state here
              * or the pane stays on READING forever. */
-            UiPaneState *remote = &state->panes[UI_PANE_REMOTE];
+            UiPaneState *remote = &state->panes[ui_pane_remote_view()];
             remote->loading = 0;
             remote->pending_path[0] = '\0';
+        } else if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
+            /* A local OPEN that never started a listing leaves the same
+             * READING latch; only clear it when an eager open is pending, so
+             * an unrelated action error cannot expose a half-written arena. */
+            UiPaneState *local = &state->panes[event->pane];
+            if (local->pending_path[0] != '\0') {
+                local->loading = 0;
+                local->pending_path[0] = '\0';
+            }
         }
         set_status(state, event->text);
         if (event->pane >= 0 && event->pane < UI_PANE_COUNT)
@@ -2171,8 +2224,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (event->direction_known)
             lane->direction = (XferDirection)event->direction;
         else
-            lane->direction = event->pane == UI_PANE_LOCAL ? XFER_DIR_UPLOAD
-                                                           : XFER_DIR_DOWNLOAD;
+            lane->direction = ui_pane_is_local((UiPane)event->pane)
+                                  ? XFER_DIR_UPLOAD
+                                  : XFER_DIR_DOWNLOAD;
         fmt_copy(lane->name, sizeof(lane->name), event->text);
         lane->skipped = 0;
         lane->failed = 0;

@@ -67,7 +67,7 @@ static int pane_risk(const UiRow *row)
 static int row_path(UiPane pane, const UiPaneState *pane_state,
                     const char *name, char *out, size_t cap)
 {
-    if (pane == UI_PANE_LOCAL) {
+    if (ui_pane_is_local(pane)) {
         if (strcmp(pane_state->path, "*") == 0) {
             int n = snprintf(out, cap, "%s", name);
             return n > 0 && (size_t)n < cap;
@@ -107,7 +107,7 @@ static void band(const UiState *state, UiPane pane, const LayoutRect *r)
     if (p->session_lost)
         path_color = C_DIM;
 
-    const char *title = pane == UI_PANE_LOCAL ? "LOCAL" : "REMOTE";
+    const char *title = ui_pane_is_local(pane) ? "LOCAL" : "REMOTE";
     font_text_tracked(title, (float)r->x + PANE_INSET,
                       (float)r->y + PANE_TITLE_Y, PX_LABEL, title_color, 2.0f);
 
@@ -144,7 +144,7 @@ static void band(const UiState *state, UiPane pane, const LayoutRect *r)
                  sizeof(fitted));
         font_text(fitted, (float)r->x + PANE_INSET,
                   (float)r->y + PANE_PATH_Y, PX_MICRO, C_RED);
-    } else if (pane == UI_PANE_LOCAL) {
+    } else if (ui_pane_is_local(pane)) {
         const char *path_text = strcmp(p->path, "*") == 0 ? "ALL DRIVES"
                                                           : p->path;
         font_text(path_text, (float)r->x + PANE_INSET,
@@ -342,7 +342,7 @@ static void pane_draw(const UiState *state, UiPane pane, const LayoutRect *r)
 
     if (p->session_lost) {
         centered_state(state, pane, r);
-    } else if (pane == UI_PANE_REMOTE && !p->connected) {
+    } else if (!ui_pane_is_local(pane) && !p->connected) {
         not_connected(state, r);
     } else if (p->loading) {
         ui_center("READING", (float)r->x, (float)r->w,
@@ -409,7 +409,7 @@ void workspace_draw(const UiState *state)
         return;
 
     pane_draw(state, UI_PANE_LOCAL, &r[1]);
-    pane_draw(state, UI_PANE_REMOTE, &r[2]);
+    pane_draw(state, ui_pane_right_view(state), &r[2]);
 
     dock_draw(state);
 

@@ -27,6 +27,7 @@ static UiState s_state;
 static UiRow s_rows[16];
 static UiMark s_local_marks[16];
 static UiMark s_remote_marks[16];
+static UiMark s_local_right_marks[16];
 
 static void row_init(int i, const char *name, UiRowType type, uint64_t size,
                      int size_known, int risk)
@@ -45,8 +46,12 @@ static void setup(void)
     memset(s_rows, 0, sizeof(s_rows));
     memset(s_local_marks, 0, sizeof(s_local_marks));
     memset(s_remote_marks, 0, sizeof(s_remote_marks));
+    memset(s_local_right_marks, 0, sizeof(s_local_right_marks));
 
-    ui_state_init(&s_state, s_local_marks, 16, s_remote_marks, 16);
+    UiMark *marks[UI_PANE_COUNT] = {s_local_marks, s_remote_marks,
+                                    s_local_right_marks};
+    int caps[UI_PANE_COUNT] = {16, 16, 16};
+    ui_state_init(&s_state, marks, caps);
 
     row_init(0, "..", UI_ROW_UP, 0, 0, 0);
     row_init(1, "VITAFTPSHELL", UI_ROW_DIR, 0, 0, 0);
@@ -489,12 +494,39 @@ static void test_aside_notice_done(void)
     CHECK(trace_has_text_prefix_color("ASIDE CLEANUP FAILED", C_YELLOW));
 }
 
+/* The both-local workspace: both bands read LOCAL, and the right slot draws
+ * whatever view it holds, with its own path and free space. */
+static void test_both_local(void)
+{
+    setup();
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    UiPaneState *right = &s_state.panes[UI_PANE_LOCAL_RIGHT];
+    snprintf(right->path, sizeof(right->path), "ur0:data");
+    snprintf(right->free_text, sizeof(right->free_text), "3.1 GB");
+    right->free_known = 1;
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL_RIGHT, s_rows, 3, 0);
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    render();
+
+    CHECK(trace_text_at_color("LOCAL", 32.0f, 84.0f, C_DIM));
+    CHECK(trace_text_at_color("LOCAL", 500.0f, 84.0f, C_YELLOW));
+    CHECK(!trace_has_text("REMOTE"));
+    CHECK(trace_text_at("ur0:data", 500.0f, 102.0f));
+    CHECK(trace_has_text("3.1 GB"));
+    CHECK(trace_has_line(486.0f, 76.0f, 486.0f + 456.0f - 14.0f, 76.0f,
+                         C_YELLOW));
+    CHECK(!trace_has_line(18.0f, 76.0f, 18.0f + 456.0f - 14.0f, 76.0f,
+                          C_YELLOW));
+    CHECK(trace_has_rect(486.0f, 76.0f, 456.0f, 352.0f, C_PANEL));
+}
+
 int main(void)
 {
     test_ten_rows_and_scroll();
     test_truncation_and_value();
     test_aside_debris_mark();
     test_active_pane();
+    test_both_local();
     test_first_2000();
     test_risk_mark();
     test_pane_error();

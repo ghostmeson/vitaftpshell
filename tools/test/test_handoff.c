@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/worker.h"
 #include "core/handoff.h"
 
 static int s_failures;
@@ -266,6 +267,78 @@ static void test_listing_adopt(void)
     CHECK(s_handoff.listings[UI_PANE_LOCAL].slots[1].held == 0);
 
     handoff_listing_release(&s_handoff, UI_PANE_LOCAL);
+}
+
+/* The third view has its own generations: a right-local publish never bumps
+ * the left local slot or changes its rows (KTD1). */
+static void test_third_listing_independent(void)
+{
+    handoff_init(&s_handoff);
+    static int left_rows[] = {1, 2, 3};
+    static int right_rows[] = {7, 8};
+
+    CHECK(UI_PANE_COUNT == 3);
+    int left_slot = handoff_listing_begin(&s_handoff, UI_PANE_LOCAL);
+    CHECK(left_slot == 0);
+    CHECK(handoff_listing_publish(&s_handoff, UI_PANE_LOCAL, left_slot,
+                                  left_rows, 3) == 1);
+
+    int right_slot = handoff_listing_begin(&s_handoff, UI_PANE_LOCAL_RIGHT);
+    CHECK(right_slot >= 0);
+    CHECK(handoff_listing_publish(&s_handoff, UI_PANE_LOCAL_RIGHT, right_slot,
+                                  right_rows, 2) == 1);
+
+    CHECK(s_handoff.listings[UI_PANE_LOCAL].next_generation == 1);
+    CHECK(s_handoff.listings[UI_PANE_LOCAL_RIGHT].next_generation == 1);
+
+    const void *rows = NULL;
+    int count = 0;
+    uint32_t generation = 0;
+    CHECK(handoff_listing_acquire(&s_handoff, UI_PANE_LOCAL, &rows, &count,
+                                  &generation) == 1);
+    CHECK(rows == left_rows);
+    CHECK(count == 3);
+    CHECK(generation == 1);
+    CHECK(handoff_listing_acquire(&s_handoff, UI_PANE_LOCAL_RIGHT, &rows,
+                                  &count, &generation) == 1);
+    CHECK(rows == right_rows);
+    CHECK(count == 2);
+    CHECK(generation == 1);
+
+    handoff_listing_release(&s_handoff, UI_PANE_LOCAL);
+    handoff_listing_release(&s_handoff, UI_PANE_LOCAL_RIGHT);
+    CHECK(handoff_listing_acquire(&s_handoff, UI_PANE_LOCAL, &rows, &count,
+                                  &generation) == 1);
+    CHECK(rows == left_rows);
+
+    /* A new right-local generation leaves the left counter and rows alone. */
+    static int right_rows_2[] = {9};
+    right_slot = handoff_listing_begin(&s_handoff, UI_PANE_LOCAL_RIGHT);
+    CHECK(right_slot >= 0);
+    CHECK(handoff_listing_publish(&s_handoff, UI_PANE_LOCAL_RIGHT, right_slot,
+                                  right_rows_2, 1) == 1);
+    CHECK(s_handoff.listings[UI_PANE_LOCAL].next_generation == 1);
+    CHECK(s_handoff.listings[UI_PANE_LOCAL_RIGHT].next_generation == 2);
+    CHECK(handoff_listing_acquire(&s_handoff, UI_PANE_LOCAL, &rows, &count,
+                                  &generation) == 1);
+    CHECK(rows == left_rows);
+    CHECK(generation == 1);
+    CHECK(handoff_listing_acquire(&s_handoff, UI_PANE_LOCAL_RIGHT, &rows,
+                                  &count, &generation) == 1);
+    CHECK(rows == right_rows_2);
+    CHECK(count == 1);
+    CHECK(generation == 2);
+}
+
+/* KTD8: three views x three generations x the worker's cap x one row must fit
+ * the named listing-arena ceiling. */
+static void test_listing_arena_budget(void)
+{
+    size_t total = (size_t)UI_PANE_COUNT * HANDOFF_LIST_GENS *
+                   WORKER_LIST_CAP * sizeof(UiRow);
+    CHECK(UI_PANE_COUNT == 3);
+    CHECK(total > 0);
+    CHECK(total <= WORKER_LISTING_ARENA_BUDGET_BYTES);
 }
 
 static void test_log_ring(void)
@@ -551,6 +624,8 @@ int main(void)
     test_listing_generations();
     test_cancel_slots();
     test_listing_adopt();
+    test_third_listing_independent();
+    test_listing_arena_budget();
     test_log_ring();
     test_bulk();
     test_record_integrity();

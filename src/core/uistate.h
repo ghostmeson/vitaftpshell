@@ -258,6 +258,9 @@ typedef struct {
     UiScreen confirm_return;
     UiScreen editor_return;
     UiPane active_pane;
+    /* Which view the right slot shows. The left slot is always UI_PANE_LOCAL;
+     * active_pane is either the left or this value (KTD1). */
+    UiPane right_view;
     UiFocus focus;
 
     UiPaneState panes[UI_PANE_COUNT];
@@ -371,8 +374,16 @@ typedef struct {
     Site edit_site;
 } UiStateEvent;
 
-void ui_state_init(UiState *state, UiMark *local_marks, int local_cap,
-                   UiMark *remote_marks, int remote_cap);
+/* Mark storage belongs to the caller and is one buffer per view (the same
+ * shape as panes[]). */
+void ui_state_init(UiState *state, UiMark *marks[UI_PANE_COUNT],
+                   const int caps[UI_PANE_COUNT]);
+
+/* The view key helpers. The right slot's view is state; a pane is local when
+ * it is either local view, and the remote view is the one FTP session. */
+UiPane ui_pane_right_view(const UiState *state);
+int ui_pane_is_local(UiPane pane);
+UiPane ui_pane_remote_view(void);
 
 int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
                     int max);

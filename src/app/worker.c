@@ -71,6 +71,7 @@ typedef struct {
     int active;
     unsigned id;
     unsigned dropped_id;
+    UiPane pane; /* the local view that issued the batch */
     int total;
     int index;
     int done;
@@ -101,7 +102,7 @@ struct Worker {
     int settings_dirty;
     uint32_t site_generation;
 
-    char local_path[PATH_MAX_LEN];
+    char local_path[UI_PANE_COUNT][PATH_MAX_LEN];
     char remote_path[PATH_MAX_LEN];
     char store_dir[PATH_MAX_LEN];
 
@@ -125,6 +126,8 @@ struct Worker {
     UiRow *rows; /* [pane][generation][WORKER_LIST_CAP] */
 
     int collecting;
+    UiPane collect_pane;
+    UiPane listing_pane; /* the view that asked for the running remote list */
     int collect_slot;
     int collect_count;
     int remote_row_count;
@@ -230,8 +233,9 @@ static void pump_queue(Worker *worker);
 static void upload_preflight_clear(Worker *worker);
 static void start_transfer_item(Worker *worker, const XferItem *item);
 static void pump_remote_actions(Worker *worker);
-static void worker_list_local(Worker *worker, const char *path);
-static void worker_list_root(Worker *worker);
+static void worker_list_local(Worker *worker, UiPane pane, const char *path);
+static void worker_list_root(Worker *worker, UiPane pane);
+static UiPane local_view(const UiCommand *command);
 static const char *last_name(const char *path);
 static int same_folder_path(const char *a, const char *b);
 static void queue_pending_action(Worker *worker, const UiCommand *command);
@@ -280,6 +284,20 @@ static UiRow *rows_for(Worker *worker, UiPane pane, int slot)
 {
     return &worker->rows[((int)pane * HANDOFF_LIST_GENS + slot) *
                           WORKER_LIST_CAP];
+}
+
+/* A local command names the view that issued it; an old or partial command
+ * falls back to the left local view. */
+static UiPane local_view(const UiCommand *command)
+{
+    if (command == NULL)
+        return UI_PANE_LOCAL;
+    return ui_pane_is_local(command->pane) ? command->pane : UI_PANE_LOCAL;
+}
+
+static int local_index(UiPane pane)
+{
+    return ui_pane_is_local(pane) ? (int)pane : (int)UI_PANE_LOCAL;
 }
 
 static void event_init(HandoffEvent *event, HandoffEventKind kind)
@@ -355,6 +373,7 @@ static void local_batch_begin(Worker *worker, const UiCommand *command,
     memset(&worker->local_batch, 0, sizeof(worker->local_batch));
     worker->local_batch.active = 1;
     worker->local_batch.id = id;
+    worker->local_batch.pane = local_view(command);
     worker->local_batch.total = total;
     worker->local_batch.index = command->batch_index;
     worker->local_batch.direction = direction;
@@ -440,7 +459,8 @@ static void local_batch_skip_item(Worker *worker, const UiCommand *command)
     batch->skipped++;
     batch->last_ms = now_ms(worker);
     if (command->batch_last || batch->index + 1 >= batch->total) {
-        worker_list_local(worker, worker->local_path);
+        worker_list_local(worker, batch->pane,
+                          worker->local_path[local_index(batch->pane)]);
         local_batch_emit_done(worker);
     }
 }
@@ -454,7 +474,8 @@ static void local_batch_cancel(Worker *worker)
                   batch->failed - batch->cancelled;
     if (missing > 0)
         batch->cancelled += missing;
-    worker_list_local(worker, worker->local_path);
+    worker_list_local(worker, batch->pane,
+                      worker->local_path[local_index(batch->pane)]);
     local_batch_emit_done(worker);
     worker->pending_command_count = 0;
     worker->batch_execute_index = 0;
@@ -544,7 +565,8 @@ static void local_batch_advance(Worker *worker)
         /* A refused item never reaches run_plan and therefore never records
          * itself; flush the batch here instead of waiting for the idle timer. */
         if (batch->active) {
-            worker_list_local(worker, worker->local_path);
+            worker_list_local(worker, batch->pane,
+                              worker->local_path[local_index(batch->pane)]);
             local_batch_emit_done(worker);
         }
         return;
@@ -715,18 +737,19 @@ static const char *fs_result_text(FsResult result)
     }
 }
 
-/* A finished download changes the local folder; the kept-file terminal needs
- * the same refresh as a normal success. */
+/* A finished download changes the left local folder (the download target is
+ * always UI_PANE_LOCAL); the kept-file terminal needs the same refresh. */
 static void refresh_local_after_download(Worker *worker,
                                          const XferItem *item)
 {
-    if (strcmp(worker->local_path, "*") == 0) {
-        worker_list_root(worker);
+    const char *path = worker->local_path[UI_PANE_LOCAL];
+    if (strcmp(path, "*") == 0) {
+        worker_list_root(worker, UI_PANE_LOCAL);
         return;
     }
     Path parent;
     if (path_parent(item->destination.text, &parent) == PATH_OK)
-        worker_list_local(worker, parent.text);
+        worker_list_local(worker, UI_PANE_LOCAL, parent.text);
 }
 
 static void emit_transfer_done(Worker *worker, XferDirection direction,
@@ -980,18 +1003,17 @@ static int row_risk(const char *dir, const char *name)
     return path_is_high_risk(joined.text) ? PATH_RISK_HIGH : PATH_RISK_NORMAL;
 }
 
-static void worker_list_root(Worker *worker)
+static void worker_list_root(Worker *worker, UiPane pane)
 {
-    emit_listing_begin(worker, UI_PANE_LOCAL, "*");
+    emit_listing_begin(worker, pane, "*");
     log_event(worker, LOGEV_LIST, NULL, NULL, "*", "begin", "app", 0, 0);
-    int slot = handoff_listing_begin(worker->handoff, UI_PANE_LOCAL);
+    int slot = handoff_listing_begin(worker->handoff, pane);
     if (slot < 0) {
-        emit_listing_end(worker, UI_PANE_LOCAL, "*", 0, 0, 0, 0,
-                         "LISTING BUSY");
+        emit_listing_end(worker, pane, "*", 0, 0, 0, 0, "LISTING BUSY");
         return;
     }
 
-    UiRow *rows = rows_for(worker, UI_PANE_LOCAL, slot);
+    UiRow *rows = rows_for(worker, pane, slot);
     int count = 0;
     for (int v = 0; v < VOLUME_COUNT; ++v) {
         const char *name = path_volume_name((Volume)v);
@@ -1007,40 +1029,45 @@ static void worker_list_root(Worker *worker)
         row->readonly = (uint8_t)path_volume_is_read_only((Volume)v);
     }
 
-    handoff_listing_publish(worker->handoff, UI_PANE_LOCAL, slot, rows, count);
-    fmt_copy(worker->local_path, sizeof(worker->local_path), "*");
+    handoff_listing_publish(worker->handoff, pane, slot, rows, count);
+    fmt_copy(worker->local_path[local_index(pane)],
+             sizeof(worker->local_path[local_index(pane)]), "*");
     log_event(worker, LOGEV_LIST, NULL, NULL, "*", "end", "app",
               (uint64_t)count, 0);
-    emit_listing_end(worker, UI_PANE_LOCAL, "*", 1, 0, 0, 0, "");
+    emit_listing_end(worker, pane, "*", 1, 0, 0, 0, "");
 }
 
-static void worker_list_local(Worker *worker, const char *path)
+static void worker_list_local(Worker *worker, UiPane pane, const char *path)
 {
+    int index = local_index(pane);
+    if (path == NULL)
+        path = worker->local_path[index];
     if (path != NULL && strcmp(path, "*") == 0) {
-        worker_list_root(worker);
+        worker_list_root(worker, pane);
         return;
     }
 
     Path canonical;
     if (path == NULL || path_canonicalize(path, &canonical) != PATH_OK) {
-        emit_error(worker, UI_PANE_LOCAL, "INVALID PATH", OP_CAUSE_APP,
+        emit_error(worker, pane, "INVALID PATH", OP_CAUSE_APP,
                    OP_STAGE_PLAN);
         return;
     }
 
-    fmt_copy(worker->local_path, sizeof(worker->local_path), canonical.text);
-    emit_listing_begin(worker, UI_PANE_LOCAL, canonical.text);
+    fmt_copy(worker->local_path[index], sizeof(worker->local_path[index]),
+             canonical.text);
+    emit_listing_begin(worker, pane, canonical.text);
     log_event(worker, LOGEV_LIST, NULL, NULL, canonical.text, "begin", "app",
               0, 0);
 
-    int slot = handoff_listing_begin(worker->handoff, UI_PANE_LOCAL);
+    int slot = handoff_listing_begin(worker->handoff, pane);
     if (slot < 0) {
-        emit_listing_end(worker, UI_PANE_LOCAL, canonical.text, 0, 0, 0, 0,
+        emit_listing_end(worker, pane, canonical.text, 0, 0, 0, 0,
                          "LISTING BUSY");
         return;
     }
 
-    UiRow *rows = rows_for(worker, UI_PANE_LOCAL, slot);
+    UiRow *rows = rows_for(worker, pane, slot);
     int count = 0;
     int truncated = 0;
 
@@ -1055,11 +1082,10 @@ static void worker_list_local(Worker *worker, const char *path)
     FsResult result = worker->ports.fs->list_open(
         worker->ports.fs->ctx, canonical.text, &dir);
     if (result != FS_OK) {
-        handoff_listing_publish(worker->handoff, UI_PANE_LOCAL, slot, rows,
-                                count);
+        handoff_listing_publish(worker->handoff, pane, slot, rows, count);
         log_event(worker, LOGEV_LIST, NULL, NULL, canonical.text, "open",
                   "storage", count, 0);
-        emit_listing_end(worker, UI_PANE_LOCAL, canonical.text, 0, 0, 0, 0,
+        emit_listing_end(worker, pane, canonical.text, 0, 0, 0, 0,
                          fs_result_text(result));
         return;
     }
@@ -1098,7 +1124,7 @@ static void worker_list_local(Worker *worker, const char *path)
     int start = count > 0 && rows[0].type == UI_ROW_UP ? 1 : 0;
     sort_rows(rows, count, start);
 
-    handoff_listing_publish(worker->handoff, UI_PANE_LOCAL, slot, rows, count);
+    handoff_listing_publish(worker->handoff, pane, slot, rows, count);
 
     int free_known = 0;
     uint64_t free_bytes = 0;
@@ -1130,17 +1156,20 @@ static void worker_list_local(Worker *worker, const char *path)
     int ok = stopped_at_cap || next == FS_END;
     log_event(worker, LOGEV_LIST, NULL, NULL, canonical.text,
               ok ? "end" : "read", ok ? "app" : "storage", count, 0);
-    emit_listing_end(worker, UI_PANE_LOCAL, canonical.text, ok, truncated,
+    emit_listing_end(worker, pane, canonical.text, ok, truncated,
                      free_bytes, free_known,
                      ok ? "" : fs_result_text(next));
-    worker->settings_dirty = 1;
-    fmt_copy(worker->settings.last_local, sizeof(worker->settings.last_local),
-             canonical.text);
+    if (pane == UI_PANE_LOCAL) {
+        worker->settings_dirty = 1;
+        fmt_copy(worker->settings.last_local,
+                 sizeof(worker->settings.last_local), canonical.text);
+    }
 }
 
 /* --- remote listing ---------------------------------------------------- */
 
-static void remote_listing_begin(Worker *worker, const char *path)
+static void remote_listing_begin(Worker *worker, UiPane pane,
+                                 const char *path)
 {
     log_event(worker, LOGEV_LIST, NULL, NULL, path, "begin", "app", 0, 0);
     /* A begin that cannot take a slot must not leave an earlier collection's
@@ -1148,18 +1177,19 @@ static void remote_listing_begin(Worker *worker, const char *path)
      * refresh, and a stale flag would make it wait for a listing that never
      * publishes (KTD5). */
     worker->collecting = 0;
-    int slot = handoff_listing_begin(worker->handoff, UI_PANE_REMOTE);
+    int slot = handoff_listing_begin(worker->handoff, pane);
     if (slot < 0) {
-        emit_listing_end(worker, UI_PANE_REMOTE, path, 0, 0, 0, 0, "LISTING BUSY");
+        emit_listing_end(worker, pane, path, 0, 0, 0, 0, "LISTING BUSY");
         return;
     }
     worker->collecting = 1;
+    worker->collect_pane = pane;
     worker->collect_slot = slot;
     worker->collect_count = 0;
     worker->remote_row_count = 0;
     worker->collect_truncated = 0;
     fmt_copy(worker->remote_path, sizeof(worker->remote_path), path != NULL ? path : "/");
-    emit_listing_begin(worker, UI_PANE_REMOTE, worker->remote_path);
+    emit_listing_begin(worker, pane, worker->remote_path);
 }
 
 static void remote_listing_row(Worker *worker, const ListingEntry *entry)
@@ -1170,7 +1200,7 @@ static void remote_listing_row(Worker *worker, const ListingEntry *entry)
         worker->collect_truncated = 1;
         return;
     }
-    UiRow *rows = rows_for(worker, UI_PANE_REMOTE, worker->collect_slot);
+    UiRow *rows = rows_for(worker, worker->collect_pane, worker->collect_slot);
     UiRow *row = &rows[worker->collect_count++];
     memset(row, 0, sizeof(*row));
     fmt_copy(row->name, sizeof(row->name), entry->name);
@@ -1189,7 +1219,8 @@ static void remote_listing_end(Worker *worker, int ok)
     if (!worker->collecting)
         return;
 
-    UiRow *rows = rows_for(worker, UI_PANE_REMOTE, worker->collect_slot);
+    UiPane pane = worker->collect_pane;
+    UiRow *rows = rows_for(worker, pane, worker->collect_slot);
     int count = worker->collect_count;
     int start = 0;
     /* The client already skips `.` and `..`; add the local UP row unless the
@@ -1209,12 +1240,12 @@ static void remote_listing_end(Worker *worker, int ok)
 
     sort_rows(rows, count, start);
     worker->remote_row_count = count;
-    handoff_listing_publish(worker->handoff, UI_PANE_REMOTE,
+    handoff_listing_publish(worker->handoff, pane,
                             worker->collect_slot, rows, count);
     log_event(worker, LOGEV_LIST, NULL, NULL, worker->remote_path,
               ok ? "end" : "read", ok ? "app" : "server",
               (uint64_t)count, 0);
-    emit_listing_end(worker, UI_PANE_REMOTE, worker->remote_path, ok,
+    emit_listing_end(worker, pane, worker->remote_path, ok,
                      worker->collect_truncated, 0, 0,
                      ok ? "" : "REMOTE LISTING FAILED");
     worker->collecting = 0;
@@ -1236,7 +1267,7 @@ static int remote_listing_type(Worker *worker, const char *destination)
         return -1;
     const char *name = last_name(destination);
     const UiRow *rows =
-        rows_for(worker, UI_PANE_REMOTE, worker->collect_slot);
+        rows_for(worker, worker->collect_pane, worker->collect_slot);
     for (int i = 0; i < worker->remote_row_count; ++i) {
         if (strcmp(rows[i].name, name) == 0)
             return rows[i].type;
@@ -1251,18 +1282,20 @@ static void remote_listing_abort(Worker *worker)
 {
     if (!worker->collecting)
         return;
-    UiRow *rows = rows_for(worker, UI_PANE_REMOTE, worker->collect_slot);
-    handoff_listing_publish(worker->handoff, UI_PANE_REMOTE,
+    UiPane pane = worker->collect_pane;
+    UiRow *rows = rows_for(worker, pane, worker->collect_slot);
+    handoff_listing_publish(worker->handoff, pane,
                             worker->collect_slot, rows, worker->collect_count);
     worker->collecting = 0;
     worker->collect_count = 0;
 }
 
-static FtpClientResult remote_list(Worker *worker)
+static FtpClientResult remote_list(Worker *worker, UiPane pane)
 {
     if (worker->client == NULL ||
         ftp_client_state(worker->client) != FTP_CLIENT_READY)
         return FTP_CLIENT_NOT_CONNECTED;
+    worker->listing_pane = pane;
     return ftp_client_list(worker->client,
                            ftp_client_cwd_text(worker->client));
 }
@@ -1344,6 +1377,7 @@ static void request_local_conflict(Worker *worker, const UiCommand *command,
     memset(&request, 0, sizeof(request));
     request.kind = UI_CONFIRM_CONFLICT;
     request.valid = 1;
+    request.pane = local_view(command);
     fmt_copy(request.context, sizeof(request.context),
              ui_action_context(command->action));
     request.item_count = plan->existing_count;
@@ -1591,7 +1625,7 @@ static void request_path_busy(Worker *worker, const UiCommand *command,
     fmt_copy(request.items[0].name, sizeof(request.items[0].name), blocker);
     confirm_request(worker, &request);
 
-    request.pane = UI_PANE_LOCAL;
+    request.pane = local_view(command);
     worker->busy_command = *command;
     worker->busy_plan = plan;
     fmt_copy(worker->busy_blocker, sizeof(worker->busy_blocker), blocker);
@@ -1658,6 +1692,7 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
     FsOpPlan *plan = worker->local_plan;
     XferDirection direction = action_direction(command.action);
     LocalBatch *batch = &worker->local_batch;
+    UiPane issuing = local_view(&command);
     int item_index = batch->active ? batch->index + 1 : 1;
     int item_total = batch->active ? batch->total : 1;
 
@@ -1669,7 +1704,7 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
         log_event(worker, LOGEV_TRANSFER_DONE, NULL, NULL, command.path,
                   "done", "app", progress.bytes_done, progress.bytes_total);
     } else {
-        emit_error(worker, UI_PANE_LOCAL, progress.message, progress.cause,
+        emit_error(worker, issuing, progress.message, progress.cause,
                    progress.stage);
         log_event(worker, LOGEV_TRANSFER_FAIL, NULL, NULL, command.path,
                   op_stage_name(progress.stage), op_cause_name(progress.cause),
@@ -1700,7 +1735,9 @@ static void finish_local_run(Worker *worker, FsOpRunResult result)
         local_batch_cancel(worker);
     } else if (command.batch_last || !batch->active ||
                batch->index + 1 >= batch->total) {
-        worker_list_local(worker, worker->local_path);
+        UiPane refresh = batch->active ? batch->pane : issuing;
+        worker_list_local(worker, refresh,
+                          worker->local_path[local_index(refresh)]);
         local_batch_emit_done(worker);
     }
 
@@ -1753,8 +1790,8 @@ static void busy_retry(Worker *worker)
     if (held == 0)
         return;
     if (held < 0) {
-        emit_error(worker, UI_PANE_LOCAL, "TOO MANY FILES TO TRACK", OP_CAUSE_APP,
-                   OP_STAGE_PLAN);
+        emit_error(worker, local_view(&worker->busy_command),
+                   "TOO MANY FILES TO TRACK", OP_CAUSE_APP, OP_STAGE_PLAN);
         free(worker->busy_plan);
         worker->busy_plan = NULL;
         worker->busy_waiting = 0;
@@ -1781,8 +1818,8 @@ static int start_local_plan(Worker *worker, const UiCommand *command,
     char blocker[PATH_MAX_LEN];
     int held = reserve_local_plan(worker, plan, blocker, sizeof(blocker));
     if (held < 0) {
-        emit_error(worker, UI_PANE_LOCAL, "TOO MANY FILES TO TRACK", OP_CAUSE_APP,
-                   OP_STAGE_PLAN);
+        emit_error(worker, local_view(command), "TOO MANY FILES TO TRACK",
+                   OP_CAUSE_APP, OP_STAGE_PLAN);
         return 0;
     }
     if (held == 0) {
@@ -1804,8 +1841,8 @@ static int run_plan_begin(Worker *worker, const UiCommand *command,
 
     FsOpRun *run = fsop_run_create(plan);
     if (run == NULL) {
-        emit_error(worker, UI_PANE_LOCAL, "OUT OF MEMORY", OP_CAUSE_APP,
-                   OP_STAGE_PLAN);
+        emit_error(worker, local_view(command), "OUT OF MEMORY",
+                   OP_CAUSE_APP, OP_STAGE_PLAN);
         return 0;
     }
 
@@ -1894,8 +1931,8 @@ static void queue_pending_action(Worker *worker, const UiCommand *command)
     if (worker->pending_command_count >=
         (int)(sizeof(worker->pending_commands) /
               sizeof(worker->pending_commands[0]))) {
-        emit_error(worker, UI_PANE_LOCAL, "ACTION QUEUE FULL", OP_CAUSE_APP,
-                   OP_STAGE_PLAN);
+        emit_error(worker, local_view(command), "ACTION QUEUE FULL",
+                   OP_CAUSE_APP, OP_STAGE_PLAN);
         return;
     }
     worker->pending_commands[worker->pending_command_count++] = *command;
@@ -1906,6 +1943,7 @@ static void execute_action(Worker *worker, const UiCommand *command,
 {
     const char *source = command->path;
     const char *destination = command->path2;
+    UiPane issuing = local_view(command);
 
     FsOpKind kind;
     switch (command->action) {
@@ -1925,8 +1963,8 @@ static void execute_action(Worker *worker, const UiCommand *command,
         kind = FSOP_RENAME;
         break;
     default:
-        emit_error(worker, UI_PANE_LOCAL, "ACTION NOT SUPPORTED",
-                   OP_CAUSE_APP, OP_STAGE_PLAN);
+        emit_error(worker, issuing, "ACTION NOT SUPPORTED", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
         return;
     }
 
@@ -1945,7 +1983,7 @@ static void execute_action(Worker *worker, const UiCommand *command,
         fact_tree(worker, source, 0);
     }
     if (worker->fact_count == 0 || worker->facts_truncated) {
-        emit_error(worker, UI_PANE_LOCAL,
+        emit_error(worker, issuing,
                    worker->facts_truncated ? "PLAN TOO LARGE"
                                            : "SOURCE NOT FOUND",
                    OP_CAUSE_APP, OP_STAGE_PLAN);
@@ -1961,16 +1999,16 @@ static void execute_action(Worker *worker, const UiCommand *command,
     if ((kind == FSOP_COPY || kind == FSOP_MOVE) && destination != NULL &&
         destination[0] != '\0') {
         if (!build_dest_facts(worker, source, destination, source_is_dir)) {
-            emit_error(worker, UI_PANE_LOCAL, "PLAN TOO LARGE",
-                       OP_CAUSE_APP, OP_STAGE_PLAN);
+            emit_error(worker, issuing, "PLAN TOO LARGE", OP_CAUSE_APP,
+                       OP_STAGE_PLAN);
             return;
         }
         if (kind == FSOP_COPY &&
             same_folder_path(source, destination))
             add_copy_candidates(worker, source, destination, source_is_dir);
         if (worker->facts_truncated) {
-            emit_error(worker, UI_PANE_LOCAL, "PLAN TOO LARGE",
-                       OP_CAUSE_APP, OP_STAGE_PLAN);
+            emit_error(worker, issuing, "PLAN TOO LARGE", OP_CAUSE_APP,
+                       OP_STAGE_PLAN);
             return;
         }
     }
@@ -1991,14 +2029,14 @@ static void execute_action(Worker *worker, const UiCommand *command,
 
     FsOpPlan *plan = calloc(1, sizeof(FsOpPlan));
     if (plan == NULL) {
-        emit_error(worker, UI_PANE_LOCAL, "OUT OF MEMORY", OP_CAUSE_APP,
+        emit_error(worker, issuing, "OUT OF MEMORY", OP_CAUSE_APP,
                    OP_STAGE_PLAN);
         return;
     }
 
     int built = fsop_plan_build(plan, &request);
     if (!built || !plan->ok) {
-        emit_error(worker, UI_PANE_LOCAL,
+        emit_error(worker, issuing,
                    plan->reason[0] != '\0' ? plan->reason : "PLAN REFUSED",
                    OP_CAUSE_APP, OP_STAGE_PLAN);
         free(plan);
@@ -2148,17 +2186,19 @@ static void handle_disconnect(Worker *worker)
 
 static void handle_action(Worker *worker, const UiCommand *command)
 {
+    UiPane issuing = local_view(command);
     if (command->action == UI_ACTION_UPLOAD ||
         command->action == UI_ACTION_DOWNLOAD) {
         UiCommand transfer = *command;
         transfer.type = UI_CMD_TRANSFER;
-        transfer.pane = command->action == UI_ACTION_UPLOAD ? UI_PANE_LOCAL
-                                                            : UI_PANE_REMOTE;
+        transfer.pane = command->action == UI_ACTION_UPLOAD
+                            ? issuing
+                            : ui_pane_remote_view();
         handle_transfer(worker, &transfer);
         return;
     }
 
-    if (command->pane == UI_PANE_REMOTE) {
+    if (command->pane == ui_pane_remote_view()) {
         if (command->action == UI_ACTION_DISCONNECT) {
             handle_disconnect(worker);
             return;
@@ -2176,16 +2216,16 @@ static void handle_action(Worker *worker, const UiCommand *command)
         command->action != UI_ACTION_DELETE &&
         command->action != UI_ACTION_NEW_FOLDER &&
         command->action != UI_ACTION_RENAME) {
-        emit_error(worker, UI_PANE_LOCAL, "ACTION NOT SUPPORTED",
-                   OP_CAUSE_APP, OP_STAGE_PLAN);
+        emit_error(worker, issuing, "ACTION NOT SUPPORTED", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
         return;
     }
 
     /* One local job at a time. A second action must not overwrite the run that
      * is still copying: the old run, its handle, and its temp would leak. */
     if (worker->local_run != NULL || worker->busy_plan != NULL) {
-        emit_error(worker, UI_PANE_LOCAL, "LOCAL JOB IN PROGRESS",
-                   OP_CAUSE_APP, OP_STAGE_TRANSFER);
+        emit_error(worker, issuing, "LOCAL JOB IN PROGRESS", OP_CAUSE_APP,
+                   OP_STAGE_TRANSFER);
         return;
     }
 
@@ -2218,7 +2258,7 @@ static void handle_action(Worker *worker, const UiCommand *command)
     if (command->action == UI_ACTION_NEW_FOLDER ||
         command->action == UI_ACTION_RENAME) {
         if (command->text[0] == '\0') {
-            emit_error(worker, UI_PANE_LOCAL, "NAME REQUIRED", OP_CAUSE_APP,
+            emit_error(worker, issuing, "NAME REQUIRED", OP_CAUSE_APP,
                        OP_STAGE_PLAN);
             return;
         }
@@ -2227,16 +2267,16 @@ static void handle_action(Worker *worker, const UiCommand *command)
             const char *dir = command->path2[0] != '\0' ? command->path2
                                                          : command->path;
             if (path_join(dir, command->text, &target) != PATH_OK) {
-                emit_error(worker, UI_PANE_LOCAL, "PATH TOO LONG",
-                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                emit_error(worker, issuing, "PATH TOO LONG", OP_CAUSE_APP,
+                           OP_STAGE_PLAN);
                 return;
             }
         } else {
             Path parent;
             if (path_parent(command->path, &parent) != PATH_OK ||
                 path_join(parent.text, command->text, &target) != PATH_OK) {
-                emit_error(worker, UI_PANE_LOCAL, "PATH TOO LONG",
-                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                emit_error(worker, issuing, "PATH TOO LONG", OP_CAUSE_APP,
+                           OP_STAGE_PLAN);
                 return;
             }
         }
@@ -2346,14 +2386,14 @@ static void handle_connect(Worker *worker, const UiCommand *command)
 
 static void handle_transfer(Worker *worker, const UiCommand *command)
 {
-    if (command->pane == UI_PANE_LOCAL && !worker->connected) {
-        emit_error(worker, UI_PANE_LOCAL, "NOT CONNECTED", OP_CAUSE_APP,
-                   OP_STAGE_CONNECT);
+    if (ui_pane_is_local(command->pane) && !worker->connected) {
+        emit_error(worker, local_view(command), "NOT CONNECTED",
+                   OP_CAUSE_APP, OP_STAGE_CONNECT);
         return;
     }
-    if (command->pane == UI_PANE_REMOTE && !worker->connected) {
-        emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
-                   OP_STAGE_CONNECT);
+    if (command->pane == ui_pane_remote_view() && !worker->connected) {
+        emit_error(worker, ui_pane_remote_view(), "NOT CONNECTED",
+                   OP_CAUSE_APP, OP_STAGE_CONNECT);
         return;
     }
     enqueue_transfer(worker, command);
@@ -2449,7 +2489,8 @@ static void start_transfer_item(Worker *worker, const XferItem *item)
                                                         : UI_PANE_REMOTE,
                    detail, cause, OP_STAGE_TRANSFER);
         if (item->direction == XFER_DIR_DOWNLOAD)
-            worker_list_local(worker, worker->local_path);
+            worker_list_local(worker, UI_PANE_LOCAL,
+                              worker->local_path[UI_PANE_LOCAL]);
         batch_finish(worker);
         return;
     }
@@ -2525,6 +2566,7 @@ static UploadRefresh upload_stat_refresh(Worker *worker)
         strcmp(worker->remote_path, parent) != 0)
         return UPLOAD_REFRESH_UNTYPED;
 
+    worker->listing_pane = ui_pane_remote_view();
     FtpClientResult result = ftp_client_list(worker->client, parent);
     if (result == FTP_CLIENT_BUSY)
         return UPLOAD_REFRESH_BUSY;
@@ -2755,24 +2797,25 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
         return;
     }
 
-    if (command->pane == UI_PANE_LOCAL) {
+    if (ui_pane_is_local(command->pane)) {
+        UiPane issuing = local_view(command);
         item.direction = XFER_DIR_UPLOAD;
         Path source;
         if (path_canonicalize(command->path, &source) != PATH_OK) {
-            emit_error(worker, UI_PANE_LOCAL, "INVALID SOURCE", OP_CAUSE_APP,
+            emit_error(worker, issuing, "INVALID SOURCE", OP_CAUSE_APP,
                        OP_STAGE_PLAN);
             return;
         }
         const char *name = last_name(source.text);
         if (!path_name_is_safe(name)) {
-            emit_error(worker, UI_PANE_LOCAL, "UNSAFE NAME", OP_CAUSE_APP,
+            emit_error(worker, issuing, "UNSAFE NAME", OP_CAUSE_APP,
                        OP_STAGE_PLAN);
             return;
         }
         fmt_copy(item.source.text, sizeof(item.source.text), source.text);
         char remote[PATH_MAX_LEN];
         if (!remote_join(command->path2, name, remote, sizeof(remote))) {
-            emit_error(worker, UI_PANE_LOCAL, "REMOTE PATH TOO LONG",
+            emit_error(worker, issuing, "REMOTE PATH TOO LONG",
                        OP_CAUSE_APP, OP_STAGE_PLAN);
             return;
         }
@@ -2781,7 +2824,7 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
         if (worker->ports.fs->stat(worker->ports.fs->ctx, source.text,
                                    &entry) == FS_OK) {
             if (entry.type == FS_ENTRY_DIR) {
-                emit_error(worker, UI_PANE_LOCAL,
+                emit_error(worker, issuing,
                            "FOLDER TRANSFER NOT SUPPORTED", OP_CAUSE_APP,
                            OP_STAGE_PLAN);
                 return;
@@ -2818,8 +2861,10 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
     }
 
     if (!xfer_enqueue(&worker->queue, &item)) {
-        emit_error(worker, UI_PANE_REMOTE, "QUEUE FULL", OP_CAUSE_APP,
-                   OP_STAGE_PLAN);
+        emit_error(worker,
+                   ui_pane_is_local(command->pane) ? local_view(command)
+                                                   : ui_pane_remote_view(),
+                   "QUEUE FULL", OP_CAUSE_APP, OP_STAGE_PLAN);
         return;
     }
     worker->batch_total++;
@@ -3051,7 +3096,7 @@ static void client_event(void *ctx, const FtpClientEvent *event)
         }
         break;
     case FTP_CLIENT_EVENT_LISTING_BEGIN:
-        remote_listing_begin(worker, event->path);
+        remote_listing_begin(worker, worker->listing_pane, event->path);
         break;
     case FTP_CLIENT_EVENT_LISTING_ROW:
         remote_listing_row(worker, event->row);
@@ -3277,37 +3322,39 @@ static void handle_command(Worker *worker, const UiCommand *command)
 {
     switch (command->type) {
     case UI_CMD_OPEN_PATH:
-        if (command->pane == UI_PANE_LOCAL) {
-            worker_list_local(worker, command->path);
+        if (ui_pane_is_local(command->pane)) {
+            worker_list_local(worker, (UiPane)command->pane, command->path);
         } else if (!worker->connected) {
-            emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
-                       OP_STAGE_COMMAND);
+            emit_error(worker, ui_pane_remote_view(), "NOT CONNECTED",
+                       OP_CAUSE_APP, OP_STAGE_COMMAND);
         } else {
             FtpClientResult result =
                 ftp_client_cwd(worker->client, command->path);
             if (result != FTP_CLIENT_OK)
-                emit_error(worker, UI_PANE_REMOTE,
+                emit_error(worker, ui_pane_remote_view(),
                            result == FTP_CLIENT_BUSY ? "BUSY - TRY AGAIN"
                                                      : "NOT CONNECTED",
                            OP_CAUSE_APP, OP_STAGE_COMMAND);
         }
         break;
     case UI_CMD_GO_PARENT:
-        if (command->pane == UI_PANE_LOCAL) {
-            if (strcmp(worker->local_path, "*") == 0) {
-                worker_list_root(worker);
-            } else if (path_is_volume_root(worker->local_path)) {
-                worker_list_root(worker);
+        if (ui_pane_is_local(command->pane)) {
+            UiPane pane = (UiPane)command->pane;
+            const char *path = worker->local_path[local_index(pane)];
+            if (strcmp(path, "*") == 0) {
+                worker_list_root(worker, pane);
+            } else if (path_is_volume_root(path)) {
+                worker_list_root(worker, pane);
             } else {
                 Path parent;
-                if (path_parent(worker->local_path, &parent) == PATH_OK)
-                    worker_list_local(worker, parent.text);
+                if (path_parent(path, &parent) == PATH_OK)
+                    worker_list_local(worker, pane, parent.text);
                 else
-                    worker_list_local(worker, worker->local_path);
+                    worker_list_local(worker, pane, path);
             }
         } else if (!worker->connected) {
-            emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
-                       OP_STAGE_COMMAND);
+            emit_error(worker, ui_pane_remote_view(), "NOT CONNECTED",
+                       OP_CAUSE_APP, OP_STAGE_COMMAND);
         } else {
             char parent[PATH_MAX_LEN];
             const char *cwd = ftp_client_cwd_text(worker->client);
@@ -3315,7 +3362,7 @@ static void handle_command(Worker *worker, const UiCommand *command)
                 FtpClientResult result =
                     ftp_client_cwd(worker->client, parent);
                 if (result != FTP_CLIENT_OK)
-                    emit_error(worker, UI_PANE_REMOTE,
+                    emit_error(worker, ui_pane_remote_view(),
                                result == FTP_CLIENT_BUSY ? "BUSY - TRY AGAIN"
                                                          : "NOT CONNECTED",
                                OP_CAUSE_APP, OP_STAGE_COMMAND);
@@ -3323,16 +3370,18 @@ static void handle_command(Worker *worker, const UiCommand *command)
         }
         break;
     case UI_CMD_REFRESH:
-        if (command->pane == UI_PANE_LOCAL)
-            worker_list_local(worker, worker->local_path);
-        else if (!worker->connected)
-            emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
-                       OP_STAGE_COMMAND);
+        if (ui_pane_is_local(command->pane)) {
+            UiPane pane = (UiPane)command->pane;
+            worker_list_local(worker, pane,
+                              worker->local_path[local_index(pane)]);
+        } else if (!worker->connected)
+            emit_error(worker, ui_pane_remote_view(), "NOT CONNECTED",
+                       OP_CAUSE_APP, OP_STAGE_COMMAND);
         else if (worker->transfer_active || xfer_busy(&worker->queue) ||
                  ftp_server_busy(worker->server))
             /* Latch it; worker_step re-issues once the lanes are idle. */
             worker->refresh_remote = 1;
-        else if (remote_list(worker) != FTP_CLIENT_OK)
+        else if (remote_list(worker, ui_pane_remote_view()) != FTP_CLIENT_OK)
             emit_error(worker, UI_PANE_REMOTE, "BUSY - TRY AGAIN",
                        OP_CAUSE_APP, OP_STAGE_COMMAND);
         break;
@@ -3641,6 +3690,8 @@ Worker *worker_create(const WorkerPorts *ports, Handoff *handoff)
         return NULL;
     }
     worker->last_site_index = -1;
+    worker->collect_pane = ui_pane_remote_view();
+    worker->listing_pane = ui_pane_remote_view();
     worker->rows = calloc((size_t)UI_PANE_COUNT * HANDOFF_LIST_GENS *
                               WORKER_LIST_CAP,
                           sizeof(UiRow));
@@ -3703,7 +3754,8 @@ static void pick_local_path(Worker *worker)
         if (worker->ports.fs->stat(worker->ports.fs->ctx, path, &entry) ==
                 FS_OK &&
             entry.type == FS_ENTRY_DIR) {
-            fmt_copy(worker->local_path, sizeof(worker->local_path), path);
+            fmt_copy(worker->local_path[UI_PANE_LOCAL],
+                     sizeof(worker->local_path[UI_PANE_LOCAL]), path);
             return;
         }
     }
@@ -3713,11 +3765,13 @@ static void pick_local_path(Worker *worker)
         if (worker->ports.fs->stat(worker->ports.fs->ctx, name, &entry) ==
                 FS_OK &&
             entry.type == FS_ENTRY_DIR) {
-            fmt_copy(worker->local_path, sizeof(worker->local_path), name);
+            fmt_copy(worker->local_path[UI_PANE_LOCAL],
+                     sizeof(worker->local_path[UI_PANE_LOCAL]), name);
             return;
         }
     }
-    snprintf(worker->local_path, sizeof(worker->local_path), "ux0:data");
+    snprintf(worker->local_path[UI_PANE_LOCAL],
+             sizeof(worker->local_path[UI_PANE_LOCAL]), "ux0:data");
 }
 
 void worker_start(Worker *worker)
@@ -3747,9 +3801,16 @@ void worker_start(Worker *worker)
         worker->settings.server_port = 1337;
 
     pick_local_path(worker);
-    fmt_copy(worker->local_path, sizeof(worker->local_path), "*");
+    /* Both local views open at ALL DRIVES. The right local view is listed at
+     * start too, so its first switch already has rows (KTD1). */
+    for (int pane = 0; pane < UI_PANE_COUNT; ++pane) {
+        if (ui_pane_is_local((UiPane)pane))
+            fmt_copy(worker->local_path[pane], sizeof(worker->local_path[pane]),
+                     "*");
+    }
     snprintf(worker->settings.last_local,
-             sizeof(worker->settings.last_local), "%s", worker->local_path);
+             sizeof(worker->settings.last_local), "%s",
+             worker->local_path[UI_PANE_LOCAL]);
 
     worker->ready = 1;
     worker->initial_list = 1;
@@ -3788,7 +3849,11 @@ void worker_step(Worker *worker)
 
     if (worker->initial_list) {
         worker->initial_list = 0;
-        worker_list_local(worker, worker->local_path);
+        for (int pane = 0; pane < UI_PANE_COUNT; ++pane) {
+            if (ui_pane_is_local((UiPane)pane))
+                worker_list_local(worker, (UiPane)pane,
+                                  worker->local_path[pane]);
+        }
     }
 
     ftp_client_tick(worker->client,
@@ -3799,7 +3864,7 @@ void worker_step(Worker *worker)
         !worker->transfer_active && !xfer_busy(&worker->queue) &&
         !ftp_server_busy(worker->server) && !ftp_client_busy(worker->client)) {
         worker->refresh_remote = 0;
-        if (remote_list(worker) != FTP_CLIENT_OK)
+        if (remote_list(worker, ui_pane_remote_view()) != FTP_CLIENT_OK)
             emit_error(worker, UI_PANE_REMOTE, "LIST FAILED", OP_CAUSE_APP,
                        OP_STAGE_COMMAND);
     }
