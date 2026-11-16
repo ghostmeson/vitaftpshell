@@ -1566,6 +1566,253 @@ static void test_session_lost_clears_identity(void)
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
 }
 
+static UiStateEvent connect_ok_event(void)
+{
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_SESSION_OK;
+    event.pane = UI_PANE_REMOTE;
+    snprintf(event.site, sizeof(event.site), "HOME NAS");
+    snprintf(event.host, sizeof(event.host), "192.168.1.20");
+    event.port = 2121;
+    return event;
+}
+
+static UiStateEvent connect_fail_event(UiStateEventKind kind, const char *text)
+{
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = kind;
+    event.pane = UI_PANE_REMOTE;
+    snprintf(event.text, sizeof(event.text), "%s", text);
+    return event;
+}
+
+/* A connect from SITES records where it started, replaces the old session
+ * before dialing, and lands on the remote view when it succeeds (R13, R21). */
+static void test_connect_from_sites_success(void)
+{
+    reset();
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.sites.count = 2;
+    CHECK(s_state.panes[UI_PANE_REMOTE].connected == 1);
+    CHECK(s_state.panes[UI_PANE_REMOTE].row_count == 3);
+
+    send_key(UI_KEY_SELECT);
+    CHECK(s_state.screen == UI_SCREEN_SITES);
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CONNECT_SITE) != NULL);
+    CHECK(s_state.sites.connecting == 1);
+    CHECK(s_state.sites.connect_from_sites == 1);
+    /* A new attempt drops the old session before it dials. */
+    CHECK(s_state.panes[UI_PANE_REMOTE].connected == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].row_count == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].rows == NULL);
+    CHECK(s_state.site_known == 0);
+
+    UiStateEvent event = connect_ok_event();
+    send_event(&event);
+    CHECK(s_state.right_view == UI_PANE_REMOTE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(s_state.active_pane == UI_PANE_REMOTE);
+    CHECK(s_state.focus == UI_FOCUS_LIST);
+    CHECK(s_state.sites.connecting == 0);
+    CHECK(s_state.sites.connect_from_sites == 0);
+    CHECK(s_state.sites.login_failed == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].connected == 1);
+    CHECK(strcmp(s_state.site_name, "HOME NAS") == 0);
+}
+
+/* A success after the user left SITES switches the right view but leaves the
+ * screen and the pane focus where the user put them. */
+static void test_connect_success_after_leaving_sites(void)
+{
+    reset();
+    s_state.sites.count = 2;
+    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_CROSS);
+    send_key(UI_KEY_CIRCLE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+
+    /* The right pane went local while the worker was still dialing. */
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.active_pane = UI_PANE_LOCAL;
+    UiStateEvent event = connect_ok_event();
+    send_event(&event);
+    CHECK(s_state.right_view == UI_PANE_REMOTE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(s_state.active_pane == UI_PANE_LOCAL);
+    CHECK(s_state.focus == UI_FOCUS_LIST);
+
+    /* A user who moved on to SERVER stays there. */
+    reset();
+    s_state.sites.count = 2;
+    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_CROSS);
+    send_key(UI_KEY_CIRCLE);
+    send_key(UI_KEY_START);
+    CHECK(s_state.screen == UI_SCREEN_SERVER);
+    event = connect_ok_event();
+    send_event(&event);
+    CHECK(s_state.right_view == UI_PANE_REMOTE);
+    CHECK(s_state.screen == UI_SCREEN_SERVER);
+    CHECK(s_state.focus == UI_FOCUS_SERVER);
+}
+
+/* A failure from SITES keeps SITES in front with the reason on the card for
+ * every class: login, resolve, refusal, and a rejected host. */
+static void test_connect_failure_stays_on_sites(void)
+{
+    static const struct {
+        UiStateEventKind kind;
+        const char *text;
+    } cases[] = {
+        {UI_EVT_SESSION_LOST, "Login incorrect."},
+        {UI_EVT_SESSION_LOST, "RESOLVE FAILED"},
+        {UI_EVT_SESSION_LOST, "CONNECT FAILED"},
+        {UI_EVT_ERROR, "CONNECT REFUSED"},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        reset();
+        s_state.sites.count = 2;
+        send_key(UI_KEY_SELECT);
+        send_key(UI_KEY_CROSS);
+        CHECK(s_state.sites.connect_from_sites == 1);
+
+        UiStateEvent event = connect_fail_event(cases[i].kind, cases[i].text);
+        send_event(&event);
+        CHECK(s_state.screen == UI_SCREEN_SITES);
+        CHECK(s_state.focus == UI_FOCUS_SITES);
+        CHECK(s_state.sites.connecting == 0);
+        CHECK(s_state.sites.connect_from_sites == 0);
+        CHECK(s_state.sites.login_failed == 1);
+        CHECK(strcmp(s_state.sites.reply, cases[i].text) == 0);
+        CHECK(s_state.panes[UI_PANE_REMOTE].connected == 0);
+    }
+
+    /* The stored reason is not cleared by an unrelated local error. */
+    UiStateEvent local = connect_fail_event(UI_EVT_ERROR, "NO FOLDER");
+    local.pane = UI_PANE_LOCAL;
+    send_event(&local);
+    CHECK(s_state.sites.login_failed == 1);
+    CHECK(strcmp(s_state.sites.reply, "CONNECT REFUSED") == 0);
+
+    /* An unrelated error while the attempt is in flight does not consume it. */
+    reset();
+    s_state.sites.count = 2;
+    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_CROSS);
+    local = connect_fail_event(UI_EVT_ERROR, "NO FOLDER");
+    local.pane = UI_PANE_LOCAL;
+    send_event(&local);
+    CHECK(s_state.sites.connecting == 1);
+    CHECK(s_state.sites.connect_from_sites == 1);
+    CHECK(s_state.sites.login_failed == 0);
+}
+
+/* A failure that arrives after the user left SITES keeps the current screen
+ * and puts the mapped reason on the dock's message line and the site card. */
+static void test_connect_failure_after_leaving_sites(void)
+{
+    reset();
+    s_state.sites.count = 2;
+    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_CROSS);
+    send_key(UI_KEY_CIRCLE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+
+    UiStateEvent event =
+        connect_fail_event(UI_EVT_SESSION_LOST, "RESOLVE FAILED");
+    send_event(&event);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(s_state.focus == UI_FOCUS_LIST);
+    CHECK(strcmp(s_state.status, "RESOLVE FAILED") == 0);
+    CHECK(s_state.sites.login_failed == 1);
+    CHECK(strcmp(s_state.sites.reply, "RESOLVE FAILED") == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].session_lost == 1);
+
+    /* The same holds on another screen, and for a rejected host. */
+    reset();
+    s_state.sites.count = 2;
+    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_CROSS);
+    send_key(UI_KEY_CIRCLE);
+    send_key(UI_KEY_START);
+    CHECK(s_state.screen == UI_SCREEN_SERVER);
+    event = connect_fail_event(UI_EVT_ERROR, "CONNECT REFUSED");
+    send_event(&event);
+    CHECK(s_state.screen == UI_SCREEN_SERVER);
+    CHECK(s_state.focus == UI_FOCUS_SERVER);
+    CHECK(strcmp(s_state.status, "CONNECT REFUSED") == 0);
+    CHECK(strcmp(s_state.sites.reply, "CONNECT REFUSED") == 0);
+}
+
+/* A pane reconnect is not a SITES connect; its success does not close a
+ * screen the user moved to. */
+static void test_pane_reconnect_not_from_sites(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    UiStateEvent lost = connect_fail_event(UI_EVT_SESSION_LOST, "CONTROL LOST");
+    send_event(&lost);
+    CHECK(s_state.panes[UI_PANE_REMOTE].session_lost == 1);
+
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_RECONNECT) != NULL);
+    CHECK(s_state.sites.connecting == 1);
+    CHECK(s_state.sites.connect_from_sites == 0);
+
+    UiStateEvent event = connect_ok_event();
+    send_event(&event);
+    CHECK(s_state.right_view == UI_PANE_REMOTE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    CHECK(s_state.active_pane == UI_PANE_REMOTE);
+    CHECK(s_state.panes[UI_PANE_REMOTE].session_lost == 0);
+}
+
+/* ACTIONS, SITES, and SERVER stay reachable on a lost remote view so the
+ * switch row can still take the user to the local pane (R7, KTD4). */
+static void test_screen_keys_on_lost_view(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    UiStateEvent lost = connect_fail_event(UI_EVT_SESSION_LOST, "CONTROL LOST");
+    send_event(&lost);
+    CHECK(s_state.panes[UI_PANE_REMOTE].session_lost == 1);
+
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
+    CHECK(s_state.actions.pane == UI_PANE_REMOTE);
+    CHECK(s_state.actions.visible_count == 7);
+    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
+    s_state.actions.selected = UI_ACTION_SWITCH_LOCAL;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.right_view == UI_PANE_LOCAL_RIGHT);
+    CHECK(s_state.active_pane == UI_PANE_LOCAL_RIGHT);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+
+    reset();
+    send_key(UI_KEY_L1);
+    lost = connect_fail_event(UI_EVT_SESSION_LOST, "CONTROL LOST");
+    send_event(&lost);
+    send_key(UI_KEY_SELECT);
+    CHECK(s_state.screen == UI_SCREEN_SITES);
+    send_key(UI_KEY_CIRCLE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+    send_key(UI_KEY_START);
+    CHECK(s_state.screen == UI_SCREEN_SERVER);
+    send_key(UI_KEY_CIRCLE);
+    CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
+
+    /* Cross still reconnects and Circle still dismisses. */
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_RECONNECT) != NULL);
+    send_key(UI_KEY_CIRCLE);
+    CHECK(s_state.panes[UI_PANE_REMOTE].session_lost == 0);
+}
+
 static void test_remote_marks_pruned(void)
 {
     reset();
@@ -2103,6 +2350,12 @@ int main(void)
     test_remote_unsafe_and_folder();
     test_remote_error_clears_reading();
     test_session_lost_clears_identity();
+    test_connect_from_sites_success();
+    test_connect_success_after_leaving_sites();
+    test_connect_failure_stays_on_sites();
+    test_connect_failure_after_leaving_sites();
+    test_pane_reconnect_not_from_sites();
+    test_screen_keys_on_lost_view();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_uistate: %d failure(s)\n", s_failures);

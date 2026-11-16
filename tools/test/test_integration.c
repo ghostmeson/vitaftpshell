@@ -119,9 +119,13 @@ static void connect_site_listing(App *app, FakePeer *peer, const char *listing,
     CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
     CHECK(app_state(app)->panes[UI_PANE_REMOTE].row_count >= 2);
 
-    /* Leave SITES so L/R and the workspace keys apply. */
-    press(app, INPUT_BIT(INPUT_CIRCLE));
+    /* A successful connect from SITES returns to the workspace by itself
+     * (R21). Only close SITES when it is still in front. */
+    if (app_state(app)->screen == UI_SCREEN_SITES)
+        press(app, INPUT_BIT(INPUT_CIRCLE));
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+    CHECK(app_state(app)->right_view == UI_PANE_REMOTE);
+    CHECK(app_state(app)->active_pane == UI_PANE_REMOTE);
 }
 
 static void connect_site(App *app, FakePeer *peer)
@@ -134,8 +138,28 @@ static void connect_site(App *app, FakePeer *peer)
 
 static void select_remote(App *app)
 {
-    press(app, INPUT_BIT(INPUT_L1));
+    /* A connect from SITES already activates the remote view; pressing L/R
+     * again would move back to the left pane. */
+    if (app_state(app)->active_pane != UI_PANE_REMOTE)
+        press(app, INPUT_BIT(INPUT_L1));
     CHECK(app_state(app)->active_pane == UI_PANE_REMOTE);
+}
+
+static void select_local(App *app)
+{
+    if (app_state(app)->active_pane != UI_PANE_LOCAL)
+        press(app, INPUT_BIT(INPUT_L1));
+    CHECK(app_state(app)->active_pane == UI_PANE_LOCAL);
+}
+
+static void press_connect(App *app)
+{
+    /* Selecting a site from SITES opens the delete confirm, so only enter it
+     * when the current screen is not already SITES. */
+    if (app_state(app)->screen != UI_SCREEN_SITES)
+        press(app, INPUT_BIT(INPUT_SELECT));
+    CHECK(app_state(app)->screen == UI_SCREEN_SITES);
+    press(app, INPUT_BIT(INPUT_CROSS));
 }
 
 static int log_has(const char *needle)
@@ -579,6 +603,7 @@ static void test_upload_preflight_size_folder(void)
         "type=file;size=5;modify=20240101000000; F.BIN\r\n";
     FakePeer *peer = peer_new();
     connect_site_listing(app, peer, listing, "HELLO");
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/DEST");
@@ -634,6 +659,138 @@ static void test_connect_list_download(void)
     CHECK(log_has("list"));
     CHECK(log_has("transfer_start"));
     CHECK(log_has("transfer_done"));
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+/* A successful connect from SITES leaves SITES by itself and shows the remote
+ * listing, without a separate Circle (R21, AE6). */
+static void test_connect_from_sites_returns(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+    CHECK(app_state(app)->right_view == UI_PANE_REMOTE);
+    CHECK(app_state(app)->active_pane == UI_PANE_REMOTE);
+    CHECK(app_state(app)->focus == UI_FOCUS_LIST);
+    CHECK(app_state(app)->sites.connecting == 0);
+    CHECK(remote_row_named(app, "TEST.BIN") != NULL);
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+/* Leaving SITES while the worker dials keeps the screen and the pane focus;
+ * only the right slot's view switches to remote (R13). */
+static void test_connect_success_after_leaving_sites(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    FakePeer *peer = peer_new();
+    fake_net_set_resolve(PEER_ADDR, 0);
+    fake_net_set_link(1, 1, PEER_ADDR, 0);
+    press_connect(app);
+    press(app, INPUT_BIT(INPUT_CIRCLE));
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+    CHECK(app_state(app)->active_pane == UI_PANE_LOCAL);
+
+    static const char *listing =
+        "type=file;size=5;modify=20240101000000; TEST.BIN\r\n"
+        "type=file;size=100;modify=20240101000000; BIG.BIN\r\n";
+    fake_peer_set_listing(peer, listing);
+    fake_peer_set_payload(peer, "HELLO");
+    fake_peer_open(peer);
+    pump(app, peer, 120);
+
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+    CHECK(app_state(app)->right_view == UI_PANE_REMOTE);
+    CHECK(app_state(app)->active_pane == UI_PANE_LOCAL);
+    CHECK(remote_row_named(app, "TEST.BIN") != NULL);
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+/* Resolve and refused-port failures are session events. SITES stays in front
+ * with the reason on the card; a user who left before the outcome keeps the
+ * workspace and reads the reason on the dock (R22, AE6). */
+static void test_connect_failure_reasons(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    fake_net_set_link(1, 1, PEER_ADDR, 0);
+
+    fake_net_set_resolve(0, 1);
+    press_connect(app);
+    pump(app, NULL, 20);
+    CHECK(app_state(app)->screen == UI_SCREEN_SITES);
+    CHECK(app_state(app)->sites.connecting == 0);
+    CHECK(app_state(app)->sites.login_failed == 1);
+    CHECK(strcmp(app_state(app)->sites.reply, "RESOLVE FAILED") == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].session_lost == 1);
+
+    /* A refused port is the same failure path. */
+    fake_net_set_resolve(PEER_ADDR, 0);
+    fake_net_set_connect_result(NET_REFUSED);
+    press_connect(app);
+    pump(app, NULL, 20);
+    CHECK(app_state(app)->screen == UI_SCREEN_SITES);
+    CHECK(app_state(app)->sites.login_failed == 1);
+    CHECK(strcmp(app_state(app)->sites.reply, "CONNECT FAILED") == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 0);
+
+    /* Leave SITES while the worker is still waiting for the greeting; the
+     * later timeout lands on the dock's message line and the site card. */
+    press_connect(app);
+    press(app, INPUT_BIT(INPUT_CIRCLE));
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+    fake_clock_advance(6000);
+    pump(app, NULL, 5);
+    CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+    CHECK(app_state(app)->active_pane == UI_PANE_LOCAL);
+    CHECK(app_state(app)->sites.login_failed == 1);
+    CHECK(strstr(app_state(app)->sites.reply, "TIMEOUT") != NULL);
+    CHECK(strcmp(app_state(app)->status, app_state(app)->sites.reply) == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 0);
+
+    app_destroy(app);
+}
+
+/* Selecting a site drops the live session before dialing; when the new attempt
+ * fails the session and its rows are gone, and SITES carries the reason. */
+static void test_failed_connect_replaces_session(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].row_count >= 2);
+
+    fake_net_set_resolve(0, 1);
+    press_connect(app);
+    pump(app, NULL, 20);
+
+    CHECK(app_state(app)->screen == UI_SCREEN_SITES);
+    CHECK(app_state(app)->sites.login_failed == 1);
+    CHECK(strcmp(app_state(app)->sites.reply, "RESOLVE FAILED") == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].row_count == 0);
+    CHECK(app_state(app)->site_known == 0);
+    CHECK(app_state(app)->right_view == UI_PANE_REMOTE);
 
     fake_peer_destroy(peer);
     app_destroy(app);
@@ -1400,6 +1557,7 @@ static void test_upload_conflict(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_exists_path(peer, "/UP.TXT");
     fake_peer_set_exists_size(peer, 5);
 
@@ -1514,6 +1672,7 @@ static void test_upload_preflight_unsupported(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
 
     /* A server that does not implement MLST keeps the old direct STOR. */
@@ -1537,6 +1696,7 @@ static void test_upload_preflight_size_fallback(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/UP.TXT");
@@ -1568,6 +1728,7 @@ static void test_upload_preflight_directory(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_DIR);
 
     start_upload(app, peer);
@@ -1589,6 +1750,7 @@ static void test_upload_preflight_failure(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_FAIL);
 
     start_upload(app, peer);
@@ -1636,6 +1798,7 @@ static void test_upload_preflight_refresh_folder(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/UP.TXT");
@@ -1675,6 +1838,7 @@ static void test_upload_preflight_refresh_not_for_listed_file(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer); /* the open listing already holds TEST.BIN */
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/TEST.BIN");
@@ -1726,6 +1890,7 @@ static void test_upload_preflight_refresh_not_needed(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/OTHER.TXT");
@@ -1764,6 +1929,7 @@ static void test_upload_preflight_refresh_names_its_own_item(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/UP.TXT");
@@ -1816,6 +1982,7 @@ static void test_upload_preflight_refresh_parent_not_shown(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/SUB/UP.TXT");
@@ -1869,6 +2036,7 @@ static void test_upload_preflight_refresh_refuses_cancel(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/UP.TXT");
@@ -1907,6 +2075,7 @@ static void test_upload_preflight_refresh_failure(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/UP.TXT");
@@ -1962,6 +2131,7 @@ static void test_upload_preflight_refresh_once_per_item(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
     fake_peer_set_size_supported(peer, 1);
     fake_peer_set_exists_path(peer, "/A.TXT");
@@ -2523,6 +2693,7 @@ static void test_deferred_worker_confirmation(void)
 
     FakePeer *peer = peer_new();
     connect_site(app, peer);
+    select_local(app);
     fake_peer_set_exists_path(peer, "/UP.TXT");
     fake_peer_set_exists_size(peer, 2);
 
@@ -2731,6 +2902,10 @@ int main(void)
     test_two_cancel_presses();
     test_wait_resume_rechecks();
     test_connect_list_download();
+    test_connect_from_sites_returns();
+    test_connect_success_after_leaving_sites();
+    test_connect_failure_reasons();
+    test_failed_connect_replaces_session();
     test_app_listing_slot_held();
     test_third_local_view_at_start();
     test_right_local_listing_keeps_left();

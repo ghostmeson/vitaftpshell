@@ -182,15 +182,28 @@ static void connect_site(App *app)
     CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
     CHECK(app_state(app)->panes[UI_PANE_REMOTE].row_count >= 2);
 
-    /* Leave SITES so L/R and the workspace keys apply. */
-    press(app, INPUT_BIT(INPUT_CIRCLE));
+    /* A successful connect from SITES returns to the workspace by itself
+     * (R21). Only close SITES when it is still in front. */
+    if (app_state(app)->screen == UI_SCREEN_SITES)
+        press(app, INPUT_BIT(INPUT_CIRCLE));
     CHECK(app_state(app)->screen == UI_SCREEN_WORKSPACE);
+    CHECK(app_state(app)->right_view == UI_PANE_REMOTE);
+    CHECK(app_state(app)->active_pane == UI_PANE_REMOTE);
 }
 
 static void select_remote(App *app)
 {
-    press(app, INPUT_BIT(INPUT_L1));
+    /* A connect from SITES already activates the remote view. */
+    if (app_state(app)->active_pane != UI_PANE_REMOTE)
+        press(app, INPUT_BIT(INPUT_L1));
     CHECK(app_state(app)->active_pane == UI_PANE_REMOTE);
+}
+
+static void select_local(App *app)
+{
+    if (app_state(app)->active_pane != UI_PANE_LOCAL)
+        press(app, INPUT_BIT(INPUT_L1));
+    CHECK(app_state(app)->active_pane == UI_PANE_LOCAL);
 }
 
 static void select_local_named(App *app, const char *name)
@@ -365,6 +378,7 @@ static void test_upload_refresh_refusal(void)
     CHECK(peer_started);
 
     connect_site(app);
+    select_local(app);
 
     press(app, INPUT_BIT(INPUT_TRIANGLE));
     press(app, INPUT_BIT(INPUT_DOWN));

@@ -165,6 +165,10 @@ typedef struct {
     int save_unavailable;
     int login_failed;
     int connecting;
+    /* Set when the attempt started on SITES. It decides whether a success
+     * returns to the workspace and whether a failure belongs on this card
+     * (KTD4); it clears on every outcome. */
+    int connect_from_sites;
     char reply[160];
     UiSiteRow rows[UI_SITES_MAX];
 } UiSiteList;

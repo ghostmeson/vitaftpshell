@@ -163,7 +163,7 @@ static void clear_action_error(UiPaneState *pane)
         pane->error[0] = '\0';
 }
 
-static void begin_remote_connect(UiState *state);
+static void begin_remote_connect(UiState *state, int from_sites);
 
 static void enter_screen(UiState *state, UiScreen screen)
 {
@@ -812,9 +812,27 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         return;
     }
 
+    /* The screen keys stay live on a lost view: ACTIONS (and its switch row)
+     * is the way to the local pane, and SERVER and SITES remain reachable
+     * (KTD4, R7). Intercepting the lost state first swallowed all three. */
+    switch (key) {
+    case UI_KEY_TRIANGLE:
+        enter_screen(state, UI_SCREEN_ACTIONS);
+        ui_actions_prepare(state);
+        return;
+    case UI_KEY_START:
+        enter_screen(state, UI_SCREEN_SERVER);
+        return;
+    case UI_KEY_SELECT:
+        enter_screen(state, UI_SCREEN_SITES);
+        return;
+    default:
+        break;
+    }
+
     if (pane->session_lost) {
         if (key == UI_KEY_CROSS) {
-            begin_remote_connect(state);
+            begin_remote_connect(state, 0);
             UiCommand *c = emit(out, max, count, UI_CMD_RECONNECT);
             if (c != NULL)
                 c->pane = state->active_pane;
@@ -1010,16 +1028,6 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
             set_status(state, "MARK LIMIT");
         return;
     }
-    case UI_KEY_TRIANGLE:
-        enter_screen(state, UI_SCREEN_ACTIONS);
-        ui_actions_prepare(state);
-        return;
-    case UI_KEY_START:
-        enter_screen(state, UI_SCREEN_SERVER);
-        return;
-    case UI_KEY_SELECT:
-        enter_screen(state, UI_SCREEN_SITES);
-        return;
     default:
         return;
     }
@@ -1049,15 +1057,31 @@ static void clear_remote_session(UiState *state)
     state->site_port = 21;
     state->site_known = 0;
     state->sites.connecting = 0;
+    state->sites.connect_from_sites = 0;
     state->sites.login_failed = 0;
     state->sites.reply[0] = '\0';
 }
 
-static void begin_remote_connect(UiState *state)
+static void begin_remote_connect(UiState *state, int from_sites)
 {
+    /* A connect attempt replaces the current session before it dials: the
+     * pane drops its rows and identity now, so a failure cannot leave the old
+     * session looking live (KTD4, R13). */
     clear_remote_session(state);
     state->panes[ui_pane_remote_view()].loading = 1;
     state->sites.connecting = 1;
+    state->sites.connect_from_sites = from_sites;
+}
+
+/* One connect failure, recorded where the site card reads it. The card keeps
+ * the reason whether or not SITES is still in front (R22). */
+static void set_site_failure(UiState *state, const char *text)
+{
+    state->sites.connecting = 0;
+    state->sites.connect_from_sites = 0;
+    state->sites.login_failed = 1;
+    fmt_copy(state->sites.reply, sizeof(state->sites.reply),
+             text != NULL && text[0] != '\0' ? text : "NO REPLY");
 }
 
 static void handle_sites_key(UiState *state, const UiStateEvent *event,
@@ -1087,7 +1111,7 @@ static void handle_sites_key(UiState *state, const UiStateEvent *event,
             set_status(state, "TRANSFER IN PROGRESS");
             return;
         }
-        begin_remote_connect(state);
+        begin_remote_connect(state, 1);
         UiCommand *c = emit(out, max, count, UI_CMD_CONNECT_SITE);
         if (c != NULL)
             c->index = state->sites.selected;
@@ -2171,7 +2195,11 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             }
         }
         break;
-    case UI_EVT_SESSION_LOST:
+    case UI_EVT_SESSION_LOST: {
+        /* Only a connect that started on SITES blames the site card; a session
+         * that drops while browsing reports on its pane and dock instead. */
+        int from_sites = state->sites.connect_from_sites &&
+                         event->pane == (int)ui_pane_remote_view();
         state->sites.connecting = 0;
         if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
@@ -2191,6 +2219,14 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             fmt_copy(pane->error, sizeof(pane->error), event->text);
             clear_marks(pane);
         }
+        if (from_sites) {
+            /* The reason stays on the card, and on the dock's message line for
+             * a user who already left SITES (R22). */
+            set_site_failure(state, event->text);
+            set_status(state, event->text);
+        } else {
+            state->sites.connect_from_sites = 0;
+        }
         if (state->screen == UI_SCREEN_ACTIONS &&
             state->active_pane == ui_pane_remote_view()) {
             /* The ledger's enabled flags describe the dead session. Return to
@@ -2199,8 +2235,11 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             set_focus(state, UI_FOCUS_LIST);
         }
         break;
-    case UI_EVT_SESSION_OK:
+    }
+    case UI_EVT_SESSION_OK: {
+        int from_sites = state->sites.connect_from_sites;
         state->sites.connecting = 0;
+        state->sites.connect_from_sites = 0;
         if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
             UiPaneState *pane = &state->panes[event->pane];
             pane->connected = 1;
@@ -2213,13 +2252,32 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             state->site_port = event->port > 0 ? event->port : 21;
             state->site_known = 1;
             state->sites.login_failed = 0;
+            state->sites.reply[0] = '\0';
             snprintf(state->panes[ui_pane_remote_view()].site,
                      sizeof(state->panes[ui_pane_remote_view()].site), "%s",
                      event->site);
         }
+        /* The connection exists, so the remote view is the one to show
+         * (R13). */
+        state->right_view = ui_pane_remote_view();
+        if (from_sites && state->screen == UI_SCREEN_SITES) {
+            /* SITES was the connect surface: it closes and the workspace
+             * returns with the remote view active and its listing requested
+             * (R21). A user who left SITES keeps the screen and focus they
+             * chose; only the right view switches. */
+            leave_screen(state);
+            state->active_pane = ui_pane_remote_view();
+        }
         break;
-    case UI_EVT_ERROR:
+    }
+    case UI_EVT_ERROR: {
+        int from_sites = 0;
         if (event->pane == (int)ui_pane_remote_view()) {
+            /* A connect can fail before any session event exists: a bad host,
+             * no network, or a refused attempt. Only the pending SITES
+             * attempt owns the error; an unrelated remote error must not
+             * consume its reason (R22). */
+            from_sites = state->sites.connect_from_sites;
             state->sites.connecting = 0;
             /* A command can fail before any LISTING_END exists (busy client,
              * refused CWD, not connected). Clear the eager READING state here
@@ -2241,7 +2299,10 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (event->pane >= 0 && event->pane < UI_PANE_COUNT)
             fmt_copy(state->panes[event->pane].error,
                      sizeof(state->panes[event->pane].error), event->text);
+        if (from_sites)
+            set_site_failure(state, event->text);
         break;
+    }
     case UI_EVT_TRANSFER_STARTED: {
         UiDock *lane = lane_for(state, event);
         lane->active = 1;
@@ -2502,6 +2563,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             state->sites.login_failed = 0;
         } else {
             state->sites.connecting = 0;
+            state->sites.connect_from_sites = 0;
             state->sites.login_failed = 1;
             fmt_copy(state->sites.reply, sizeof(state->sites.reply), event->text);
         }

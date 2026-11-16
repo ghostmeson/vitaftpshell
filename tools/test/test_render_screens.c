@@ -136,6 +136,18 @@ static void test_sites(void)
     render();
     CHECK(trace_has_text_prefix("LOGIN FAILED  -  "));
 
+    /* Every failure class keeps its reason on the card, not only a login
+     * failure (R22). */
+    snprintf(s_state.sites.reply, sizeof(s_state.sites.reply),
+             "RESOLVE FAILED");
+    render();
+    CHECK(trace_has_text("LOGIN FAILED  -  RESOLVE FAILED"));
+
+    snprintf(s_state.sites.reply, sizeof(s_state.sites.reply),
+             "CONNECT REFUSED");
+    render();
+    CHECK(trace_has_text("LOGIN FAILED  -  CONNECT REFUSED"));
+
     setup();
     s_state.screen = UI_SCREEN_SITES;
     s_state.sites.count = 0;
@@ -168,6 +180,18 @@ static void test_sites(void)
     render();
     CHECK(!trace_text_at("SITE0", 50.0f, 254.0f));
     CHECK(trace_text_at("SITE6", 50.0f, 254.0f + 5.0f * 30.0f));
+}
+
+/* A connect failure that arrives after the user left SITES lands on the
+ * dock's message line, so the reason is not only on a screen they left. */
+static void test_dock_message(void)
+{
+    setup();
+    s_state.screen = UI_SCREEN_WORKSPACE;
+    s_state.active_pane = UI_PANE_LOCAL;
+    snprintf(s_state.status, sizeof(s_state.status), "RESOLVE FAILED");
+    render();
+    CHECK(trace_text_at_color("RESOLVE FAILED", 32.0f, 483.0f, C_YELLOW));
 }
 
 static void test_editor(void)
@@ -573,6 +597,7 @@ static void test_textentry(void)
 int main(void)
 {
     test_sites();
+    test_dock_message();
     test_editor();
     test_actions();
     test_server();

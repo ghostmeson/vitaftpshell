@@ -2358,8 +2358,11 @@ static void handle_connect(Worker *worker, const UiCommand *command)
         return;
     }
 
-    /* Selecting a site always starts a new session. Tearing the old one down
-     * first fixes both a stale half-open session and a refused connect. */
+    /* A connect attempt replaces the current session before it dials (KTD4):
+     * the old control connection is torn down and the worker's session state
+     * is reset, so a failure leaves no session behind and the UI can show the
+     * reason without a stale live session under it (R13). This also fixes a
+     * stale half-open session and a refused connect. */
     if (ftp_client_state(worker->client) != FTP_CLIENT_IDLE) {
         (void)ftp_client_disconnect(worker->client);
     }
