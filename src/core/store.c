@@ -3,6 +3,7 @@
 #include "core/store.h"
 
 #include "core/fmt.h"
+#include "core/ftp/limits.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,11 +15,10 @@
 #define SETTINGS_HEADER "vitaFTPShell-settings 1"
 #define LINE_BUF 4096
 #define READ_BUF 256
-/* The FTP server follows its control port with four data ports, so 65531 is the
- * highest startable port; the loader keeps a stored value inside the range the
- * server and its editor accept (R6). */
-#define STORE_SERVER_PORT_MIN 1024
-#define STORE_SERVER_PORT_MAX 65531
+/* The loader keeps a stored value inside the range the server and its editor
+ * accept, so a stale settings file cannot ask for a port the server refuses. */
+#define STORE_SERVER_PORT_MIN FTP_SERVER_PORT_MIN
+#define STORE_SERVER_PORT_MAX FTP_SERVER_PORT_MAX
 
 typedef struct {
     FsPort *fs;
