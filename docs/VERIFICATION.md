@@ -8,9 +8,9 @@
 **Status:** b77 is the current artifact and ran on a PCH-1000 on 2026-11-17. The
 operator report confirms both local panes' file operations, the ACTIONS menu,
 the local/remote switch with its state preserved, the SITES connect return, and
-the remote client and server. M25 and M26 are PART; M5, M10, M13, and M14 remain
-PART from earlier builds; every other row is PENDING until the v1 code-freeze
-pass (D95). `imc0:` stays BLOCKED on this console.
+the remote client and server. M25, M26, and M27 are PART; M5, M10, M13, and M14
+remain PART from earlier builds; every other row is PENDING until the v1
+code-freeze pass (D95). `imc0:` stays BLOCKED on this console.
 
 This file is the U14 evidence record and the one home for the matrix. A row is
 added or amended when the behavior it proves lands, and it names what the user
@@ -33,16 +33,22 @@ network roles. The report, verbatim:
 4. Switching between local and remote works and also saves current states
 5. Connecting to site closes the SITES properly and focuses on the remote connected pane
 
-This moves M25 and M26 to PART. The two-pane file operations, the ACTIONS menu,
-the switch with its state preserved, and the SITES success return are observed on
-b77. The rows stay PART because their remaining conditions are not in the
-report: marks and a running transfer across a switch, the both-local UPLOAD
-refusal and its hint, the exact-parent reload, and the vanished-folder fallback
-(M25); every failure class and a connect the user left behind (M26). M24 and
-M27 were not exercised and stay PENDING; `imc0:` stays BLOCKED on the PCH-1000.
-No crash dump was reported, but M13 is not advanced because the cross-volume
-crash pass was not run. The project stays `building`; `verified` still needs
-every row PASS.
+**Follow-up, same pass:** the operator reports the M27 stick and wrap work and
+were tested.
+
+This moves M25, M26, and M27 to PART. The two-pane file operations, the ACTIONS
+menu, the switch with its state preserved, the SITES success return, and the
+stick moving the selection with the workspace wrapping are observed on b77. The
+rows stay PART because their remaining conditions are not in the report: marks
+and a running transfer across a switch, the both-local UPLOAD refusal and its
+hint, the exact-parent reload, and the vanished-folder fallback (M25); every
+failure class and a connect the user left behind (M26); the deflection scale at
+its edges, the dock entry when a lane is active or queued, the site-book wrap
+and window reset, and clamping in ACTIONS, CONFIRM, and the editor (M27). M24
+was not exercised and stays PENDING; `imc0:` stays BLOCKED on the PCH-1000. No
+crash dump was reported, but M13 is not advanced because the cross-volume crash
+pass was not run. The project stays `building`; `verified` still needs every row
+PASS.
 
 ## Residual open-issues sweep (b72, host)
 
@@ -448,7 +454,7 @@ volume, so it stays host-only evidence and is never PASS.
 | M24 | Every user mount and the read-only value | `ALL DRIVES` with `ux0:`, `ur0:`, and `app0:` present, a memory card for `gro0:`/`grw0:`, and a PCH-2000 for `imc0:`. Passes when: every present mount appears once in table order and an absent mount is an absent row, not an error; `gro0:` and `app0:` read `DRIVE RO`; a write, create, paste, rename, move, or delete there is refused with `READ-ONLY MOUNT` and changes nothing while COPY stays live; `savedata0:`, `vs0:`, and `os0:` never appear; free space is a value on `ux0:` and `--` where the platform cannot report it | pending; the `imc0:` leg is BLOCKED on the PCH-1000 and is covered only by the host fakes | `test_path`, `test_uistate`, `test_integration`, `test_render_workspace`; host run | PENDING |
 | M25 | Second local view and the switch | A connected site at a folder with two marks and a running download; two local folders. Passes when: `SWITCH TO LOCAL` and `SWITCH TO REMOTE` appear last in the right pane's seven-row ACTIONS and never on the left; a switch preserves the session, folder, cursor, scroll, marks, and the running transfer; the right local view opens at `ALL DRIVES` then returns to its last folder; a copy in one pane pastes into the other pane's folder and both keep their places; UPLOAD is dim on both local panes with `NO REMOTE VIEW`, the hint is `X TO OPEN` on a folder and `NO REMOTE VIEW` on a file, and the dock never reads `REMOTE`; a change in one local view reloads the other only when its exact folder changed, and a vanished folder falls back to `ALL DRIVES` | b77: switching between local and remote works and preserves the current state; copy, paste, new folder, rename, and delete work across both local panes; the ACTIONS menu behaves as expected | b77 operator report 2026-11-17 (PCH-1000); `test_uistate`, `test_handoff`, `test_integration`, `test_app_thread`, `test_render_workspace`, `test_render_screens` host runs | PART |
 | M26 | Connect return and failure reasons | SITES holding a good site, a site with a bad password, an unresolvable host, and a refused port. Passes when: a success started from SITES closes SITES and returns to the WORKSPACE with the remote view active and its listing requested; a failure of every class stays on SITES with its reason; a success after the user left SITES switches the right view without changing the screen or focus, and the reason for a later failure appears in the dock and on the site card; a new attempt replaces the old session and a failed attempt leaves none | b77: a successful connect closes SITES and focuses the remote connected pane | b77 operator report 2026-11-17 (PCH-1000); `test_uistate`, `test_integration`, `test_render_screens` host runs | PART |
-| M27 | Stick, wrap, and the site book | A 40-row folder; a site book longer than six rows; an active network transfer. Passes when: the stick moves the selection one row at the deadzone edge, up to five at full deflection, at the 100 ms cadence, and the view follows; Up on the first row selects the last and Down on the last selects the first; Down on the last row focuses the dock only while a lane has an active or queued item; the site book wraps at both ends and resets its six-row window; ACTIONS, CONFIRM, and the editor still clamp | pending | `test_input`, `test_uistate`, `test_integration`; host run | PENDING |
+| M27 | Stick, wrap, and the site book | A 40-row folder; a site book longer than six rows; an active network transfer. Passes when: the stick moves the selection one row at the deadzone edge, up to five at full deflection, at the 100 ms cadence, and the view follows; Up on the first row selects the last and Down on the last selects the first; Down on the last row focuses the dock only while a lane has an active or queued item; the site book wraps at both ends and resets its six-row window; ACTIONS, CONFIRM, and the editor still clamp | b77: the stick moves the selection and the workspace wraps at both ends; the operator reports it tested and working | b77 operator report 2026-11-17 (PCH-1000), follow-up; `test_input`, `test_uistate`, `test_integration` host runs | PART |
 
 ## Install and launch
 

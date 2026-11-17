@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-17 — b77 ran on a PCH-1000: both local panes' copy/paste/new folder/rename/delete, the ACTIONS menu, the local/remote switch with state preserved, the SITES connect return, and the remote client and server all work; M25 and M26 are PART, not PASS | Plan and build R22/R23, remote recursive download and upload — the last unbuilt v1 requirements; the full matrix still runs at code freeze | GPLv3. One UNSAFE eboot. b77 (269,901 bytes, SHA-256 `a173b76b…`) is hardware-observed and host-tested. M24's seven-mount/read-only surface and M27's stick/wrap are not yet exercised; `imc0:` is BLOCKED on the PCH-1000. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-17 — b77 ran on a PCH-1000: both local panes' copy/paste/new folder/rename/delete, the ACTIONS menu, the local/remote switch with state preserved, the SITES connect return, the remote client and server, and the stick with workspace wrap all work; M25, M26, and M27 are PART, not PASS | Plan and build R22/R23, remote recursive download and upload — the last unbuilt v1 requirements; the full matrix still runs at code freeze | GPLv3. One UNSAFE eboot. b77 (269,901 bytes, SHA-256 `a173b76b…`) is hardware-observed and host-tested. M24's seven-mount/read-only surface is not yet exercised; M27's site-book wrap, dock entry, and clamping remain unobserved; `imc0:` is BLOCKED on the PCH-1000. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
