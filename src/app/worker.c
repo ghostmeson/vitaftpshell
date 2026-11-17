@@ -7,6 +7,7 @@
 
 #include "core/cause.h"
 #include "core/fmt.h"
+#include "core/ftp/ftp.h"
 #include "core/ftp/limits.h"
 #include "core/fsop_plan.h"
 #include "core/fsop_run.h"
@@ -97,6 +98,33 @@ typedef struct {
     int size_known;
     int stays;
 } PromptItem;
+
+/*
+ * U2: the private remote walk (KTD3). It borrows the caller's plan and root
+ * paths and fills plan entries from listings it starts itself; the pane's
+ * rows, path, and generation are never written. `request` is the walk's own
+ * listing in flight: `token` identifies the walk, and the pair keeps a user
+ * listing of the same path from entering the plan. Everything is reset by the
+ * next begin, so a cancelled walk leaves only its unfinished plan behind.
+ */
+typedef struct {
+    int active;      /* folders are still being listed */
+    int done;        /* the walk finalized the plan and it may run */
+    int cancel;      /* a cancel latched before the walk stopped */
+    int abort;       /* the plan refused a row; stop at the next pump */
+    XferPlan *plan;  /* borrowed; the caller frees it */
+    unsigned token;  /* this walk's identity, moved on by begin and cancel */
+    unsigned request; /* the token of the listing the walk started, else 0 */
+    char roots[WORKER_WALK_ROOTS][PATH_MAX_LEN]; /* normalized remote roots */
+    int root_count;
+    char path[PATH_MAX_LEN]; /* the folder the current listing fills */
+    int dir;                 /* the plan entry the current listing fills */
+    int retry_dir;           /* a popped folder whose request must be retried */
+    int folders;             /* folders listed to the end */
+    int rows;                /* rows collected for the current folder */
+    int overflow;            /* rows past WORKER_LIST_CAP in the folder */
+    char refusal[128];       /* the last refusal or stop reason */
+} Walk;
 
 struct Worker {
     WorkerPorts ports;
@@ -243,6 +271,8 @@ struct Worker {
     XferDirection server_direction;
     char server_name[PATH_NAME_MAX];
     uint64_t server_transfer_start_ms;
+
+    Walk walk; /* U2: one folder transfer's scan, or all-zero when idle */
 
     char last_error[160];
     unsigned log_lost_seen;
@@ -1508,11 +1538,351 @@ static void remote_listing_abort(Worker *worker)
     worker->collect_count = 0;
 }
 
+/* --- U2: private remote walk ------------------------------------------- */
+
+static void walk_note(Walk *walk, const char *reason)
+{
+    fmt_copy(walk->refusal, sizeof(walk->refusal), reason);
+}
+
+/* The absolute path one folder entry is listed under. A root uses the caller's
+ * own root string; a child composes from the plan's source. */
+static int walk_dir_path(Worker *worker, int dir, char *out, size_t cap)
+{
+    Walk *walk = &worker->walk;
+    const char *path = dir >= 0 && dir < walk->root_count
+                           ? walk->roots[dir]
+                           : xfer_plan_source(walk->plan, dir);
+    if (path == NULL || path[0] != '/')
+        return 0;
+    return ftp_remote_normalize(NULL, path, out, cap);
+}
+
+/* One skipped entry stands for a whole subtree (R5). The folder's own entry
+ * stays planned, so a download still creates the empty destination folder and
+ * a move never deletes the skipped source. */
+static void walk_add_skip(Worker *worker, int dir, XferSkipReason reason)
+{
+    Walk *walk = &worker->walk;
+    const char *source = xfer_plan_source(walk->plan, dir);
+    const char *dest = xfer_plan_dest(walk->plan, dir);
+    (void)xfer_plan_add_skip(walk->plan, dir,
+                             source[0] != '\0' ? source : NULL,
+                             dest[0] != '\0' ? dest : NULL, XFER_ENTRY_DIR,
+                             reason);
+}
+
+/* Stop an unfinished walk. The plan is deliberately left un-finalized: it is
+ * the caller's to discard, and no partial plan may run (KTD2). A NULL reason
+ * keeps the refusal the caller already recorded. */
+static void walk_stop(Worker *worker, const char *reason)
+{
+    Walk *walk = &worker->walk;
+    if (!walk->active)
+        return;
+    walk->active = 0;
+    walk->done = 0;
+    walk->request = 0;
+    walk->retry_dir = XFER_PLAN_NO_INDEX;
+    if (reason != NULL)
+        walk_note(walk, reason);
+}
+
+int worker_walk_begin(Worker *worker, XferPlan *plan,
+                      const char *const *roots, int root_count)
+{
+    if (worker == NULL || plan == NULL || roots == NULL || root_count <= 0)
+        return 0;
+
+    Walk *walk = &worker->walk;
+    if (walk->active)
+        return 0;
+
+    walk->active = 0;
+    walk->done = 0;
+    walk->cancel = 0;
+    walk->abort = 0;
+    walk->request = 0;
+    walk->plan = plan;
+    walk->root_count = 0;
+    walk->path[0] = '\0';
+    walk->dir = XFER_PLAN_NO_INDEX;
+    walk->retry_dir = XFER_PLAN_NO_INDEX;
+    walk->folders = 0;
+    walk->rows = 0;
+    walk->overflow = 0;
+    walk_note(walk, "");
+
+    if (!plan->ok) {
+        walk_note(walk, plan->reason);
+        return 0;
+    }
+    if (plan->direction != XFER_PLAN_DOWNLOAD) {
+        /* The upload walk also lists the local tree and each remote destination
+         * folder; that half belongs to the job (U3), so it is refused rather
+         * than half-built here. */
+        walk_note(walk, "UPLOAD WALK NOT BUILT");
+        return 0;
+    }
+    if (root_count > WORKER_WALK_ROOTS || root_count > plan->entry_count) {
+        walk_note(walk, "TOO MANY ROOTS");
+        return 0;
+    }
+    for (int i = 0; i < root_count; ++i) {
+        if (roots[i] == NULL || roots[i][0] != '/' ||
+            xfer_plan_parent(plan, i) != -1 ||
+            !ftp_remote_normalize(NULL, roots[i], walk->roots[i],
+                                  sizeof(walk->roots[i]))) {
+            walk_note(walk, "INVALID ROOT");
+            return 0;
+        }
+    }
+
+    walk->root_count = root_count;
+    walk->token++;
+    if (walk->token == 0)
+        walk->token = 1;
+    walk->active = 1;
+    return 1;
+}
+
+void worker_walk_cancel(Worker *worker)
+{
+    if (worker == NULL)
+        return;
+    Walk *walk = &worker->walk;
+    if (!walk->active)
+        return;
+    /* Latch it: the pump owns the client call, so a cancel never re-enters the
+     * client from inside a listing callback. The plan is left unfinished for
+     * the caller to discard. */
+    walk->cancel = 1;
+    walk->done = 0;
+}
+
+int worker_walk_active(const Worker *worker)
+{
+    return worker != NULL && worker->walk.active;
+}
+
+int worker_walk_done(const Worker *worker)
+{
+    return worker != NULL && worker->walk.done;
+}
+
+XferPlan *worker_walk_plan(Worker *worker)
+{
+    return worker != NULL ? worker->walk.plan : NULL;
+}
+
+int worker_walk_folders(const Worker *worker)
+{
+    return worker != NULL ? worker->walk.folders : 0;
+}
+
+const char *worker_walk_refusal(const Worker *worker)
+{
+    return worker != NULL ? worker->walk.refusal : "";
+}
+
+/* The walk's own listing: the token was set before the request, so a user
+ * listing of the same path (the walk's request slot is 0 then) never enters
+ * the plan. */
+static int walk_owns_listing(const Walk *walk, const FtpClientEvent *event)
+{
+    return walk->active && walk->request != 0 && event->path != NULL &&
+           strcmp(event->path, walk->path) == 0;
+}
+
+static int walk_listing_begin(Worker *worker, const FtpClientEvent *event)
+{
+    Walk *walk = &worker->walk;
+    if (!walk_owns_listing(walk, event))
+        return 0;
+    fmt_copy(walk->path, sizeof(walk->path), event->path);
+    walk->rows = 0;
+    walk->overflow = 0;
+    return 1;
+}
+
+static int walk_listing_row(Worker *worker, const FtpClientEvent *event)
+{
+    Walk *walk = &worker->walk;
+    if (!walk_owns_listing(walk, event) || event->row == NULL)
+        return 0;
+    if (walk->rows >= WORKER_LIST_CAP) {
+        /* The client streams the whole listing. The first 2,000 rows transfer
+         * and the rest become one missing entry (R5), never a silent loss. */
+        walk->overflow++;
+        return 1;
+    }
+    const ListingEntry *row = event->row;
+    XferEntryType type =
+        row->type == LISTING_DIR ? XFER_ENTRY_DIR : XFER_ENTRY_FILE;
+    if (xfer_plan_add_child(walk->plan, walk->dir, row->name, type, row->size,
+                            row->size_known) < 0) {
+        /* The plan refused (too large, or a path that cannot be stored). Stop
+         * at the next pump, outside the client's callback. */
+        walk->abort = 1;
+        return 1;
+    }
+    walk->rows++;
+    return 1;
+}
+
+/* A listing can fail in two ways that look alike at LISTING_END. A refused or
+ * failed command has already left the client READY, so one folder is lost and
+ * the session survives. A terminal state - a timeout, a lost control
+ * connection, or a closed session - means the walk cannot continue. A data
+ * stream that dies is still LISTING at the event and becomes READY right after
+ * the operation-done event, so only the terminal states end the walk. */
+static int walk_session_closed(const Worker *worker)
+{
+    switch (ftp_client_state(worker->client)) {
+    case FTP_CLIENT_IDLE:
+    case FTP_CLIENT_LOST:
+    case FTP_CLIENT_FAILED:
+    case FTP_CLIENT_STALLED:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int walk_listing_end(Worker *worker, const FtpClientEvent *event)
+{
+    Walk *walk = &worker->walk;
+    if (!walk_owns_listing(walk, event))
+        return 0;
+
+    walk->request = 0;
+    if (event->ok) {
+        if (walk->overflow > 0)
+            walk_add_skip(worker, walk->dir, XFER_SKIP_LIST_CAP);
+        walk->folders++;
+        return 1;
+    }
+
+    walk_note(walk, event->detail != NULL ? event->detail : "LISTING FAILED");
+    if (walk_session_closed(worker)) {
+        walk_stop(worker, NULL);
+        return 1;
+    }
+    walk_add_skip(worker, walk->dir, XFER_SKIP_LIST_REFUSED);
+    return 1;
+}
+
+static void worker_walk_pump(Worker *worker)
+{
+    Walk *walk = &worker->walk;
+    if (!walk->active)
+        return;
+
+    if (walk->cancel) {
+        int listing = walk->request != 0;
+        /* The request belongs to the cancelled walk, so its own END is ignored
+         * instead of filling the next walk's plan. */
+        walk->request = 0;
+        walk->retry_dir = XFER_PLAN_NO_INDEX;
+        walk->token++;
+        walk_note(walk, "CANCELLED");
+        walk_stop(worker, NULL);
+        if (listing)
+            (void)ftp_client_cancel(worker->client);
+        return;
+    }
+
+    if (walk->abort) {
+        walk->abort = 0;
+        int listing = walk->request != 0;
+        walk->request = 0;
+        if (listing)
+            (void)ftp_client_cancel(worker->client);
+        walk_stop(worker, walk->plan->reason);
+        return;
+    }
+
+    if (walk->request != 0)
+        return;
+    /* A connect in progress owns the slot and the walk simply waits for it: a
+     * walk begun during a connect either starts when the session is READY or
+     * stops when that connect fails. */
+    if (ftp_client_busy(worker->client))
+        return;
+    if (ftp_client_state(worker->client) != FTP_CLIENT_READY) {
+        walk_stop(worker, "SESSION LOST");
+        return;
+    }
+
+    int guard = walk->plan->entry_count + 1;
+    while (walk->active && walk->request == 0 && guard-- > 0) {
+        /* The client slot is the only thing that can hold a folder back. The
+         * check precedes the pop, so the slot never loses a worklist item. */
+        if (ftp_client_busy(worker->client))
+            return;
+        if (ftp_client_state(worker->client) != FTP_CLIENT_READY) {
+            walk_stop(worker, "SESSION LOST");
+            return;
+        }
+
+        int dir;
+        if (walk->retry_dir != XFER_PLAN_NO_INDEX) {
+            dir = walk->retry_dir;
+            walk->retry_dir = XFER_PLAN_NO_INDEX;
+        } else {
+            dir = xfer_plan_next_dir(walk->plan);
+        }
+        if (dir < 0) {
+            walk->active = 0;
+            walk->done = xfer_plan_finalize(walk->plan);
+            if (!walk->done)
+                walk_note(walk, walk->plan->reason);
+            return;
+        }
+
+        char path[PATH_MAX_LEN];
+        if (!walk_dir_path(worker, dir, path, sizeof(path))) {
+            walk_add_skip(worker, dir, XFER_SKIP_LIST_REFUSED);
+            continue;
+        }
+
+        walk->dir = dir;
+        fmt_copy(walk->path, sizeof(walk->path), path);
+        walk->rows = 0;
+        walk->overflow = 0;
+        /* The request token goes down before the call: ftp_client_list emits
+         * LISTING_BEGIN from inside it. */
+        walk->request = walk->token;
+        FtpClientResult result = ftp_client_list(worker->client, walk->path);
+        if (result == FTP_CLIENT_OK)
+            return; /* LISTING_END advances the worklist */
+        walk->request = 0;
+        if (result == FTP_CLIENT_BUSY) {
+            walk->retry_dir = dir;
+            return;
+        }
+        if (result == FTP_CLIENT_INVALID) {
+            walk_add_skip(worker, dir, XFER_SKIP_LIST_REFUSED);
+            continue;
+        }
+        walk_stop(worker, "SESSION LOST");
+        return;
+    }
+    /* Each pass either starts a listing or consumes one worklist entry, so the
+     * bound is the plan's own size; reaching it means the worklist is lying. */
+    if (walk->active && walk->request == 0)
+        walk_stop(worker, "WALK LOOP");
+}
+
 static FtpClientResult remote_list(Worker *worker, UiPane pane)
 {
     if (worker->client == NULL ||
         ftp_client_state(worker->client) != FTP_CLIENT_READY)
         return FTP_CLIENT_NOT_CONNECTED;
+    /* The walk's listing stream is private (KTD3): a pane refresh waits for
+     * the walk to end instead of interleaving a user listing with it. */
+    if (worker_walk_active(worker))
+        return FTP_CLIENT_BUSY;
     worker->listing_pane = pane;
     return ftp_client_list(worker->client,
                            ftp_client_cwd_text(worker->client));
@@ -2492,6 +2862,9 @@ static void reset_remote_session(Worker *worker)
     worker->connected = 0;
     worker->refresh_remote = 0;
     worker->remote_action_count = 0;
+    /* A walk cannot survive the session it was reading (R3): it stops with the
+     * plan unfinished, and the caller discards it. */
+    walk_stop(worker, "SESSION LOST");
     worker->remote_perm_known = 0;
     worker->remote_perm_mask = 0;
     worker->remote_perm_pending = 0;
@@ -3478,12 +3851,20 @@ static void client_event(void *ctx, const FtpClientEvent *event)
         }
         break;
     case FTP_CLIENT_EVENT_LISTING_BEGIN:
+        /* U2: the walk's private collector runs first, so its rows never take
+         * a pane slot (KTD3). */
+        if (walk_listing_begin(worker, event))
+            break;
         remote_listing_begin(worker, worker->listing_pane, event->path);
         break;
     case FTP_CLIENT_EVENT_LISTING_ROW:
+        if (walk_listing_row(worker, event))
+            break;
         remote_listing_row(worker, event->row);
         break;
     case FTP_CLIENT_EVENT_LISTING_END:
+        if (walk_listing_end(worker, event))
+            break;
         client_listing_end(worker, event);
         break;
     case FTP_CLIENT_EVENT_PROGRESS: {
@@ -3764,7 +4145,8 @@ static void handle_command(Worker *worker, const UiCommand *command)
             remote_perm_clear(worker, 1);
             worker->remote_perm_pending = 1;
             if (worker->transfer_active || xfer_busy(&worker->queue) ||
-                ftp_server_busy(worker->server))
+                ftp_server_busy(worker->server) ||
+                worker_walk_active(worker))
                 /* Latch it; worker_step re-issues once the lanes are idle. */
                 worker->refresh_remote = 1;
             else if (remote_list(worker, ui_pane_remote_view()) !=
@@ -4255,9 +4637,13 @@ void worker_step(Worker *worker)
     /* The folder probe goes first after a connect, a navigation, or a refresh,
      * so the pane learns the write facts before the new rows are acted on. */
     remote_perm_pump(worker);
+    /* U2: a running walk owns the listing stream; a latched pane refresh waits
+     * for its terminal instead of publishing rows over it. */
+    worker_walk_pump(worker);
     if (worker->refresh_remote && worker->connected &&
-        !worker->transfer_active && !xfer_busy(&worker->queue) &&
-        !ftp_server_busy(worker->server) && !ftp_client_busy(worker->client)) {
+        !worker_walk_active(worker) && !worker->transfer_active &&
+        !xfer_busy(&worker->queue) && !ftp_server_busy(worker->server) &&
+        !ftp_client_busy(worker->client)) {
         worker->refresh_remote = 0;
         if (remote_list(worker, ui_pane_remote_view()) != FTP_CLIENT_OK)
             emit_error(worker, UI_PANE_REMOTE, "LIST FAILED", OP_CAUSE_APP,

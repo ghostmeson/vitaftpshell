@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "app/app.h"
 #include "core/handoff.h"
 #include "core/listing.h"
+#include "core/xfer_plan.h"
 #include "fake_clock.h"
 #include "fake_fs.h"
 #include "fake_ime.h"
@@ -3903,6 +3905,581 @@ static void test_hidden_local_view_falls_back_when_shown(void)
     app_destroy(app);
 }
 
+/* --- U2: the private remote walk --------------------------------------- */
+
+#define WALK_TICKS_MAX 400
+
+/* One download root: the plan names the remote source and the local
+ * destination, and the walker lists the source. */
+static XferPlan *walk_plan_new(const char *remote, const char *local)
+{
+    XferPlan *plan = xfer_plan_create(XFER_PLAN_DOWNLOAD);
+    CHECK(plan != NULL);
+    if (plan == NULL)
+        return NULL;
+    CHECK(xfer_plan_add_root(plan, remote, local, XFER_ENTRY_DIR, 0, 1) == 0);
+    return plan;
+}
+
+static void walk_run(App *app, FakePeer *peer)
+{
+    for (int i = 0; i < WALK_TICKS_MAX && worker_walk_active(app_worker(app));
+         ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+}
+
+/* What a walk must leave alone: the pane's rows, folder, cursor, and reason.
+ * The generation slot is behind `rows`, so an unpublished listing cannot have
+ * replaced either. */
+typedef struct {
+    const UiRow *rows;
+    int row_count;
+    char path[PATH_MAX_LEN];
+    int selected;
+    int loading;
+    char error[128];
+} PaneSnapshot;
+
+static void pane_snapshot(App *app, PaneSnapshot *snap)
+{
+    const UiPaneState *pane = &app_state(app)->panes[UI_PANE_REMOTE];
+    snap->rows = pane->rows;
+    snap->row_count = pane->row_count;
+    snprintf(snap->path, sizeof(snap->path), "%s", pane->path);
+    snap->selected = pane->selected;
+    snap->loading = pane->loading;
+    snprintf(snap->error, sizeof(snap->error), "%s", pane->error);
+}
+
+static int pane_unchanged(App *app, const PaneSnapshot *snap)
+{
+    const UiPaneState *pane = &app_state(app)->panes[UI_PANE_REMOTE];
+    return pane->rows == snap->rows && pane->row_count == snap->row_count &&
+           strcmp(pane->path, snap->path) == 0 &&
+           pane->selected == snap->selected && pane->loading == snap->loading &&
+           strcmp(pane->error, snap->error) == 0;
+}
+
+/* Scenario 1: a three-level tree is walked with absolute paths and the pane
+ * keeps the rows and folder it had (KTD3). */
+static void test_walk_nested_tree(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=dir;modify=20240101000000; B\r\n"
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    static const char *b =
+        "type=file;size=7;modify=20240101000000; C.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_path_listing(peer, "/A/B", b);
+
+    PaneSnapshot remote;
+    pane_snapshot(app, &remote);
+
+    XferPlan *plan = walk_plan_new("/A", "ux0:data/A");
+    if (plan == NULL) {
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+    const char *roots[1] = {"/A"};
+    Worker *worker = app_worker(app);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+    CHECK(worker_walk_active(worker) == 1);
+    walk_run(app, peer);
+
+    CHECK(worker_walk_active(worker) == 0);
+    CHECK(worker_walk_done(worker) == 1);
+    CHECK(worker_walk_plan(worker) == plan);
+    CHECK(worker_walk_folders(worker) == 2);
+    CHECK(plan->ok == 1 && plan->finalized == 1);
+    CHECK(plan->entry_count == 4);
+    CHECK(plan->root_count == 1);
+    CHECK(plan->dir_count == 2 && plan->file_count == 2);
+    CHECK(plan->total_bytes == 12 && plan->bytes_known == 1);
+    CHECK(plan->skipped_count == 0);
+
+    CHECK(xfer_plan_parent(plan, 1) == 0);
+    CHECK(plan->entries[1].type == XFER_ENTRY_DIR);
+    CHECK(strcmp(xfer_plan_source(plan, 1), "/A/B") == 0);
+    CHECK(strcmp(xfer_plan_dest(plan, 1), "ux0:data/A/B") == 0);
+    CHECK(xfer_plan_parent(plan, 3) == 1);
+    CHECK(strcmp(xfer_plan_source(plan, 3), "/A/B/C.TXT") == 0);
+    CHECK(strcmp(xfer_plan_dest(plan, 3), "ux0:data/A/B/C.TXT") == 0);
+
+    /* Every listing named an absolute path, and the connect's own listing
+     * stayed outside the walk. */
+    CHECK(fake_peer_listing_count(peer) == 3);
+    CHECK(strcmp(fake_peer_last_list_path(peer), "/A/B") == 0);
+
+    CHECK(pane_unchanged(app, &remote));
+    CHECK(remote_row_named(app, "TEST.BIN") != NULL);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    fake_peer_destroy(peer);
+}
+
+/* Scenario 3: one refused subfolder is one skip, and a sibling folder after it
+ * still lists. */
+static void test_walk_refused_subfolder_continues(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=dir;modify=20240101000000; B\r\n"
+        "type=dir;modify=20240101000000; C\r\n"
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    static const char *c =
+        "type=file;size=9;modify=20240101000000; C.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_path_refused(peer, "/A/B", 1);
+    fake_peer_set_path_listing(peer, "/A/C", c);
+
+    XferPlan *plan = walk_plan_new("/A", "ux0:data/A");
+    if (plan == NULL) {
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+    const char *roots[1] = {"/A"};
+    Worker *worker = app_worker(app);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+    walk_run(app, peer);
+
+    CHECK(worker_walk_done(worker) == 1);
+    CHECK(plan->finalized == 1);
+    CHECK(plan->skipped_count == 1);
+    CHECK(xfer_plan_list_count(plan, XFER_LIST_MISSING) == 1);
+    int skip = xfer_plan_list_at(plan, XFER_LIST_MISSING, 0);
+    CHECK(skip >= 0);
+    if (skip >= 0) {
+        CHECK(plan->entries[skip].skip_reason == XFER_SKIP_LIST_REFUSED);
+        CHECK(strcmp(xfer_plan_source(plan, skip), "/A/B") == 0);
+        CHECK(strcmp(xfer_plan_dest(plan, skip), "ux0:data/A/B") == 0);
+    }
+    /* B's directory, C's directory, and C's file are all in the plan; the
+     * refused folder is the only miss. */
+    CHECK(plan->file_count == 2);
+    CHECK(plan->dir_count == 3);
+    CHECK(strcmp(fake_peer_last_list_path(peer), "/A/C") == 0);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    fake_peer_destroy(peer);
+}
+
+/* Scenario 4: a 2,001-row folder transfers the first 2,000 and records one
+ * remainder skip (R5). */
+static void test_walk_listing_cap_keeps_first_rows(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    enum { ROWS = WORKER_LIST_CAP + 1 };
+    size_t cap = (size_t)ROWS * 64u;
+    char *listing = malloc(cap);
+    CHECK(listing != NULL);
+    if (listing == NULL) {
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+    size_t used = 0;
+    for (int i = 1; i <= ROWS; ++i)
+        used += (size_t)snprintf(listing + used, cap - used,
+                                 "type=file;size=1;modify=20240101000000; "
+                                 "F%04d.BIN\r\n",
+                                 i);
+    fake_peer_set_path_listing(peer, "/BIG", listing);
+
+    XferPlan *plan = walk_plan_new("/BIG", "ux0:data/BIG");
+    if (plan == NULL) {
+        free(listing);
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+    const char *roots[1] = {"/BIG"};
+    Worker *worker = app_worker(app);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+    walk_run(app, peer);
+
+    CHECK(worker_walk_done(worker) == 1);
+    CHECK(plan->finalized == 1);
+    CHECK(plan->entry_count == WORKER_LIST_CAP + 2);
+    CHECK(plan->file_count == WORKER_LIST_CAP);
+    CHECK(plan->skipped_count == 1);
+    CHECK(plan->total_bytes == WORKER_LIST_CAP);
+    CHECK(xfer_plan_list_count(plan, XFER_LIST_MISSING) == 1);
+    int skip = xfer_plan_list_at(plan, XFER_LIST_MISSING, 0);
+    CHECK(skip >= 0);
+    if (skip >= 0) {
+        CHECK(plan->entries[skip].skip_reason == XFER_SKIP_LIST_CAP);
+        CHECK(strcmp(xfer_plan_source(plan, skip), "/BIG") == 0);
+    }
+    /* The 2,000th row is the last planned file; row 2,001 is the remainder. */
+    CHECK(strcmp(xfer_plan_source(plan, WORKER_LIST_CAP), "/BIG/F2000.BIN") ==
+          0);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    fake_peer_destroy(peer);
+    free(listing);
+}
+
+/* Scenario 5: a folder renamed between two listings is refused, and that
+ * refusal never reaches the pane. */
+static void test_walk_rename_between_listings_is_refusal(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=dir;modify=20240101000000; B\r\n"
+        "type=dir;modify=20240101000000; C\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_path_refused(peer, "/A/B", 1);
+    fake_peer_set_path_refused(peer, "/A/C", 1);
+
+    PaneSnapshot remote;
+    pane_snapshot(app, &remote);
+
+    XferPlan *plan = walk_plan_new("/A", "ux0:data/A");
+    if (plan == NULL) {
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+    const char *roots[1] = {"/A"};
+    Worker *worker = app_worker(app);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+    walk_run(app, peer);
+
+    CHECK(worker_walk_done(worker) == 1);
+    CHECK(plan->skipped_count == 2);
+    for (int i = 0; i < plan->entry_count; ++i) {
+        if (plan->entries[i].status != XFER_STATUS_SKIPPED)
+            continue;
+        CHECK(plan->entries[i].skip_reason == XFER_SKIP_LIST_REFUSED);
+    }
+    /* The pane never sees the walk's failed listing: no rows and no error. */
+    CHECK(pane_unchanged(app, &remote));
+    CHECK(remote.error[0] == '\0');
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    fake_peer_destroy(peer);
+}
+
+/* Scenario 6: a cancel stops the walk with the plan unfinished, moves nothing,
+ * and writes no report. */
+static void test_walk_cancel_moves_nothing(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=dir;modify=20240101000000; B\r\n"
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    static const char *b =
+        "type=file;size=7;modify=20240101000000; C.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_path_listing(peer, "/A/B", b);
+
+    PaneSnapshot remote;
+    pane_snapshot(app, &remote);
+
+    XferPlan *plan = walk_plan_new("/A", "ux0:data/A");
+    if (plan == NULL) {
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+    const char *roots[1] = {"/A"};
+    Worker *worker = app_worker(app);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+
+    /* Let the first folder's request leave, then cancel while it is in
+     * flight. The latch stops the walk on the next step and the client's
+     * listing is cancelled with it. */
+    (void)app_tick(app);
+    CHECK(worker_walk_active(worker) == 1);
+    worker_walk_cancel(worker);
+    (void)app_tick(app);
+    fake_peer_serve(peer);
+    for (int i = 0; i < 20; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+
+    CHECK(worker_walk_active(worker) == 0);
+    CHECK(worker_walk_done(worker) == 0);
+    CHECK(plan->finalized == 0);
+    CHECK(plan->ok == 1);
+    CHECK(strcmp(worker_walk_refusal(worker), "CANCELLED") == 0);
+    CHECK(plan->entry_count == 1); /* only the root the caller seeded */
+    CHECK(!fake_fs_exists("ux0:data/A"));
+    CHECK(!fake_fs_exists("ux0:data/A/skipped.txt"));
+    CHECK(!fake_fs_exists("ux0:data/skipped.txt"));
+    CHECK(pane_unchanged(app, &remote));
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    fake_peer_destroy(peer);
+}
+
+/* Scenario 7: the connect's own first listing is refused, which ends the
+ * session, and the walk armed behind it stops unfinished. */
+static void test_walk_first_listing_failure_ends_walk(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+
+    XferPlan *plan = walk_plan_new("/A", "ux0:data/A");
+    if (plan == NULL) {
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+
+    fake_net_set_resolve(PEER_ADDR, 0);
+    fake_net_set_link(1, 1, PEER_ADDR, 0);
+    press(app, INPUT_BIT(INPUT_SELECT));
+    CHECK(app_state(app)->screen == UI_SCREEN_SITES);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    (void)app_tick(app);
+
+    fake_peer_set_listing(
+        peer, "type=file;size=5;modify=20240101000000; TEST.BIN\r\n");
+    /* MLSD and its LIST fallback are both refused. During the connect's first
+     * listing the client treats the refusal as terminal: the session cannot
+     * browse, so the walk must not outlive it. */
+    fake_peer_set_list_fail(peer, 1);
+    fake_peer_open(peer);
+
+    const char *roots[1] = {"/A"};
+    Worker *worker = app_worker(app);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+    CHECK(worker_walk_active(worker) == 1);
+
+    for (int i = 0; i < 120; ++i) {
+        if (!worker_walk_active(worker) &&
+            !app_state(app)->panes[UI_PANE_REMOTE].connected)
+            break;
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+
+    CHECK(worker_walk_active(worker) == 0);
+    CHECK(worker_walk_done(worker) == 0);
+    CHECK(plan->finalized == 0);
+    CHECK(plan->entry_count == 1);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 0);
+    CHECK(strstr(worker_walk_refusal(worker), "SESSION LOST") != NULL);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    fake_peer_destroy(peer);
+}
+
+/* Scenario 8: a data failure on a later folder skips that folder and keeps the
+ * session, so the walk still completes. */
+static void test_walk_later_listing_failure_skips_folder(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=dir;modify=20240101000000; B\r\n"
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    XferPlan *plan = walk_plan_new("/A", "ux0:data/A");
+    if (plan == NULL) {
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+    const char *roots[1] = {"/A"};
+    Worker *worker = app_worker(app);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+
+    /* Wait for /A's listing to be served, then fail the next data connect,
+     * which is /A/B's listing. */
+    for (int i = 0; i < 100 && fake_peer_listing_count(peer) < 2; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(fake_peer_listing_count(peer) == 2);
+    fake_net_set_connect_result(NET_ERROR);
+    walk_run(app, peer);
+
+    CHECK(worker_walk_active(worker) == 0);
+    CHECK(worker_walk_done(worker) == 1);
+    CHECK(plan->finalized == 1);
+    /* Root, A.TXT, B, and one refused subtree for B. */
+    CHECK(plan->entry_count == 4);
+    CHECK(plan->file_count == 1);
+    CHECK(plan->dir_count == 2);
+    CHECK(plan->skipped_count == 1);
+    CHECK(xfer_plan_list_count(plan, XFER_LIST_MISSING) == 1);
+    int skip = xfer_plan_list_at(plan, XFER_LIST_MISSING, 0);
+    CHECK(skip >= 0);
+    if (skip >= 0)
+        CHECK(plan->entries[skip].skip_reason == XFER_SKIP_LIST_REFUSED);
+    /* The session survived the failed folder. */
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].session_lost == 0);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    fake_peer_destroy(peer);
+}
+
+/* The begin contract: one walk at a time, a session is required before the
+ * first folder starts, and a plan or root the walk cannot use is refused with
+ * a named reason instead of half-walking. */
+static void test_walk_begin_guards(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    Worker *worker = app_worker(app);
+
+    XferPlan *plan = walk_plan_new("/A", "ux0:data/A");
+    XferPlan *upload = xfer_plan_create(XFER_PLAN_UPLOAD);
+    XferPlan *relative = walk_plan_new("A", "ux0:data/A");
+    CHECK(upload != NULL && relative != NULL);
+    if (plan == NULL || upload == NULL || relative == NULL) {
+        xfer_plan_free(plan);
+        xfer_plan_free(upload);
+        xfer_plan_free(relative);
+        app_destroy(app);
+        return;
+    }
+    xfer_plan_add_root(upload, "ux0:data/A", "/A", XFER_ENTRY_DIR, 0, 1);
+    const char *roots[1] = {"/A"};
+    const char *relative_roots[1] = {"A"};
+
+    /* Without a session the walk stops itself with the reason. */
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+    CHECK(worker_walk_active(worker) == 1);
+    (void)app_tick(app);
+    CHECK(worker_walk_active(worker) == 0);
+    CHECK(worker_walk_done(worker) == 0);
+    CHECK(strcmp(worker_walk_refusal(worker), "SESSION LOST") == 0);
+
+    /* The upload half of the walk belongs to the job, not here. */
+    CHECK(worker_walk_begin(worker, upload, roots, 1) == 0);
+    CHECK(worker_walk_active(worker) == 0);
+    CHECK(strcmp(worker_walk_refusal(worker), "UPLOAD WALK NOT BUILT") == 0);
+
+    /* The walk lists absolute paths only. */
+    CHECK(worker_walk_begin(worker, relative, relative_roots, 1) == 0);
+    CHECK(strcmp(worker_walk_refusal(worker), "INVALID ROOT") == 0);
+
+    /* A second begin cannot replace the walk already running. */
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 0);
+    CHECK(worker_walk_active(worker) == 1);
+    worker_walk_cancel(worker);
+    (void)app_tick(app);
+    CHECK(worker_walk_active(worker) == 0);
+    CHECK(worker_walk_done(worker) == 0);
+    CHECK(strcmp(worker_walk_refusal(worker), "CANCELLED") == 0);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    xfer_plan_free(upload);
+    xfer_plan_free(relative);
+}
+
+/* Scenario 8, the data-stream shape: the socket dies mid-listing, the client
+ * is still LISTING at LISTING_END and READY right after, so the folder is
+ * skipped and the walk keeps the session. */
+static void test_walk_stream_failure_skips_folder(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=dir;modify=20240101000000; B\r\n"
+        "type=dir;modify=20240101000000; C\r\n"
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    static const char *c =
+        "type=file;size=9;modify=20240101000000; C.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_path_reset(peer, "/A/B", 1);
+    fake_peer_set_path_listing(peer, "/A/C", c);
+
+    XferPlan *plan = walk_plan_new("/A", "ux0:data/A");
+    if (plan == NULL) {
+        fake_peer_destroy(peer);
+        app_destroy(app);
+        return;
+    }
+    const char *roots[1] = {"/A"};
+    Worker *worker = app_worker(app);
+    CHECK(worker_walk_begin(worker, plan, roots, 1) == 1);
+    /* The aborted listing holds the client for its grace window, which is
+     * measured on the clock; a host run has to move it. */
+    for (int i = 0; i < WALK_TICKS_MAX && worker_walk_active(worker); ++i) {
+        fake_clock_advance(10);
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+
+    CHECK(worker_walk_active(worker) == 0);
+    CHECK(worker_walk_done(worker) == 1);
+    CHECK(plan->finalized == 1);
+    CHECK(plan->skipped_count == 1);
+    CHECK(plan->file_count == 2);
+    int skip = xfer_plan_list_at(plan, XFER_LIST_MISSING, 0);
+    CHECK(skip >= 0);
+    if (skip >= 0) {
+        CHECK(plan->entries[skip].skip_reason == XFER_SKIP_LIST_REFUSED);
+        CHECK(strcmp(xfer_plan_source(plan, skip), "/A/B") == 0);
+    }
+    CHECK(strcmp(fake_peer_last_list_path(peer), "/A/C") == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].connected == 1);
+
+    app_destroy(app);
+    xfer_plan_free(plan);
+    fake_peer_destroy(peer);
+}
+
 int main(void)
 {
     test_download_destination_failure();
@@ -3982,6 +4559,15 @@ int main(void)
     test_server_port_ceiling();
     test_server_port_editor();
     test_server_start_refused_port();
+    test_walk_nested_tree();
+    test_walk_refused_subfolder_continues();
+    test_walk_listing_cap_keeps_first_rows();
+    test_walk_rename_between_listings_is_refusal();
+    test_walk_cancel_moves_nothing();
+    test_walk_first_listing_failure_ends_walk();
+    test_walk_later_listing_failure_skips_folder();
+    test_walk_stream_failure_skips_folder();
+    test_walk_begin_guards();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_integration: %d failure(s)\n", s_failures);

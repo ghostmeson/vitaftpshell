@@ -8,6 +8,7 @@
 #include "fake_fs.h"
 #include "fake_ftpd.h"
 #include "fake_net.h"
+#include "fake_peer.h"
 
 static int s_failures;
 static unsigned s_states_seen;
@@ -1084,6 +1085,27 @@ static void test_first_listing_timeout(void)
     ftp_client_destroy(client);
 }
 
+static void test_first_listing_data_connect_fails(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_login(client, &server, &cap, 1, NULL, NULL, 1);
+    /* The control session is up and PASV is outstanding. The next connect is
+     * the data socket, and the first listing owns that budget (R8). */
+    fake_net_set_connect_result(NET_REFUSED);
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_FAILED);
+    CHECK(ftp_client_stage(client) == FTP_STAGE_DATA);
+    CHECK(cap.cause == FTP_CAUSE_NETWORK);
+
+    ftp_client_destroy(client);
+}
+
 static void test_data_idle(void)
 {
     setup();
@@ -1753,6 +1775,92 @@ static void test_mlst(void)
     ftp_client_destroy(client);
 }
 
+/* U2: the fake peer answers a different listing per path, so a walk can read
+ * /A and /A/B without a CWD. */
+static void test_peer_per_path_listings(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakePeer *peer = fake_peer_create();
+    CHECK(peer != NULL);
+    if (peer == NULL) {
+        ftp_client_destroy(client);
+        return;
+    }
+
+    static const char *root =
+        "type=file;size=5;modify=20240101000000; ROOT.TXT\r\n";
+    static const char *a =
+        "type=dir;modify=20240101000000; B\r\n"
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    static const char *b =
+        "type=file;size=7;modify=20240101000000; C.TXT\r\n";
+
+    FtpClientLogin login;
+    memset(&login, 0, sizeof(login));
+    login.host = "ftp.test";
+    login.port = 21;
+    login.anonymous = 1;
+    CHECK(ftp_client_connect(client, &login) == FTP_CLIENT_OK);
+
+    fake_peer_set_listing(peer, root);
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_path_listing(peer, "/A/B", b);
+    fake_peer_open(peer);
+
+    for (int i = 0; i < 80 && cap.done == 0; ++i) {
+        tick(client);
+        fake_peer_serve(peer);
+    }
+    CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
+    CHECK(cap.done == 1 && cap.ok == 1);
+    CHECK(cap.rows == 1 && strcmp(cap.row[0].name, "ROOT.TXT") == 0);
+
+    capture_reset_rows(&cap);
+    CHECK(ftp_client_list(client, "/A") == FTP_CLIENT_OK);
+    for (int i = 0; i < 80 && cap.end == 0; ++i) {
+        tick(client);
+        fake_peer_serve(peer);
+    }
+    CHECK(cap.end == 1 && cap.end_ok == 1);
+    CHECK(cap.rows == 2);
+    CHECK(strcmp(cap.row[0].name, "B") == 0);
+    CHECK(cap.row[0].type == LISTING_DIR);
+    CHECK(strcmp(cap.row[1].name, "A.TXT") == 0);
+    CHECK(strcmp(fake_peer_last_list_path(peer), "/A") == 0);
+
+    capture_reset_rows(&cap);
+    CHECK(ftp_client_list(client, "/A/B") == FTP_CLIENT_OK);
+    for (int i = 0; i < 80 && cap.end == 0; ++i) {
+        tick(client);
+        fake_peer_serve(peer);
+    }
+    CHECK(cap.end == 1 && cap.end_ok == 1);
+    CHECK(cap.rows == 1);
+    CHECK(strcmp(cap.row[0].name, "C.TXT") == 0);
+    CHECK(cap.row[0].size == 7 && cap.row[0].size_known == 1);
+    CHECK(strcmp(fake_peer_last_list_path(peer), "/A/B") == 0);
+    CHECK(fake_peer_listing_count(peer) == 3);
+
+    /* A refused path is a listing refusal, not a session loss. */
+    fake_peer_set_path_refused(peer, "/A/B", 1);
+    capture_reset_rows(&cap);
+    CHECK(ftp_client_list(client, "/A/B") == FTP_CLIENT_OK);
+    for (int i = 0; i < 80 && cap.end == 0; ++i) {
+        tick(client);
+        fake_peer_serve(peer);
+    }
+    CHECK(cap.end == 1 && cap.end_ok == 0);
+    CHECK(ftp_client_state(client) == FTP_CLIENT_READY);
+    /* MLSD and its LIST fallback are both refused. */
+    CHECK(fake_peer_list_fail_count(peer) == 2);
+
+    ftp_client_destroy(client);
+    fake_peer_destroy(peer);
+}
+
 int main(void)
 {
     test_anonymous_connect_real();
@@ -1781,6 +1889,7 @@ int main(void)
     test_connect_timeout();
     test_login_timeout();
     test_first_listing_timeout();
+    test_first_listing_data_connect_fails();
     test_data_idle();
     test_cancel_alignment();
     test_abort_reverse_order();
@@ -1798,6 +1907,7 @@ int main(void)
     test_idle_control_drop();
     test_keepalive_timeout();
     test_disconnect();
+    test_peer_per_path_listings();
 
     for (int s = FTP_CLIENT_IDLE; s <= FTP_CLIENT_FAILED; ++s)
         CHECK((s_states_seen & (1u << s)) != 0);

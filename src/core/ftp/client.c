@@ -1113,8 +1113,16 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
             client->last_net = nr;
             client->data = NULL;
             client->data_state = FTP_DATA_NONE;
-            client_command_fail(client, FTP_CAUSE_NETWORK, FTP_STAGE_DATA,
-                                "DATA CONNECT FAILED");
+            /* R8: the session's first listing owns the connect budget, so a
+             * failed data connect there fails the session rather than leaving
+             * a "connected" client whose first listing never opened. */
+            if (client->first_listing)
+                client_enter_terminal(client, FTP_CLIENT_FAILED,
+                                      FTP_CAUSE_NETWORK, FTP_STAGE_DATA,
+                                      "DATA CONNECT FAILED");
+            else
+                client_command_fail(client, FTP_CAUSE_NETWORK, FTP_STAGE_DATA,
+                                    "DATA CONNECT FAILED");
             return;
         }
         client->data_state = FTP_DATA_ACCEPTED;

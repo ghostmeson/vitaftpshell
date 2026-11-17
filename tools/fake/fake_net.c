@@ -5,7 +5,10 @@
 #include <pthread.h>
 #include <string.h>
 
-#define FAKE_NET_RX_MAX 8192
+/* One listing can be large: the U2 walk cap test streams a 2,001-row folder in
+ * one peer pass (about 110 KiB), so the receive buffer holds a whole listing.
+ * The client still reads it in its own bounded chunks. */
+#define FAKE_NET_RX_MAX (256u * 1024u)
 #define FAKE_NET_TX_MAX 8192
 #define FAKE_NET_ACCEPT_MAX 4
 

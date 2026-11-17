@@ -15,6 +15,16 @@
 #define PEER_CWD_MAX 64
 #define PEER_PATH_MAX 256
 #define PEER_REPLY_MAX 640
+/* Per-path listing scripts. A U2 walk lists a handful of folders; the bound
+ * keeps the instance fixed-size and a test that scripts more is a bug. */
+#define PEER_PATH_SCRIPTS 8
+
+typedef struct {
+    char path[PEER_PATH_MAX];
+    const char *listing; /* borrowed; NULL is an empty folder */
+    int refused;
+    int reset; /* the data channel dies instead of serving this listing */
+} PeerPathScript;
 
 struct FakePeer {
     FakeFtpd server;
@@ -41,6 +51,11 @@ struct FakePeer {
     int hold_data;
     int hold_final;
     int list_fail;
+
+    /* U2: per-path listings, keyed by the path the MLSD/LIST named. */
+    PeerPathScript scripts[PEER_PATH_SCRIPTS];
+    int script_count;
+    char last_list_path[PEER_PATH_MAX];
 
     char cwd[PEER_CWD_MAX];
     char last_stor[PEER_PATH_MAX];
@@ -82,6 +97,7 @@ void fake_peer_attach(FakePeer *peer, NetSocket *control)
     peer->stor_data = NULL;
     peer->last_stor[0] = '\0';
     snprintf(peer->cwd, sizeof(peer->cwd), "/");
+    snprintf(peer->last_list_path, sizeof(peer->last_list_path), "/");
 
     peer->listings = 0;
     peer->list_fails = 0;
@@ -125,6 +141,62 @@ void fake_peer_set_sub_listing(FakePeer *peer, const char *listing)
 {
     if (peer != NULL)
         peer->sub_listing = listing;
+}
+
+/* The script for one path, or NULL when the path falls back to the
+ * single-listing script. */
+static PeerPathScript *peer_script(FakePeer *peer, const char *path)
+{
+    for (int i = 0; i < peer->script_count; ++i) {
+        if (strcmp(peer->scripts[i].path, path) == 0)
+            return &peer->scripts[i];
+    }
+    return NULL;
+}
+
+/* One entry per path: a second call for the same path replaces the first, so a
+ * test can restate a folder between two walks without running out of slots. */
+static PeerPathScript *peer_script_slot(FakePeer *peer, const char *path)
+{
+    PeerPathScript *script = peer_script(peer, path);
+    if (script != NULL)
+        return script;
+    if (peer->script_count >= PEER_PATH_SCRIPTS)
+        return NULL;
+    script = &peer->scripts[peer->script_count++];
+    memset(script, 0, sizeof(*script));
+    snprintf(script->path, sizeof(script->path), "%s", path);
+    return script;
+}
+
+void fake_peer_set_path_listing(FakePeer *peer, const char *path,
+                                const char *listing)
+{
+    if (peer == NULL || path == NULL)
+        return;
+    PeerPathScript *script = peer_script_slot(peer, path);
+    if (script == NULL)
+        return;
+    script->refused = 0;
+    script->listing = listing;
+}
+
+void fake_peer_set_path_refused(FakePeer *peer, const char *path, int refused)
+{
+    if (peer == NULL || path == NULL)
+        return;
+    PeerPathScript *script = peer_script_slot(peer, path);
+    if (script != NULL)
+        script->refused = refused ? 1 : 0;
+}
+
+void fake_peer_set_path_reset(FakePeer *peer, const char *path, int reset)
+{
+    if (peer == NULL || path == NULL)
+        return;
+    PeerPathScript *script = peer_script_slot(peer, path);
+    if (script != NULL)
+        script->reset = reset ? 1 : 0;
 }
 
 void fake_peer_set_payload(FakePeer *peer, const char *payload)
@@ -265,6 +337,11 @@ const char *fake_peer_cwd(const FakePeer *peer)
     return peer != NULL ? peer->cwd : "";
 }
 
+const char *fake_peer_last_list_path(const FakePeer *peer)
+{
+    return peer != NULL ? peer->last_list_path : "";
+}
+
 /* The socket the client opened for the transfer, or NULL when the last connect
  * was the control session itself. */
 static NetSocket *peer_data_socket(FakePeer *peer)
@@ -291,8 +368,39 @@ static void peer_reap_stor(FakePeer *peer)
     }
 }
 
-static void peer_send_listing(FakePeer *peer)
+static void peer_send_listing(FakePeer *peer, const char *path)
 {
+    PeerPathScript *script = peer_script(peer, path);
+    if (script != NULL) {
+        if (script->refused) {
+            peer->list_fails++;
+            fake_ftpd_reply(&peer->server, 550, "Listing refused.");
+            return;
+        }
+        peer->data = peer_data_socket(peer);
+        fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
+        if (script->reset) {
+            /* The data channel dies after the 150 and no 226 follows; the
+             * client should read this as a failed transfer of one folder, not
+             * as the end of the session. */
+            if (peer->data != NULL)
+                fake_net_reset_peer(peer->data);
+            peer->data = NULL;
+            return;
+        }
+        if (script->listing != NULL && peer->data != NULL) {
+            fake_net_queue_rx(peer->data, script->listing,
+                              strlen(script->listing));
+            fake_net_shutdown(peer->data);
+        }
+        fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
+        peer->listings++;
+        peer->data = NULL;
+        return;
+    }
+
+    /* No script for this path: the single-listing fallback keeps every older
+     * suite reading the same rows. */
     const char *listing = peer->listing;
     if (strcmp(peer->cwd, "/") != 0 && peer->sub_listing != NULL)
         listing = peer->sub_listing;
@@ -431,15 +539,20 @@ static void peer_handle_command(FakePeer *peer, const char *line)
         peer->stors++;
         peer->stor_data = peer_data_socket(peer);
         fake_ftpd_reply(&peer->server, 150, "Opening data connection.");
-    } else if (strncmp(line, "MLSD ", 5) == 0 ||
-               strncmp(line, "LIST ", 5) == 0) {
+    } else if ((strncmp(line, "MLSD", 4) == 0 &&
+                (line[4] == ' ' || line[4] == '\0')) ||
+               (strncmp(line, "LIST", 4) == 0 &&
+                (line[4] == ' ' || line[4] == '\0'))) {
+        const char *path = line[4] == ' ' ? line + 5 : "/";
+        snprintf(peer->last_list_path, sizeof(peer->last_list_path), "%s",
+                 path);
         if (peer->list_fail) {
             /* The client retries MLSD as LIST; both must fail for the listing
              * to end as a read error. */
             peer->list_fails++;
             fake_ftpd_reply(&peer->server, 550, "Listing refused.");
         } else {
-            peer_send_listing(peer);
+            peer_send_listing(peer, path);
         }
     } else if (strncmp(line, "SIZE ", 5) == 0) {
         peer_send_size(peer, line + 5);

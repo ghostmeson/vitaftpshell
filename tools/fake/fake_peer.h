@@ -67,6 +67,21 @@ void fake_peer_set_listing(FakePeer *peer, const char *listing);
 void fake_peer_set_refresh_listing(FakePeer *peer, const char *listing);
 /* Served for a listing while the peer is not at "/" when set. */
 void fake_peer_set_sub_listing(FakePeer *peer, const char *listing);
+/*
+ * A per-path listing script (U2): an MLSD or LIST of exactly `path` serves
+ * `listing` instead of the single-listing script above, and different paths
+ * can hold different rows. The path is copied; the listing stays borrowed and
+ * NULL still means a complete, empty folder. A path with no script falls back
+ * to the single-listing script, so the older suites read unchanged.
+ */
+void fake_peer_set_path_listing(FakePeer *peer, const char *path,
+                                const char *listing);
+/* Refuse an MLSD or LIST of exactly `path` with 550, as a folder renamed
+ * between two listings is refused. */
+void fake_peer_set_path_refused(FakePeer *peer, const char *path, int refused);
+/* Reset the data channel for a listing of exactly `path` after its 150, with
+ * no 226, as a server whose data connection dies does. */
+void fake_peer_set_path_reset(FakePeer *peer, const char *path, int reset);
 /* The bytes a RETR queues on the data socket. */
 void fake_peer_set_payload(FakePeer *peer, const char *payload);
 
@@ -110,5 +125,7 @@ unsigned fake_peer_rename_count(const FakePeer *peer);
 const char *fake_peer_last_stor(const FakePeer *peer);
 /* The path the last CWD named, "/" before any. */
 const char *fake_peer_cwd(const FakePeer *peer);
+/* The path the last MLSD or LIST named, "/" before any. */
+const char *fake_peer_last_list_path(const FakePeer *peer);
 
 #endif
