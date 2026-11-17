@@ -233,6 +233,15 @@ static int content_is(const char *path, const char *expected)
     return n == strlen(expected) && memcmp(buf, expected, n) == 0;
 }
 
+/* The file's stored text contains `needle`: the report's own rows (U7). */
+static int file_holds(const char *path, const char *needle)
+{
+    char buf[8192];
+    size_t n = fake_fs_read_file(path, buf, sizeof(buf) - 1);
+    buf[n] = '\0';
+    return strstr(buf, needle) != NULL;
+}
+
 /* A destination that is a folder, or whose parent vanished, must end as one
  * failed item and leave the lane usable for the next transfer. */
 static void test_download_destination_failure(void)
@@ -5700,6 +5709,432 @@ static void test_folder_upload_read_only_destination(void)
     fake_peer_destroy(peer);
 }
 
+/* U7: push one file-transfer command with a size the pane claims. */
+static void push_file_transfer_sized(App *app, const char *remote,
+                                     const char *local, uint64_t total,
+                                     int known, unsigned batch_id,
+                                     int index, int total_items)
+{
+    UiCommand command;
+    memset(&command, 0, sizeof(command));
+    command.type = UI_CMD_TRANSFER;
+    command.pane = UI_PANE_REMOTE;
+    command.source_type = UI_ROW_FILE;
+    command.total = total;
+    command.total_known = known;
+    command.batch_id = batch_id;
+    command.batch_index = index;
+    command.batch_total = total_items;
+    command.batch_last = index + 1 >= total_items;
+    snprintf(command.path, sizeof(command.path), "%s", remote);
+    snprintf(command.path2, sizeof(command.path2), "%s", local);
+    CHECK(handoff_command_push(app_handoff(app), &command) == 1);
+}
+
+/* U7: one mark of a folder set, exactly as the reducer emits it. */
+static void push_folder_transfer(App *app, const char *remote,
+                                 const char *local, unsigned batch_id,
+                                 int index, int total)
+{
+    UiCommand command;
+    memset(&command, 0, sizeof(command));
+    command.type = UI_CMD_RUN_ACTION;
+    command.action = UI_ACTION_DOWNLOAD;
+    command.pane = UI_PANE_REMOTE;
+    command.source_type = UI_ROW_DIR;
+    command.batch_id = batch_id;
+    command.batch_index = index;
+    command.batch_total = total;
+    command.batch_last = index + 1 >= total;
+    snprintf(command.path, sizeof(command.path), "%s", remote);
+    snprintf(command.path2, sizeof(command.path2), "%s", local);
+    CHECK(handoff_command_push(app_handoff(app), &command) == 1);
+}
+
+/* A single-file folder job: a MOVE is the file path that owns a report. */
+static int folder_file_download(App *app, const char *remote, const char *local,
+                                int move)
+{
+    const char *sources[1] = {remote};
+    int types[1] = {UI_ROW_FILE};
+    uint64_t sizes[1] = {5};
+    int known[1] = {1};
+    WorkerFolderRequest request;
+    memset(&request, 0, sizeof(request));
+    request.direction = XFER_PLAN_DOWNLOAD;
+    request.move = move;
+    request.origin = UI_PANE_REMOTE;
+    request.destination = local;
+    request.source_count = 1;
+    request.sources = sources;
+    request.types = types;
+    request.sizes = sizes;
+    request.size_known = known;
+    return worker_folder_begin(app_worker(app), &request);
+}
+
+/* R20: a single known-size download over free space refuses before the first
+ * byte and names the shortfall. */
+static void test_download_space_single_file(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    fake_fs_set_free("ux0:", 50, 1);
+    push_file_transfer_sized(app, "/BIG.BIN", "ux0:data", 100, 1, 0, 0, 1);
+    pump(app, peer, 20);
+
+    CHECK(fake_peer_retr_count(peer) == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    CHECK(strstr(app_state(app)->status, "NOT ENOUGH SPACE") != NULL);
+    CHECK(strstr(app_state(app)->status, "50 B SHORT") != NULL);
+    CHECK(!fake_fs_exists("ux0:data/BIG.BIN"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R20: a marked file set sums its known bytes and refuses as one request. */
+static void test_download_space_marked_set(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    fake_fs_set_free("ux0:", 100, 1);
+    push_file_transfer_sized(app, "/TEST.BIN", "ux0:data", 60, 1, 44, 0, 2);
+    push_file_transfer_sized(app, "/BIG.BIN", "ux0:data", 60, 1, 44, 1, 2);
+    pump(app, peer, 20);
+
+    CHECK(fake_peer_retr_count(peer) == 0);
+    CHECK(strstr(app_state(app)->status, "NOT ENOUGH SPACE") != NULL);
+    CHECK(strstr(app_state(app)->status, "20 B SHORT") != NULL);
+    CHECK(!fake_fs_exists("ux0:data/TEST.BIN"));
+    CHECK(!fake_fs_exists("ux0:data/BIG.BIN"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R20: a folder download sums the finalized plan; the refusal lands before
+ * any byte and writes no report (no copy phase began). */
+static void test_download_space_folder(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n"
+        "type=file;size=5;modify=20240101000000; B.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_fs_set_free("ux0:", 9, 1);
+
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
+    CHECK(strstr(app_state(app)->dock.message, "NOT ENOUGH SPACE") != NULL);
+    CHECK(fake_peer_retr_count(peer) == 0);
+    CHECK(!fake_fs_exists("ux0:data/A/A.TXT"));
+    CHECK(!fake_fs_exists("ux0:data/skipped.txt"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R20: a volume that reports no free space skips the check. */
+static void test_download_space_unknown_free(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_fs_set_free("ux0:", 0, 0);
+
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(app_state(app)->panes[UI_PANE_LOCAL].free_known == 0);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R20: an unknown size is counted as nothing, so the sum is a lower bound;
+ * a known part that already exceeds free space still refuses. */
+static void test_download_space_unknown_size(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    fake_fs_set_free("ux0:", 100, 1);
+    push_file_transfer_sized(app, "/BIG.BIN", "ux0:data", 120, 1, 45, 0, 2);
+    push_file_transfer_sized(app, "/TEST.BIN", "ux0:data", 0, 0, 45, 1, 2);
+    pump(app, peer, 20);
+
+    CHECK(fake_peer_retr_count(peer) == 0);
+    CHECK(strstr(app_state(app)->status, "NOT ENOUGH SPACE") != NULL);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R21/R22: a folder job that copied writes one truthful report; a skip with
+ * no local path is REMOTE and a completed entry is not listed. */
+static void test_report_folder_with_skip(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n"
+        "type=file;size=5;modify=20240101000000; BAD:NAME.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(worker_folder_last_skipped(app_worker(app)) == 1);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(!fake_fs_exists("ux0:data/A/BAD:NAME.TXT"));
+
+    CHECK(fake_fs_exists("ux0:data/skipped.txt"));
+    CHECK(file_holds("ux0:data/skipped.txt", "vitaFTPShell transfer report\n"));
+    CHECK(file_holds("ux0:data/skipped.txt", "direction: DOWNLOAD\n"));
+    CHECK(file_holds("ux0:data/skipped.txt", "roots: /A -> ux0:data\n"));
+    CHECK(file_holds("ux0:data/skipped.txt", "missing: 1\n"));
+    CHECK(file_holds("ux0:data/skipped.txt",
+                "SKIPPED REMOTE /A/BAD:NAME.TXT - UNSAFE NAME\n"));
+    CHECK(!file_holds("ux0:data/skipped.txt", "A/A.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* AE9: a marked set from two folders writes one report in the pane's folder. */
+static void test_report_marked_set_one_report(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    static const char *b =
+        "type=file;size=5;modify=20240101000000; BAD:NAME.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_path_listing(peer, "/B", b);
+
+    push_folder_transfer(app, "/A", "ux0:data", 77, 0, 2);
+    push_folder_transfer(app, "/B", "ux0:data", 77, 1, 2);
+    for (int i = 0; i < 40 && !worker_folder_active(app_worker(app)); ++i)
+        (void)app_tick(app);
+    CHECK(worker_folder_active(app_worker(app)) == 1);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(fake_fs_exists("ux0:data/skipped.txt"));
+    CHECK(!fake_fs_exists("ux0:data/skipped 2.txt"));
+    CHECK(file_holds("ux0:data/skipped.txt", "roots: /A (+1 MORE) -> ux0:data\n"));
+    CHECK(file_holds("ux0:data/skipped.txt",
+                "SKIPPED REMOTE /B/BAD:NAME.TXT - UNSAFE NAME\n"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R14: a move that stops deleting names every source it kept. */
+static void test_report_partial_move_names_sources(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n"
+        "type=file;size=5;modify=20240101000000; B.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_delete_fail(peer, "/A/A.TXT");
+
+    CHECK(folder_download(app, "/A", "ux0:data", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
+    CHECK(strstr(app_state(app)->dock.message, "Permission denied") != NULL);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(content_is("ux0:data/A/B.TXT", "HELLO"));
+    CHECK(fake_fs_exists("ux0:data/skipped.txt"));
+    CHECK(file_holds("ux0:data/skipped.txt", "missing: 2\n"));
+    CHECK(file_holds("ux0:data/skipped.txt",
+                "NOT DELETED REMOTE /A/A.TXT - Permission denied.\n"));
+    CHECK(file_holds("ux0:data/skipped.txt",
+                "NOT DELETED REMOTE /A - Permission denied.\n"));
+    CHECK(!file_holds("ux0:data/skipped.txt", "NOT DELETED REMOTE /A/B.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R22: a move deletes a source folder, so its report sits in the folder
+ * above and survives. */
+static void test_report_move_leaves_report_in_parent(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    CHECK(folder_download(app, "/A", "ux0:data", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.move == 1);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(fake_peer_dele_count(peer) == 1);
+    CHECK(fake_peer_rmd_count(peer) == 1);
+    CHECK(fake_fs_exists("ux0:data/skipped.txt"));
+    CHECK(!fake_fs_exists("ux0:data/A/skipped.txt"));
+    CHECK(file_holds("ux0:data/skipped.txt", "missing: 0\n"));
+    CHECK(file_holds("ux0:data/skipped.txt",
+                "transfer complete - nothing is missing\n"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R22: a report that cannot be written changes nothing about the transfer;
+ * the terminal reason carries the notice on the same line. */
+static void test_report_write_failure_keeps_outcome(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    /* Only a skip: no transfer writes, so the report's own write is the next
+     * one and the failure is aimed at it. */
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; BAD:NAME.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_fs_fail_op(FAKE_FS_OP_WRITE, FS_IO);
+
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(strstr(app_state(app)->dock.message, "REPORT NOT SAVED") != NULL);
+    CHECK(strstr(app_state(app)->dock.message, "SKIPPED") != NULL);
+    CHECK(fake_fs_exists("ux0:data/A"));
+    CHECK(!fake_fs_exists("ux0:data/skipped.txt"));
+    CHECK(!fake_fs_exists("ux0:data/skipped.txt.tmp"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R22: the transfer wrote skipped.txt itself, so the report takes the free
+ * name and leaves the transferred file alone. */
+static void test_report_free_name_after_transfer(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    CHECK(folder_file_download(app, "/skipped.txt", "ux0:data", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(strstr(app_state(app)->dock.message, "REPORT: skipped 2.txt") !=
+          NULL);
+    CHECK(content_is("ux0:data/skipped.txt", "HELLO"));
+    CHECK(fake_fs_exists("ux0:data/skipped 2.txt"));
+    CHECK(file_holds("ux0:data/skipped 2.txt",
+                "transfer complete - nothing is missing\n"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R20/KTD10: a write to the volume invalidates the cached free space, so the
+ * next preflight reads the platform again instead of the stale value. */
+static void test_download_space_cache_invalidated(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    /* The first preflight fills the cache with 1000 and admits the item. */
+    fake_fs_set_free("ux0:", 1000, 1);
+    push_file_transfer_sized(app, "/TEST.BIN", "ux0:data", 5, 1, 0, 0, 1);
+    for (int i = 0; i < 120 && !content_is("ux0:data/TEST.BIN", "HELLO"); ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
+    CHECK(fake_peer_retr_count(peer) == 1);
+
+    /* The platform now reports no space. Only an invalidated cache sees it. */
+    fake_fs_set_free("ux0:", 0, 1);
+    push_file_transfer_sized(app, "/BIG.BIN", "ux0:data", 100, 1, 0, 0, 1);
+    pump(app, peer, 20);
+
+    CHECK(fake_peer_retr_count(peer) == 1);
+    CHECK(strstr(app_state(app)->status, "NOT ENOUGH SPACE") != NULL);
+    CHECK(!fake_fs_exists("ux0:data/BIG.BIN"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
 int main(void)
 {
     test_download_destination_failure();
@@ -5816,6 +6251,18 @@ int main(void)
     test_folder_over_file_skipped();
     test_folder_path_busy();
     test_folder_upload_read_only_destination();
+    test_download_space_single_file();
+    test_download_space_marked_set();
+    test_download_space_folder();
+    test_download_space_unknown_free();
+    test_download_space_unknown_size();
+    test_download_space_cache_invalidated();
+    test_report_folder_with_skip();
+    test_report_marked_set_one_report();
+    test_report_partial_move_names_sources();
+    test_report_move_leaves_report_in_parent();
+    test_report_write_failure_keeps_outcome();
+    test_report_free_name_after_transfer();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_integration: %d failure(s)\n", s_failures);

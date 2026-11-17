@@ -13,6 +13,7 @@
 #include "core/fsop_run.h"
 #include "core/logev.h"
 #include "core/path.h"
+#include "core/report.h"
 #include "core/reserve.h"
 #include "core/store.h"
 
@@ -229,6 +230,7 @@ typedef struct {
 
     /* DELETE: bottom-up over the plan's delete list. */
     int delete_checked;
+    int delete_started;
     int delete_index;
     int delete_total;
     int deleted;
@@ -448,6 +450,64 @@ static uint64_t now_ms(Worker *worker)
     return worker->ports.clock->now_ms(worker->ports.clock->ctx);
 }
 
+/*
+ * R20/KTD10: free space is cached per volume. A miss reads the platform once;
+ * a value the platform cannot report stays unknown, so the preflight is
+ * skipped and the dock renders `--` instead of a guess.
+ */
+static int volume_free_get(Worker *worker, const char *path, uint64_t *out)
+{
+    Volume volume;
+    if (!path_volume(path, &volume))
+        return 0;
+    int index = (int)volume;
+    if (index < 0 || index >= VOLUME_COUNT)
+        return 0;
+
+    if (!worker->volume_free_valid[index]) {
+        FsFreeSpace space;
+        memset(&space, 0, sizeof(space));
+        if (worker->ports.fs->free_space(worker->ports.fs->ctx, path, &space) !=
+                FS_OK ||
+            !space.known)
+            return 0;
+        worker->volume_free_bytes[index] = space.bytes;
+        worker->volume_free_valid[index] = 1;
+    }
+    *out = worker->volume_free_bytes[index];
+    return 1;
+}
+
+/* A write to the volume makes the cached value a claim about the past. */
+static void volume_free_invalidate(Worker *worker, const char *path)
+{
+    Volume volume;
+    if (path == NULL || !path_volume(path, &volume))
+        return;
+    int index = (int)volume;
+    if (index >= 0 && index < VOLUME_COUNT)
+        worker->volume_free_valid[index] = 0;
+}
+
+/*
+ * R20: `bytes` sums only known sizes, so the check is a lower bound. An unknown
+ * free space skips the check; a known shortfall fills `reason` and refuses the
+ * request before its first byte.
+ */
+static int download_space_ok(Worker *worker, const char *destination,
+                             uint64_t bytes, char *reason, size_t cap)
+{
+    uint64_t free_bytes = 0;
+    if (!volume_free_get(worker, destination, &free_bytes) ||
+        bytes <= free_bytes)
+        return 1;
+
+    char shortfall[32];
+    fmt_size(shortfall, sizeof(shortfall), bytes - free_bytes, 1);
+    snprintf(reason, cap, "NOT ENOUGH SPACE - %s SHORT", shortfall);
+    return 0;
+}
+
 /* U26: the FTP server asks the reservation table before a data or mutating
  * command. CHECK refuses a held path; HOLD claims the transfer's path;
  * RELEASE drops the server lane when the transfer ends. */
@@ -655,6 +715,8 @@ static void local_batch_emit_done(Worker *worker)
 static void changed_dir_commit(Worker *worker)
 {
     const Path *candidate = &worker->changed_dirs[worker->changed_dir_count];
+    /* The local write changed the volume's free space (R20). */
+    volume_free_invalidate(worker, candidate->text);
     for (int i = 0; i < worker->changed_dir_count; ++i) {
         if (path_ci_equal(worker->changed_dirs[i].text, candidate->text))
             return;
@@ -2228,6 +2290,19 @@ static void folder_job_after_scan(Worker *worker)
     }
     job->entry_total = job->plan->file_count + job->plan->dir_count;
     job->skips = job->plan->skipped_count;
+    /* R20: the walk has just made the whole sum knowable and no byte has
+     * moved, so a known shortfall refuses the one request here. */
+    if (job->plan->direction == XFER_PLAN_DOWNLOAD &&
+        job->plan->total_bytes > 0) {
+        char reason[64];
+        if (!download_space_ok(worker, job->dest_folder,
+                               job->plan->total_bytes, reason,
+                               sizeof(reason))) {
+            folder_job_end(worker, 0, 0, reason, OP_CAUSE_STORAGE,
+                           OP_STAGE_PLAN, XFER_PHASE_SCAN);
+            return;
+        }
+    }
     if (job->plan->conflicts.count > 0 && !job->conflict_asked) {
         folder_job_request_conflict(worker);
         return;
@@ -2990,6 +3065,7 @@ static void folder_job_verify_pump(Worker *worker)
      * entry verified. The copies stay; every source stays with them. */
     if (xfer_plan_move_ready(job->plan) && job->plan->skipped_count == 0) {
         job->stage = FOLDER_STAGE_DELETE;
+        job->delete_started = 1;
         job->delete_index = 0;
         job->delete_checked = 0;
         job->deleted = 0;
@@ -3078,6 +3154,9 @@ static void folder_job_delete_pump(Worker *worker)
             return;
         }
         job->deleted++;
+        /* A local delete returns space to the volume, so its cached free
+         * value cannot stand (R20). */
+        volume_free_invalidate(worker, source);
         folder_job_emit_progress(worker, XFER_PHASE_DELETE,
                                  (uint64_t)job->deleted,
                                  (uint64_t)job->delete_total, 1,
@@ -3204,6 +3283,20 @@ static void folder_job_cancel(Worker *worker)
         (void)ftp_client_cancel(worker->client);
 }
 
+/* R21: the header names the direction's both roots. A marked set names its
+ * first root and the extra count; one root names itself. */
+static void folder_job_report_roots(const FolderJob *job, char *out, size_t cap)
+{
+    const XferPlan *plan = job->plan;
+    const char *first =
+        plan != NULL && plan->root_count > 0 ? xfer_plan_source(plan, 0) : "";
+    if (job->root_count > 1)
+        snprintf(out, cap, "%s (+%d MORE) -> %s", first,
+                 job->root_count - 1, job->dest_folder);
+    else
+        snprintf(out, cap, "%s -> %s", first, job->dest_folder);
+}
+
 static void folder_job_end(Worker *worker, int ok, int cancelled,
                            const char *detail, OpCause cause, OpStage stage,
                            XferPhase phase)
@@ -3246,6 +3339,91 @@ static void folder_job_end(Worker *worker, int ok, int cancelled,
     worker->folder_last_skipped = skipped;
     reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
 
+    /*
+     * R21/R22: one report for every job that reached its copy phase. A job
+     * that stopped before the first byte (a cancelled walk, conflict, or move
+     * confirm) writes nothing and leaves any previous report in place. A
+     * failed or cancelled transfer lists every entry it did not complete. The
+     * report is written before the terminal refresh so a download's new file
+     * appears with the copies.
+     */
+    int report_failed = 0;
+    int report_saved = 0;
+    char chosen[PATH_MAX_LEN];
+    chosen[0] = '\0';
+    if (copy_started && plan != NULL) {
+        char roots[PATH_MAX_LEN * 2];
+        folder_job_report_roots(job, roots, sizeof(roots));
+
+        XferReportRequest request;
+        memset(&request, 0, sizeof(request));
+        request.direction =
+            plan->direction == XFER_PLAN_UPLOAD ? "UPLOAD" : "DOWNLOAD";
+        request.roots = roots;
+        request.move = move;
+        request.complete = !cancelled && ok;
+        request.deleted = job->delete_started ? job->deleted : -1;
+        request.pending_reason =
+            cancelled ? "CANCELLED"
+                      : (detail != NULL ? detail : "NOT ATTEMPTED");
+
+        XferReportResult result =
+            xfer_report_write(worker->ports.fs, report_folder, plan, &request,
+                              chosen, sizeof(chosen));
+        report_saved = result == XFER_REPORT_OK;
+        report_failed = !report_saved;
+        if (report_saved) {
+            log_event(worker, LOGEV_LOG, NULL, NULL, chosen, "report", "app",
+                      0, 0);
+        } else {
+            log_detail(worker, LOGEV_LOG,
+                       result == XFER_REPORT_REFUSED ? "report refused"
+                                                     : "report failed");
+        }
+    }
+
+    /* The copies (and the report above) changed the destination volume, so its
+     * cached free space is a claim about the past (R20). */
+    if (copy_started && direction == XFER_DIR_DOWNLOAD)
+        volume_free_invalidate(worker, dest_folder);
+
+    /* One terminal reason: the failure or the skip count, then the report
+     * notice on the same line. */
+    char terminal[192];
+    terminal[0] = '\0';
+    int notice = 0;
+    if (detail != NULL)
+        fmt_copy(terminal, sizeof(terminal), detail);
+    if (!cancelled && detail == NULL && skipped > 0) {
+        snprintf(terminal, sizeof(terminal), "%d SKIPPED", skipped);
+        notice = 1;
+    }
+    if (report_failed) {
+        size_t used = strlen(terminal);
+        if (used > 0)
+            snprintf(terminal + used, sizeof(terminal) - used,
+                     " - REPORT NOT SAVED");
+        else
+            snprintf(terminal, sizeof(terminal), "REPORT NOT SAVED");
+        if (!cancelled)
+            notice = 1;
+    } else if (report_saved) {
+        /* R22: the transfer owned the base name, so the report took the free
+         * one; the dock names the file the user will actually find. */
+        const char *leaf = last_name(chosen);
+        if (strcmp(leaf, XFER_REPORT_NAME) != 0) {
+            size_t used = strlen(terminal);
+            if (used > 0)
+                snprintf(terminal + used, sizeof(terminal) - used,
+                         " - REPORT: %s", leaf);
+            else
+                snprintf(terminal, sizeof(terminal), "REPORT: %s", leaf);
+            if (!cancelled)
+                notice = 1;
+        }
+    }
+    const char *terminal_text = terminal[0] != '\0' ? terminal : NULL;
+
     /* R9: the views that changed refresh once, at the terminal. A move that
      * deleted its sources also refreshes the side they came from. */
     if (copy_started || deleted_sources) {
@@ -3270,8 +3448,8 @@ static void folder_job_end(Worker *worker, int ok, int cancelled,
         event.phase = phase;
         event.phase_known = 1;
         event.move = move;
-        if (detail != NULL)
-            fmt_copy(event.detail, sizeof(event.detail), detail);
+        if (terminal_text != NULL)
+            fmt_copy(event.detail, sizeof(event.detail), terminal_text);
     } else {
         event_init(&event, HANDOFF_EVT_TRANSFER_DONE);
         event.ok = ok;
@@ -3287,12 +3465,10 @@ static void folder_job_end(Worker *worker, int ok, int cancelled,
         event.item_total = entry_total > 0 ? entry_total : 1;
         event.cause = cause;
         event.stage = stage;
-        if (detail != NULL)
-            fmt_copy(event.detail, sizeof(event.detail), detail);
-        if (skipped > 0 && detail == NULL) {
-            snprintf(event.detail, sizeof(event.detail), "%d SKIPPED", skipped);
+        if (terminal_text != NULL)
+            fmt_copy(event.detail, sizeof(event.detail), terminal_text);
+        if (notice)
             event.notice = 1;
-        }
         if (elapsed > 0) {
             event.elapsed_ms = elapsed;
             event.elapsed_known = 1;
@@ -5632,6 +5808,26 @@ static void transfer_batch_flush(Worker *worker)
         return;
     }
 
+    /* R20: a pure file set is one download request. The sum covers only the
+     * sizes the pane knows, so an unknown size is a lower bound, never a
+     * reason to guess. An unknown free space skips the check. */
+    if (direction == XFER_PLAN_DOWNLOAD) {
+        uint64_t bytes = 0;
+        for (int i = 0; i < count; ++i) {
+            if (batch[i].total_known)
+                bytes += batch[i].total;
+        }
+        if (bytes > 0) {
+            char reason[64];
+            if (!download_space_ok(worker, destination, bytes, reason,
+                                   sizeof(reason))) {
+                emit_error(worker, UI_PANE_REMOTE, reason, OP_CAUSE_STORAGE,
+                           OP_STAGE_PLAN);
+                return;
+            }
+        }
+    }
+
     for (int i = 0; i < count; ++i) {
         UiCommand item = batch[i];
         item.type = UI_CMD_TRANSFER;
@@ -5871,6 +6067,10 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
     XferItem finished;
     memset(&finished, 0, sizeof(finished));
     (void)xfer_active(&worker->queue, &finished);
+
+    /* A download wrote (or removed its partial) on the destination volume. */
+    if (finished.direction == XFER_DIR_DOWNLOAD)
+        volume_free_invalidate(worker, finished.destination.text);
 
     xfer_release(&worker->queue, NULL);
     reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
@@ -6203,6 +6403,11 @@ static void server_event(void *ctx, const FtpServerEvent *event)
     }
     case FTP_SERVER_EVENT_TRANSFER_DONE:
         worker->server_transfer_active = 0;
+        /* The server transfer touched the local volume (a STOR writes, a
+         * failed one may leave no partial at all). Invalidate, never guess:
+         * the next read is one free_space call, not a stale number. */
+        if (event->path != NULL)
+            volume_free_invalidate(worker, event->path);
         emit_transfer_done(worker, worker->server_direction,
                            worker->server_name, event->ok, 0, event->bytes,
                            event->total, event->total_known, event->cause,
