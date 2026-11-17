@@ -287,8 +287,11 @@ static int wait_net_cancelled(App *app)
     for (int i = 0; i < TICK_LIMIT; ++i) {
         if (!app_tick(app))
             return 0;
+        /* R24: the cancel keeps a visible terminal, so DONE + cancelled is
+         * the settled state; IDLE would hide what the job reported. */
         if (strcmp(app_state(app)->status, "NETWORK CANCELLED") == 0 &&
-            app_state(app)->dock.state == UI_DOCK_IDLE)
+            app_state(app)->dock.state == UI_DOCK_DONE &&
+            app_state(app)->dock.cancelled == 1)
             return 1;
     }
     return 0;

@@ -1732,6 +1732,26 @@ static void test_mlsd_cdir_perm(void)
     CHECK(cap.perm_known == 1);
     CHECK((cap.perm_mask & LISTING_PERM_WRITES) == 0);
 
+    /* R18: a pdir row describes the parent, never the listed folder, so it
+     * must not supply the current folder's mask. */
+    capture_reset_rows(&cap);
+    CHECK(ftp_client_list(client, "/") == FTP_CLIENT_OK);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    data = fake_net_last_connected();
+    expect_cmd(&server, "MLSD /");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+    fake_net_queue_rx(data, "type=pdir;perm=el; ..\r\n",
+                      strlen("type=pdir;perm=el; ..\r\n"));
+    fake_net_shutdown(data);
+    reply(&server, 226, "Transfer complete.");
+    tick_until_settled(client);
+
+    CHECK(cap.end == 1 && cap.end_ok == 1);
+    CHECK(cap.perm_known == 0);
+
     ftp_client_destroy(client);
 }
 

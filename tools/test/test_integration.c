@@ -123,6 +123,14 @@ static void pump(App *app, FakePeer *peer, int ticks)
     }
 }
 
+/* R24: a cancelled transfer keeps its terminal visible with the counts and
+ * the reason, so the lane is DONE + cancelled rather than IDLE. */
+static void expect_cancelled_dock(App *app)
+{
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.cancelled == 1);
+}
+
 static void connect_site_listing(App *app, FakePeer *peer, const char *listing,
                                  const char *payload)
 {
@@ -360,7 +368,7 @@ static void test_two_lanes_progress(void)
     press(app, INPUT_BIT(INPUT_CROSS));
     pump(app, peer, 40);
     CHECK(fake_peer_abort_count(peer) > 0);
-    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    expect_cancelled_dock(app);
 
     fake_peer_destroy(peer);
     app_destroy(app);
@@ -401,7 +409,7 @@ static void test_two_cancel_presses(void)
 
     pump(app, peer, 40);
     CHECK(fake_peer_abort_count(peer) > 0);
-    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    expect_cancelled_dock(app);
 
     fake_peer_destroy(peer);
     app_destroy(app);
@@ -1285,7 +1293,7 @@ static void test_cancel(void)
     CHECK(fake_peer_abort_count(peer) > 0);
     CHECK(!fake_fs_exists("ux0:data/BIG.BIN"));
     CHECK(!fake_fs_exists("ux0:data/BIG.BIN.vftp.part"));
-    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    expect_cancelled_dock(app);
 
     fake_peer_destroy(peer);
     app_destroy(app);
@@ -1935,7 +1943,7 @@ static void test_upload_conflict(void)
     pump(app, peer, 40);
     CHECK(fake_peer_stor_count(peer) == 1);
     /* CANCEL must be observed as a cancellation, not look like SKIP. */
-    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    expect_cancelled_dock(app);
     CHECK(strcmp(app_state(app)->status, "NETWORK CANCELLED") == 0);
 
     /* CANCEL cleared the batch latch: a new attempt asks again. */
@@ -4936,6 +4944,49 @@ static void test_folder_move_confirm_cancel(void)
 }
 
 /* A verified download move deletes the remote source and ends MOVED. */
+/* R14: a move whose copy skipped one entry keeps every source, including the
+ * entries that copied and verified; no delete is issued. */
+static void test_folder_move_with_skip_keeps_sources(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/A.TXT", "OLD", 3);
+    fake_fs_seed_file("ux0:data/SRC/B.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    /* `/` holds SRC, and /SRC already holds A.TXT, so the one conflict
+     * question appears for that file. */
+    fake_peer_set_path_listing(
+        peer, "/", "type=dir;size=0;modify=20240101000000; SRC\r\n");
+    fake_peer_set_path_listing(
+        peer, "/SRC",
+        "type=file;size=3;modify=20240101000000; A.TXT\r\n");
+
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_CONFLICT, 200) == 1);
+    /* The real confirm: CANCEL -> SKIP. */
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    /* CANCEL -> MOVE. */
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(fake_peer_stor_count(peer) == 1); /* B.TXT only */
+    CHECK(fake_peer_dele_count(peer) == 0);
+    CHECK(fake_peer_rmd_count(peer) == 0);
+    CHECK(fake_fs_exists("ux0:data/SRC/A.TXT"));
+    CHECK(fake_fs_exists("ux0:data/SRC/B.TXT"));
+    CHECK(worker_folder_last_skipped(app_worker(app)) == 1);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
 static void test_folder_download_move(void)
 {
     App *app = make_app();
@@ -5183,7 +5234,7 @@ static void test_folder_cancel_scan(void)
 
     CHECK(worker_folder_active(app_worker(app)) == 0);
     CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
-    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    expect_cancelled_dock(app);
     CHECK(!fake_fs_exists("ux0:data/A/A.TXT"));
     CHECK(fake_peer_retr_count(peer) == 0);
     CHECK(!fake_fs_exists("ux0:data/skipped.txt"));
@@ -5220,7 +5271,7 @@ static void test_folder_cancel_copy(void)
 
     CHECK(worker_folder_active(app_worker(app)) == 0);
     CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
-    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    expect_cancelled_dock(app);
     CHECK(!fake_fs_exists("ux0:data/A/A.TXT"));
     CHECK(!fake_fs_exists("ux0:data/A/A.TXT.vftp.part"));
 
@@ -5597,7 +5648,7 @@ static void test_folder_cancel_verify(void)
     CHECK(cancelled == 1);
     CHECK(worker_folder_active(app_worker(app)) == 0);
     CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
-    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    expect_cancelled_dock(app);
     CHECK(fake_fs_exists("ux0:data/SRC/F.TXT"));
     CHECK(fake_peer_dele_count(peer) == 0);
     CHECK(fake_peer_rmd_count(peer) == 0);
@@ -6233,6 +6284,7 @@ int main(void)
     test_remote_move_file_bridge();
     test_folder_conflict_skip();
     test_folder_move_confirm_cancel();
+    test_folder_move_with_skip_keeps_sources();
     test_folder_download_move();
     test_folder_upload_move();
     test_folder_verify_unverified_keeps_sources();

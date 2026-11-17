@@ -285,6 +285,9 @@ download, owner metadata, and the SIZE upload fallback; D92-D94 record the
 per-session data ports, the one-fact-one-home rule, and the documentation gate;
 D95 records the one-pass verification sequencing; D96-D99 record the volume
 scope, the right-pane view model, the same-folder prompt, and the `app0:` alias.
+D100-D102 record the one folder job and the eight-row ledger, the verified move
+and the `skipped.txt` report, and the per-folder read-only state with the
+free-space preflight.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
@@ -335,7 +338,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D99
+    DECISIONS.md       numbered decisions, D1-D102
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     VERIFICATION.md    hardware matrix, build evidence, and the test record
     THIRD_PARTY.md     reused code, licenses, protocol references

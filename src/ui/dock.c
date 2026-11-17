@@ -291,6 +291,21 @@ static void active_dock(const UiDock *d, DockPanel *p)
                                     : 0.0f;
     p->bar_color = C_YELLOW;
 
+    /* DESIGN: SCANNING and DELETING report a count, never a byte figure. */
+    if (d->phase_known && d->phase_count_known &&
+        ((XferPhase)d->phase == XFER_PHASE_SCAN ||
+         (XferPhase)d->phase == XFER_PHASE_DELETE)) {
+        snprintf(index, sizeof(index), "%d %s", d->phase_count,
+                 (XferPhase)d->phase == XFER_PHASE_SCAN ? "FOLDERS"
+                                                        : "SOURCES");
+        p->left = index;
+        p->left_color = C_WHITE;
+        p->left2 = NULL;
+        p->right_text = "--";
+        p->right_text_color = C_DIM;
+        return;
+    }
+
     if (d->item_index > 0 && d->item_total > 0) {
         snprintf(index, sizeof(index), "%d OF %d", d->item_index,
                  d->item_total);
@@ -340,17 +355,20 @@ static void done_dock(const UiDock *d, DockPanel *p)
     } else if (d->move) {
         /* KTD5: one flag turns the copy's done word into the move's word. */
         p->word = "MOVED";
-        if (failed > 0)
+        if (failed > 0 || skipped > 0)
             p->word_color = C_YELLOW;
         else
             p->word_color = C_GREEN;
     } else {
         p->word = direction_done_word(d->direction);
-        if (failed > 0)
+        if (failed > 0 || skipped > 0)
             p->word_color = C_YELLOW;
         else
             p->word_color = C_GREEN;
     }
+    /* R24: a partial keeps the verb in yellow even when nothing failed. */
+    if (skipped > 0 && done > 0 && cancelled == 0)
+        p->word_color = C_YELLOW;
 
     if (batch) {
         if (cancelled > 0 || failed > 0)
@@ -404,11 +422,15 @@ static void failed_dock(const UiDock *d, DockPanel *p)
 
     /* A download can lose its final reply after every byte arrived. The file
      * stays, so the dock keeps the operation word in yellow and puts the
-     * reason on line three instead of claiming nothing was kept (D89). */
-    int kept = d->file_kept &&
-               (d->direction == XFER_DIR_DOWNLOAD ||
-                d->direction == XFER_DIR_SERVER_DOWNLOAD);
-    p->word = kept ? direction_done_word(d->direction) : "FAILED";
+     * reason on line three instead of claiming nothing was kept (D89). A
+     * folder job that copied some entries before failing keeps them too, so a
+     * partial folder terminal is never `FAILED` / `NO PARTIAL KEPT`. */
+    int folder_partial = d->phase_known && d->item_index > 0;
+    int kept = folder_partial ||
+               (d->file_kept && (d->direction == XFER_DIR_DOWNLOAD ||
+                                 d->direction == XFER_DIR_SERVER_DOWNLOAD));
+    p->word = kept ? (d->move ? "MOVED" : direction_done_word(d->direction))
+                   : "FAILED";
     p->word_color = kept ? C_YELLOW : C_RED;
     p->subject = d->name;
     p->progress_valid = d->total_known && d->total > 0;

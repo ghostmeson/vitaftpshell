@@ -133,6 +133,8 @@ typedef struct {
      * into MOVED and the phase hides the bar while it scans or checks. */
     int phase;
     int phase_known;
+    int phase_count;
+    int phase_count_known;
     int move;
     int skipped;
     int failed;
@@ -402,6 +404,8 @@ typedef struct {
     /* KTD5: the folder job's phase and move flag (see HandoffEvent). */
     int phase;
     int phase_known;
+    int phase_count;
+    int phase_count_known;
     int move;
     unsigned prompt_id;
     int existing_count;

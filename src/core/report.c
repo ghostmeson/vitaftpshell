@@ -186,6 +186,24 @@ static int plan_owns_local(const XferPlan *plan, const char *path)
     return 0;
 }
 
+/* R22: a candidate is unusable when the transfer owns the name itself or the
+ * temp/aside the report writer consumes beside it. Without this check a
+ * transferred `skipped.txt.tmp` is deleted as leftover debris: write_report
+ * removes `<target>.tmp` and replace_file moves `<target>.old` away. */
+static int candidate_owned(const XferPlan *plan, const char *target)
+{
+    if (plan_owns_local(plan, target))
+        return 1;
+    char side[PATH_MAX_LEN];
+    if (sidecar_path(side, sizeof(side), target, ".tmp") &&
+        plan_owns_local(plan, side))
+        return 1;
+    if (sidecar_path(side, sizeof(side), target, ".old") &&
+        plan_owns_local(plan, side))
+        return 1;
+    return 0;
+}
+
 /* Compose one candidate name in the report folder. */
 static XferReportResult candidate_path(const char *folder, int index,
                                        char *out, size_t cap)
@@ -224,18 +242,22 @@ static XferReportResult choose_target(FsPort *fs, const char *report_folder,
         return found == FS_DENIED ? XFER_REPORT_REFUSED
                                   : XFER_REPORT_FAILED;
     if (found == FS_NOT_FOUND) {
-        memcpy(target, base, text_len(base) + 1);
-        return XFER_REPORT_OK;
-    }
-    if (entry.type == FS_ENTRY_DIR)
-        return XFER_REPORT_REFUSED;
-    if (!plan_owns_local(plan, base)) {
-        memcpy(target, base, text_len(base) + 1);
-        return XFER_REPORT_OK;
+        if (!candidate_owned(plan, base)) {
+            memcpy(target, base, text_len(base) + 1);
+            return XFER_REPORT_OK;
+        }
+    } else {
+        if (entry.type == FS_ENTRY_DIR)
+            return XFER_REPORT_REFUSED;
+        if (!candidate_owned(plan, base)) {
+            memcpy(target, base, text_len(base) + 1);
+            return XFER_REPORT_OK;
+        }
     }
 
-    /* The transfer owns the base name: take the first free numbered name. A
-     * directory on a candidate simply means that name is taken. */
+    /* The transfer owns the base name, or the sidecars beside it: take the
+     * first free numbered name. A directory on a candidate simply means that
+     * name is taken. */
     for (int i = 2; i <= XFER_REPORT_FREE_MAX; ++i) {
         char candidate[PATH_MAX_LEN];
         made = candidate_path(report_folder, i, candidate, sizeof(candidate));
@@ -245,12 +267,18 @@ static XferReportResult choose_target(FsPort *fs, const char *report_folder,
         memset(&entry, 0, sizeof(entry));
         found = fs->stat(fs->ctx, candidate, &entry);
         if (found == FS_NOT_FOUND) {
+            if (candidate_owned(plan, candidate))
+                continue;
             memcpy(target, candidate, text_len(candidate) + 1);
             return XFER_REPORT_OK;
         }
         if (found != FS_OK)
             return found == FS_DENIED ? XFER_REPORT_REFUSED
                                       : XFER_REPORT_FAILED;
+        if (entry.type == FS_ENTRY_DIR || candidate_owned(plan, candidate))
+            continue;
+        memcpy(target, candidate, text_len(candidate) + 1);
+        return XFER_REPORT_OK;
     }
     return XFER_REPORT_REFUSED;
 }

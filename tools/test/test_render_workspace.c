@@ -249,8 +249,13 @@ static void test_dock_states(void)
     s_state.dock.item_total = 3;
     s_state.dock.phase = XFER_PHASE_SCAN;
     s_state.dock.phase_known = 1;
+    s_state.dock.phase_count = 7;
+    s_state.dock.phase_count_known = 1;
     render();
     CHECK(trace_text_at_color("SCANNING", 32.0f, 450.0f, C_YELLOW));
+    /* R24/DESIGN: a phase reports its count, never a byte figure. */
+    CHECK(trace_has_text("7 FOLDERS"));
+    CHECK(!trace_has_text("7 B OF"));
 
     s_state.dock.phase = XFER_PHASE_VERIFY;
     render();
@@ -258,8 +263,11 @@ static void test_dock_states(void)
 
     s_state.dock.phase = XFER_PHASE_DELETE;
     s_state.dock.item_total = 5;
+    s_state.dock.phase_count = 3;
+    s_state.dock.phase_count_known = 1;
     render();
     CHECK(trace_text_at_color("DELETING", 32.0f, 450.0f, C_YELLOW));
+    CHECK(trace_has_text("3 SOURCES"));
 
     /* A verified move's terminal is MOVED. */
     memset(&s_state.dock, 0, sizeof(s_state.dock));
@@ -273,6 +281,19 @@ static void test_dock_states(void)
     s_state.dock.item_total = 1;
     render();
     CHECK(trace_text_at_color("MOVED", 32.0f, 450.0f, C_GREEN));
+
+    /* R24: a cancelled job keeps its terminal: CANCELLED n OF m in white. */
+    memset(&s_state.dock, 0, sizeof(s_state.dock));
+    s_state.dock.state = UI_DOCK_DONE;
+    s_state.dock.direction = XFER_DIR_DOWNLOAD;
+    s_state.dock.cancelled = 1;
+    s_state.dock.item_index = 2;
+    s_state.dock.item_total = 5;
+    s_state.dock.notice = 1;
+    snprintf(s_state.dock.message, sizeof(s_state.dock.message), "CANCELLED");
+    render();
+    CHECK(trace_has_text_color("CANCELLED", C_WHITE));
+    CHECK(trace_has_text("2 OF 5 ITEMS"));
 
     memset(&s_state.dock, 0, sizeof(s_state.dock));
     s_state.dock.state = UI_DOCK_DONE;

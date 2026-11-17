@@ -2168,6 +2168,15 @@ static void folder_job_emit_progress(Worker *worker, XferPhase phase,
     event.total_known = total_known;
     event.item_index = item_index;
     event.item_total = item_total;
+    /* DESIGN: SCANNING and DELETING report their own count, never a byte
+     * figure. The byte fields stay zero so the dock can never invent one. */
+    if (phase == XFER_PHASE_SCAN || phase == XFER_PHASE_DELETE) {
+        event.phase_count = item_index;
+        event.phase_count_known = 1;
+        event.bytes = 0;
+        event.total = 0;
+        event.total_known = 0;
+    }
     uint64_t elapsed = now_ms(worker) - job->start_ms;
     event.elapsed_ms = elapsed;
     event.elapsed_known = elapsed > 0;
@@ -2206,7 +2215,10 @@ static int folder_child_named(const XferPlan *plan, int parent,
     for (int i = 0; i < plan->entry_count; ++i) {
         if (xfer_plan_parent(plan, i) != parent)
             continue;
-        if (strcmp(last_name(xfer_plan_dest(plan, i)), name) == 0)
+        /* R4/R13: the destination filesystem folds case, so a listing row that
+         * differs only in case is the same file the conflict question and the
+         * verifier must both see. A byte comparison here silently rewrote it. */
+        if (path_ci_equal(last_name(xfer_plan_dest(plan, i)), name))
             return i;
     }
     return XFER_PLAN_NO_INDEX;
@@ -2390,8 +2402,10 @@ static void folder_job_local_list(Worker *worker, int dir)
         if (strcmp(entry.name, ".") == 0 || strcmp(entry.name, "..") == 0)
             continue;
         if (rows >= WORKER_LIST_CAP) {
+            /* Every later row is discarded, so stop reading: draining a huge
+             * directory here holds the worker step and starves the client. */
             overflow = 1;
-            continue;
+            break;
         }
         XferEntryType type =
             entry.type == FS_ENTRY_DIR ? XFER_ENTRY_DIR : XFER_ENTRY_FILE;
@@ -2626,15 +2640,20 @@ static void folder_job_scan_pump(Worker *worker)
  * remote partial's removal on the next pump. The client's own operation slot
  * is still held when this is called from its callback, so the delete cannot be
  * started here. */
-static void folder_job_transfer_failed(Worker *worker, const char *detail)
+static void folder_job_transfer_failed(Worker *worker, const char *detail,
+                                       OpCause cause, OpStage stage)
 {
     FolderJob *job = worker->folder_job;
     if (job == NULL)
         return;
     fmt_copy(job->detail, sizeof(job->detail),
              detail != NULL ? detail : "TRANSFER FAILED");
-    job->cause = OP_CAUSE_APP;
-    job->stage_reason = OP_STAGE_TRANSFER;
+    /* D33: the cause class is the operation's, not the worker's. Only a
+     * policy refusal the job itself detects is an app failure. */
+    job->cause = cause == OP_CAUSE_APP && stage == OP_STAGE_NONE
+                     ? OP_CAUSE_APP
+                     : cause;
+    job->stage_reason = stage != OP_STAGE_NONE ? stage : OP_STAGE_TRANSFER;
     if (job->plan->direction == XFER_PLAN_UPLOAD && !job->cancel &&
         job->current >= 0 && job->store_started) {
         /* R8: the STOR started, so its remote partial must not be left. */
@@ -2672,7 +2691,8 @@ static void folder_job_copy_pump(Worker *worker)
         if (plan->entries[entry].type == XFER_ENTRY_DIR) {
             const char *dest = xfer_plan_dest(plan, entry);
             if (dest[0] == '\0') {
-                folder_job_transfer_failed(worker, "INVALID PATH");
+                folder_job_transfer_failed(worker, "INVALID PATH",
+                                           OP_CAUSE_APP, OP_STAGE_PLAN);
                 return;
             }
             if (job->dest_present[entry]) {
@@ -2684,7 +2704,9 @@ static void folder_job_copy_pump(Worker *worker)
                     worker->ports.fs->ctx, dest);
                 if (result != FS_OK && result != FS_EXISTS) {
                     folder_job_transfer_failed(worker,
-                                               fs_result_text(result));
+                                               fs_result_text(result),
+                                               OP_CAUSE_STORAGE,
+                                               OP_STAGE_TRANSFER);
                     return;
                 }
             } else {
@@ -2696,9 +2718,13 @@ static void folder_job_copy_pump(Worker *worker)
                 }
                 if (result != FTP_CLIENT_OK) {
                     folder_job_transfer_failed(
-                        worker, result == FTP_CLIENT_NOT_CONNECTED
-                                    ? "SESSION LOST"
-                                    : "MKDIR FAILED");
+                        worker,
+                        result == FTP_CLIENT_NOT_CONNECTED ? "SESSION LOST"
+                                                           : "MKDIR FAILED",
+                        result == FTP_CLIENT_NOT_CONNECTED ? OP_CAUSE_NETWORK
+                                                           : OP_CAUSE_SERVER,
+                        result == FTP_CLIENT_NOT_CONNECTED ? OP_STAGE_CONNECT
+                                                           : OP_STAGE_COMMAND);
                     return;
                 }
                 job->current = entry;
@@ -2740,7 +2766,15 @@ static void folder_job_copy_pump(Worker *worker)
                     : (result == FTP_CLIENT_DENIED ? "DENIED PATH"
                       : result == FTP_CLIENT_NOT_CONNECTED ? "SESSION LOST"
                                                            : "TRANSFER REFUSED");
-            folder_job_transfer_failed(worker, detail);
+            OpCause cause = result == FTP_CLIENT_LOCAL_FAILED
+                                ? OP_CAUSE_STORAGE
+                                : (result == FTP_CLIENT_NOT_CONNECTED
+                                       ? OP_CAUSE_NETWORK
+                                       : OP_CAUSE_SERVER);
+            OpStage stage = result == FTP_CLIENT_NOT_CONNECTED
+                                ? OP_STAGE_CONNECT
+                                : OP_STAGE_TRANSFER;
+            folder_job_transfer_failed(worker, detail, cause, stage);
             return;
         }
         job->awaiting = 1;
@@ -3138,11 +3172,13 @@ static void folder_job_delete_pump(Worker *worker)
                        XFER_PHASE_DELETE);
         return;
     }
-    job->delete_index++;
 
     int is_dir = plan->entries[entry].type == XFER_ENTRY_DIR;
     const char *source = xfer_plan_source(plan, entry);
     if (plan->direction == XFER_PLAN_UPLOAD) {
+        /* The index advances only when the remove is actually issued: a busy
+         * guard that returns early must not consume an entry. */
+        job->delete_index++;
         FsResult result = is_dir
                               ? worker->ports.fs->rmdir(worker->ports.fs->ctx,
                                                         source)
@@ -3166,6 +3202,7 @@ static void folder_job_delete_pump(Worker *worker)
 
     if (ftp_client_busy(worker->client))
         return;
+    job->delete_index++;
     FtpClientResult result =
         is_dir ? ftp_client_rmdir(worker->client, source)
                : ftp_client_delete(worker->client, source);
@@ -3362,7 +3399,14 @@ static void folder_job_end(Worker *worker, int ok, int cancelled,
         request.roots = roots;
         request.move = move;
         request.complete = !cancelled && ok;
-        request.deleted = job->delete_started ? job->deleted : -1;
+        /* A move that verified its copies but never reached the delete phase
+         * keeps every source; the report must name them rather than claim
+         * `missing: 0` for an empty delete list (R14, R21). */
+        int verified_move =
+            move && (phase == XFER_PHASE_VERIFY || phase == XFER_PHASE_DELETE);
+        request.deleted = job->delete_started
+                              ? job->deleted
+                              : (verified_move ? 0 : -1);
         request.pending_reason =
             cancelled ? "CANCELLED"
                       : (detail != NULL ? detail : "NOT ATTEMPTED");
@@ -3394,8 +3438,15 @@ static void folder_job_end(Worker *worker, int ok, int cancelled,
     int notice = 0;
     if (detail != NULL)
         fmt_copy(terminal, sizeof(terminal), detail);
-    if (!cancelled && detail == NULL && skipped > 0) {
-        snprintf(terminal, sizeof(terminal), "%d SKIPPED", skipped);
+    /* R24: a partial keeps the verb in yellow and names the reason. A skip is
+     * a partial whether or not the job also had a detail to report. */
+    if (!cancelled && skipped > 0) {
+        size_t used = strlen(terminal);
+        if (used == 0)
+            snprintf(terminal, sizeof(terminal), "%d SKIPPED", skipped);
+        else
+            snprintf(terminal + used, sizeof(terminal) - used,
+                     " - %d SKIPPED", skipped);
         notice = 1;
     }
     if (report_failed) {
@@ -3448,6 +3499,9 @@ static void folder_job_end(Worker *worker, int ok, int cancelled,
         event.phase = phase;
         event.phase_known = 1;
         event.move = move;
+        /* R24: `CANCELLED n OF m` needs the counts on the cancel too. */
+        event.item_index = entries_done > 0 ? entries_done : 1;
+        event.item_total = entry_total > 0 ? entry_total : 1;
         if (terminal_text != NULL)
             fmt_copy(event.detail, sizeof(event.detail), terminal_text);
     } else {
@@ -3476,6 +3530,11 @@ static void folder_job_end(Worker *worker, int ok, int cancelled,
             event.rate_known = 1;
         }
     }
+    /* R24/DESIGN: the folder terminal carries the batch counts the done and
+     * failed docks already render (n SKIPPED, a partial verb), so a copy that
+     * skipped entries is never drawn as a clean success. */
+    event.batch_skipped = skipped;
+    event.batch_failed = (!ok && !cancelled) ? 1 : 0;
     emit(worker, &event);
 
     free(job);
@@ -3709,7 +3768,8 @@ static int folder_job_client_done(Worker *worker,
             return 1;
         }
         folder_job_transfer_failed(
-            worker, event->detail != NULL ? event->detail : "TRANSFER FAILED");
+            worker, event->detail != NULL ? event->detail : "TRANSFER FAILED",
+            event->cause, event->stage);
         return 1;
 
     case FTP_CLIENT_OP_DELETE:
@@ -3757,7 +3817,9 @@ int worker_folder_begin(Worker *worker, const WorkerFolderRequest *request)
         return 0;
     }
     if (worker->transfer_active || xfer_busy(&worker->queue) ||
-        ftp_server_busy(worker->server)) {
+        worker->remote_action_count > 0 || ftp_server_busy(worker->server)) {
+        /* R2/KTD1: a queued remote rename or delete would run after the job and
+         * act on a path the job may have changed, so the job waits for it. */
         emit_error(worker, UI_PANE_REMOTE, "TRANSFER IN PROGRESS",
                    OP_CAUSE_APP, OP_STAGE_PLAN);
         return 0;
@@ -6256,11 +6318,11 @@ static void client_event(void *ctx, const FtpClientEvent *event)
     case FTP_CLIENT_EVENT_PROGRESS: {
         if (worker->folder_job != NULL) {
             FolderJob *job = worker->folder_job;
-            /* A STOR that has actually written bytes leaves a remote partial
-             * if it then fails; a refused STOR wrote nothing (R8). */
-            if (job->awaiting &&
-                job->awaiting_op == FTP_CLIENT_OP_UPLOAD &&
-                event->bytes > 0)
+            /* R8: the server accepted the STOR (the 150/125 reply emits
+             * progress before any payload byte), so a failure from here on
+             * leaves a remote partial that must be removed. A refused STOR
+             * never reaches this event and wrote nothing. */
+            if (job->awaiting && job->awaiting_op == FTP_CLIENT_OP_UPLOAD)
                 job->store_started = 1;
             if (job->copy_started) {
                 folder_job_emit_progress(

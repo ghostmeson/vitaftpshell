@@ -27,8 +27,8 @@ passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b82.vpk`, 296,331 bytes,
-  SHA-256 `dde3c491f35ad8929caec227ac105a22b2d6f2ab7e0f2e7c553601ad8673038b`.
+- **Current artifact:** `vitaftpshell-v01.00-b85.vpk`, 303,055 bytes,
+  SHA-256 `a79015c55ac8ed4ce39032604ee7fd084a0f8e72e511e52e8f569c6fb658a33c`.
 - **Latest hardware-observed build:** b77 (operator report, 2026-11-17,
   PCH-1000): copy, paste, new folder, rename, and delete work across both local
   panes; the remote client and the server work; the ACTIONS menu works; the
@@ -59,6 +59,29 @@ passes.
   PART only for a FileZilla rename/delete and the full three-volume browse;
   M10, M13, M14, M25, M26, and M27 are partly observed; every other row awaits
   the code-freeze pass (D95).
+
+## Cross-pane review fixes (b85, host)
+
+The code review of `feat-cross-pane-transfer` (run 20261117-211726-a03f9813)
+returned 19 primary findings. The correctness, data-safety, and gate fixes
+below are applied on the branch; b85 is the current host-tested artifact. The
+new rows M28-M32 stay PENDING and no console row is claimed.
+
+| Build | Symptom | Cause and fix | Evidence | Status |
+|---|---|---|---|---|
+| b85 | **The report deleted a file the transfer had just copied.** | `choose_target` checked only the base name, so a transferred `skipped.txt.tmp`/`.old` was consumed as the report's own sidecar. A candidate is now rejected when the plan owns the name or either sidecar. | `test_report` (`test_sidecar_owned_by_transfer`); host run | `HOST b85` |
+| b85 | **A queued remote action ran after a folder job.** | `worker_folder_begin` admitted a job with `remote_action_count` nonzero; the queue then drained after the job against a changed path. The job now refuses while a remote action is queued. | `test_integration`; host run | `HOST b85` |
+| b85 | **A busy client could lose one delete and still report MOVED.** | `folder_job_delete_pump` consumed `delete_index` before the `ftp_client_busy` guard. The index now advances only when the remove is issued. | `test_integration`; host run | `HOST b85` |
+| b85 | **A zero-byte failed upload left a remote partial.** | `store_started` was set only after payload bytes; a STOR accepted then failed at zero bytes escaped cleanup. The 150/125 progress event now marks acceptance. | `test_integration`; host run | `HOST b85` |
+| b85 | **Every folder failure counted as an app failure.** | `folder_job_transfer_failed` hardcoded `OP_CAUSE_APP`. It now carries the operation's cause and stage, so D33's app-failure gate stays truthful. | `test_integration`; host run | `HOST b85` |
+| b85 | **A move cancelled after verification wrote `missing: 0`.** | `request.deleted` was `-1` whenever the delete phase had not started. A verified move now lists every kept source under `NOT DELETED`. | `test_report`, `test_integration`; host run | `HOST b85` |
+| b85 | **Folder phases printed entry counts as bytes.** | SCAN and DELETE put counts in the byte fields, so the dock read `42 B OF --`. A `phase_count` field now flows worker -> handoff -> uistate -> dock and renders `n FOLDERS` / `n SOURCES`; the byte line stays `--`. | `test_render_workspace`; host run | `HOST b85` |
+| b85 | **A cancel cleared the dock and dropped the phase.** | The app copied only the direction and the reducer reset the lane to IDLE. The cancel now keeps `CANCELLED n OF m` with the job's reason. | `test_render_workspace`, `test_integration`, `test_app_thread_xfer`; host run | `HOST b85` |
+| b85 | **A skip ended green and a partial read FAILED / NO PARTIAL KEPT.** | The folder terminal never set the batch counts, and `notice` was set only when no detail existed. The terminal now carries `n SKIPPED` and the batch flags; a partial keeps its verb in yellow. | `test_render_workspace`; host run | `HOST b85` |
+| b85 | **A case-only destination skipped the conflict question.** | `folder_child_named` compared with `strcmp` while verification folded case. It now folds, so `foo.txt` over `Foo.txt` asks the one question. | `test_integration`; host run | `HOST b85` |
+| b85 | **A capped local scan drained the whole directory.** | Every row past the 2,000-row cap was read and discarded. The scan now stops and closes at the first extra row. | `test_integration`; host run | `HOST b85` |
+| b85 | **The stack gate measured a 128-byte dispatcher.** | `FIXED_CHAIN` named only `folder_job_pump`. The chain now includes its measured callees, so the gate reports 36,308 B for the folder path instead of 16,020 B. | `./build.sh` gate output; host run | `HOST b85` |
+| b85 | **A pdir row could supply the folder's write mask.** | `listing_parse_mlsd` collapsed cdir and pdir into one skip. The row's role is now recorded and only cdir marks the folder. | `test_listing`, `test_client`; host run | `HOST b85` |
 
 ## Cross-pane folder transfer (b82, host)
 

@@ -105,6 +105,10 @@ typedef struct {
      * single-file transfer and for a terminal that names only its word. */
     XferPhase phase;
     int phase_known;
+    /* The phase's own count: folders found while SCANNING, sources removed
+     * while DELETING (DESIGN's `n FOLDERS` / `n SOURCES`), never a byte. */
+    int phase_count;
+    int phase_count_known;
     int move;
     int value;
     char address[32];

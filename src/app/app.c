@@ -268,6 +268,8 @@ static void drain_events(App *app)
             ui.item_total = event.item_total;
             ui.phase = (int)event.phase;
             ui.phase_known = event.phase_known;
+            ui.phase_count = event.phase_count;
+            ui.phase_count_known = event.phase_count_known;
             ui.move = event.move;
             feed(app, &ui);
             break;
@@ -282,6 +284,8 @@ static void drain_events(App *app)
             ui.item_total = event.item_total;
             ui.phase = (int)event.phase;
             ui.phase_known = event.phase_known;
+            ui.phase_count = event.phase_count;
+            ui.phase_count_known = event.phase_count_known;
             ui.move = event.move;
             snprintf(ui.text, sizeof(ui.text), "%s", event.detail);
             feed(app, &ui);
@@ -304,6 +308,8 @@ static void drain_events(App *app)
             ui.notice = event.notice;
             ui.phase = (int)event.phase;
             ui.phase_known = event.phase_known;
+            ui.phase_count = event.phase_count;
+            ui.phase_count_known = event.phase_count_known;
             ui.move = event.move;
             fmt_copy(ui.text, sizeof(ui.text),
                      event.detail[0] != '\0' ? event.detail : event.path);
@@ -313,6 +319,16 @@ static void drain_events(App *app)
             ui.kind = UI_EVT_TRANSFER_CANCELLED;
             ui.direction = (int)event.direction;
             ui.direction_known = event.direction_known;
+            /* R24: the cancel terminal keeps the phase, the move flag, the
+             * counts, and the reason the job named. */
+            ui.phase = (int)event.phase;
+            ui.phase_known = event.phase_known;
+            ui.phase_count = event.phase_count;
+            ui.phase_count_known = event.phase_count_known;
+            ui.move = event.move;
+            ui.item_index = event.item_index;
+            ui.item_total = event.item_total;
+            fmt_copy(ui.text, sizeof(ui.text), event.detail);
             feed(app, &ui);
             break;
         case HANDOFF_EVT_BATCH_DONE:

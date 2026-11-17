@@ -628,10 +628,11 @@ static void client_emit_listing_line(FtpClient *client, const char *line,
     }
 
     if (result != LISTING_OK) {
-        /* The cdir/pdir row is never published, but its perm facts are the
-         * listed folder's own (R18). `.` and `..` name the same folder. */
+        /* The cdir/pdir row is never published, but only cdir carries the
+         * listed folder's own perm facts (R18). A pdir row describes the
+         * parent, so it must never mark the current folder. */
         if (result == LISTING_SKIP && client->list_kind == CLIST_MLSD &&
-            entry.perm_known) {
+            entry.perm_known && entry.dir_role == LISTING_ROLE_SELF) {
             client->list_perm_known = 1;
             client->list_perm_mask = entry.perm_mask;
         }

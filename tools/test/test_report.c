@@ -330,6 +330,38 @@ static void test_directory_is_not_replaced(void)
     xfer_plan_free(plan);
 }
 
+/* R22: a transferred `<report>.tmp` or `<report>.old` is the transfer's own
+ * file. The report must take the free name instead of deleting it. */
+static void test_sidecar_owned_by_transfer(void)
+{
+    seed_report_folder();
+    fake_fs_seed_file(REPORT, "PREVIOUS\n", 9);
+    fake_fs_seed_file(REPORT ".tmp", "MINE\n", 5);
+
+    XferPlan *plan = new_plan(XFER_PLAN_UPLOAD);
+    if (plan == NULL)
+        return;
+    int file = xfer_plan_add_root(plan, REPORT ".tmp", "/R/skipped.txt.tmp",
+                                  XFER_ENTRY_FILE, 5, 1);
+    finalize(plan);
+    plan->entries[file].status = XFER_STATUS_COPIED;
+
+    XferReportRequest req = request("UPLOAD", "ux0:data -> /R");
+    char chosen[PATH_MAX_LEN];
+    CHECK(xfer_report_write(fake_fs_port(), "ux0:data", plan, &req, chosen,
+                            sizeof(chosen)) == XFER_REPORT_OK);
+    CHECK(strcmp(chosen, "ux0:data/skipped 2.txt") == 0);
+
+    /* The transferred file and the previous report both survive. */
+    char text[32];
+    CHECK(read_text(REPORT ".tmp", text, sizeof(text)));
+    CHECK(strcmp(text, "MINE\n") == 0);
+    CHECK(read_text(REPORT, text, sizeof(text)));
+    CHECK(strcmp(text, "PREVIOUS\n") == 0);
+
+    xfer_plan_free(plan);
+}
+
 /* A file the transfer wrote under the report name takes the free name (R22). */
 static void test_free_name_for_transfer_file(void)
 {
@@ -444,6 +476,7 @@ int main(void)
     test_replace_file();
     test_directory_is_not_replaced();
     test_free_name_for_transfer_file();
+    test_sidecar_owned_by_transfer();
     test_refused_and_failed_writes();
     test_temp_and_aside_cleanup();
 

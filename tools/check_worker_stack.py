@@ -22,6 +22,9 @@ HANDLE_ACTION_MAX = 16 * 1024
 
 # The non-recursive part of the copy/rename chain. The folder scan recurses
 # separately and is checked below as its own frame times its depth constant.
+# The sum is a conservative bound: every owner below is measured at the frame
+# it actually reserves, and the folder-job entry lists its whole worst path
+# rather than the dispatcher alone (b82 finding 8).
 FIXED_CHAIN_MAX = 64 * 1024
 # Functions the compiler keeps separate at -O2. State that moved into the heap
 # run still costs stack when inlined, so each owner below is measured at the
@@ -32,6 +35,13 @@ FIXED_CHAIN = (
     "worker_step",
     "handle_action",
     "folder_job_pump",
+    # The folder job's own worst path: the dispatcher alone is 128 B, while
+    # its callees below are the frames the worker thread actually reserves.
+    "folder_job_scan_pump",
+    "folder_job_after_scan",
+    "folder_job_end",
+    "xfer_report_write",
+    "replace_file",
     "fsop_run_step",
     "logev_emit",
     "local_batch_emit_done",

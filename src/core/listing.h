@@ -31,6 +31,12 @@ typedef enum {
     (LISTING_PERM_WRITE | LISTING_PERM_CREATE | LISTING_PERM_DELETE |      \
      LISTING_PERM_MKDIR)
 
+/* MLSD cdir/pdir rows are skipped, but their identity decides whether a perm
+ * fact describes the listed folder or its parent. */
+#define LISTING_ROLE_NONE 0
+#define LISTING_ROLE_SELF 1
+#define LISTING_ROLE_PARENT 2
+
 typedef struct {
     char name[LISTING_NAME_MAX];
     ListingType type;
@@ -40,6 +46,9 @@ typedef struct {
     int mtime_known;
     uint8_t perm_mask; /* LISTING_PERM_* bits from `perm` */
     int perm_known;    /* a `perm` fact was present */
+    /* RFC 3659's MLSD type=cdir is the listed folder itself; type=pdir is its
+     * parent. Only the self row may describe the folder's own permissions. */
+    uint8_t dir_role;
 } ListingEntry;
 
 typedef enum {

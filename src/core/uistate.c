@@ -2614,6 +2614,8 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->notice = 0;
         lane->phase = event->phase;
         lane->phase_known = event->phase_known;
+        lane->phase_count = event->phase_count;
+        lane->phase_count_known = event->phase_count_known;
         lane->move = event->move;
         set_transfer_dock(lane, event, UI_DOCK_ACTIVE);
         lane->done = 0;
@@ -2636,6 +2638,8 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         set_transfer_dock(lane, event, UI_DOCK_ACTIVE);
         lane->phase = event->phase;
         lane->phase_known = event->phase_known;
+        lane->phase_count = event->phase_count;
+        lane->phase_count_known = event->phase_count_known;
         lane->move = event->move;
         lane->rate = event->rate;
         lane->rate_known = event->rate_known;
@@ -2655,8 +2659,13 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         set_transfer_dock(lane, event, UI_DOCK_DONE);
         lane->file_kept = 0;
         lane->notice = event->notice;
+        lane->skipped = event->batch_skipped;
+        lane->failed = event->batch_failed;
+        lane->cancelled = 0;
         lane->phase = event->phase;
         lane->phase_known = event->phase_known;
+        lane->phase_count = event->phase_count;
+        lane->phase_count_known = event->phase_count_known;
         lane->move = event->move;
         lane->rate = event->rate;
         lane->rate_known = event->rate_known;
@@ -2674,11 +2683,28 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         /* The queue died with the cancel; a stale depth would keep the dock
          * entry alive for work that no longer exists (R24). */
         lane->queued = 0;
-        lane->state = UI_DOCK_IDLE;
-        lane->message[0] = '\0';
-        lane->phase = XFER_PHASE_NONE;
-        lane->phase_known = 0;
-        lane->move = 0;
+        /* R24: `CANCELLED n OF m` in white with the kept copies named. The
+         * terminal stays visible instead of clearing to IDLE. */
+        lane->state = UI_DOCK_DONE;
+        lane->cancelled = 1;
+        lane->failed = 0;
+        lane->skipped = 0;
+        lane->notice = 0;
+        if (event->item_index > 0)
+            lane->item_index = event->item_index;
+        if (event->item_total > 0)
+            lane->item_total = event->item_total;
+        if (event->text[0] != '\0') {
+            fmt_copy(lane->message, sizeof(lane->message), event->text);
+            lane->notice = 1;
+        } else {
+            lane->message[0] = '\0';
+        }
+        lane->phase = event->phase;
+        lane->phase_known = event->phase_known;
+        lane->phase_count = event->phase_count;
+        lane->phase_count_known = event->phase_count_known;
+        lane->move = event->move;
         if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
         set_status(state, lane == &state->dock ? "NETWORK CANCELLED"
@@ -2691,10 +2717,15 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
         set_transfer_dock(lane, event, UI_DOCK_FAILED);
-        lane->notice = 0;
+        lane->notice = event->notice;
         lane->file_kept = event->file_kept;
+        lane->skipped = event->batch_skipped;
+        lane->failed = event->batch_failed;
+        lane->cancelled = 0;
         lane->phase = event->phase;
         lane->phase_known = event->phase_known;
+        lane->phase_count = event->phase_count;
+        lane->phase_count_known = event->phase_count_known;
         lane->move = event->move;
         if (event->item_index > 0)
             lane->item_index = event->item_index;

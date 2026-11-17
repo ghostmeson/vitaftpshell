@@ -95,8 +95,10 @@ ListingResult listing_parse_mlsd(const char *line, ListingEntry *out)
                     have_type = 1;
                 } else if (value_len == 4 && ci_equal(value, "cdir", 4)) {
                     skip = 1;
+                    out->dir_role = LISTING_ROLE_SELF;
                 } else if (value_len == 4 && ci_equal(value, "pdir", 4)) {
                     skip = 1;
+                    out->dir_role = LISTING_ROLE_PARENT;
                 } else if (value_len > 0) {
                     out->type = LISTING_OTHER;
                     have_type = 1;
