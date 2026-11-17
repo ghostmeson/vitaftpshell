@@ -1,15 +1,16 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b74.vpk (packaged 2026-11-16; not run on hardware)
-**SHA-256:** b25a5af7650ea1b1adbca512caeb70bc66827fecde3ab0032ba38d5a0d3e4046
-**ELF:** build/vitaftpshell, 536,192 bytes
+**Build:** vitaftpshell-v01.00-b77.vpk (packaged 2026-11-17)
+**SHA-256:** a173b76b7b1afedf6ef2666017a50462a8b73d5a0e2dd672715acf262480bc91
+**ELF:** build/vitaftpshell, 543,144 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
-**Date:** 2026-11-16
-**Status:** b74 is the current artifact and is host-tested only. The last
-hardware-observed build is b60: FileZilla upload and download with two
-sessions, and app-local transfers on all three volumes. b43 is the last
-row-level operator report. M5, M10, M13, and M14 are PART; every other row is
-PENDING until the v1 code-freeze pass (D95).
+**Date:** 2026-11-17
+**Status:** b77 is the current artifact and ran on a PCH-1000 on 2026-11-17. The
+operator report confirms both local panes' file operations, the ACTIONS menu,
+the local/remote switch with its state preserved, the SITES connect return, and
+the remote client and server. M25 and M26 are PART; M5, M10, M13, and M14 remain
+PART from earlier builds; every other row is PENDING until the v1 code-freeze
+pass (D95). `imc0:` stays BLOCKED on this console.
 
 This file is the U14 evidence record and the one home for the matrix. A row is
 added or amended when the behavior it proves lands, and it names what the user
@@ -17,6 +18,31 @@ does and what pass means. A row is PASS only when the observed result matches
 its pass condition and the evidence is recorded here; a row that cannot be run
 is BLOCKED, never PASS. The matrix runs once on the v1 code-freeze build
 (D95), and `verified` requires every row PASS.
+
+## b77 hardware pass (PCH-1000)
+
+**Date:** 2026-11-17
+**Build:** `vitaftpshell-v01.00-b77.vpk`
+**Console:** PCH-1000 (PHAT), 3.65 Enso
+**Report:** the operator installed b77 and exercised the local workspace and the
+network roles. The report, verbatim:
+
+1. Copy paste new folder rename delete works across both local panes
+2. Remote and server works flawlessly
+3. Actions menu works as expected
+4. Switching between local and remote works and also saves current states
+5. Connecting to site closes the SITES properly and focuses on the remote connected pane
+
+This moves M25 and M26 to PART. The two-pane file operations, the ACTIONS menu,
+the switch with its state preserved, and the SITES success return are observed on
+b77. The rows stay PART because their remaining conditions are not in the
+report: marks and a running transfer across a switch, the both-local UPLOAD
+refusal and its hint, the exact-parent reload, and the vanished-folder fallback
+(M25); every failure class and a connect the user left behind (M26). M24 and
+M27 were not exercised and stay PENDING; `imc0:` stays BLOCKED on the PCH-1000.
+No crash dump was reported, but M13 is not advanced because the cross-volume
+crash pass was not run. The project stays `building`; `verified` still needs
+every row PASS.
 
 ## Residual open-issues sweep (b72, host)
 
@@ -420,8 +446,8 @@ volume, so it stays host-only evidence and is never PASS.
 | M22 | Reconnect and queue clear | Connect to a site, queue three downloads, clear the queue from the dock, then drop Wi-Fi during a session and reconnect. Passes when: SELECT on the dock with items queued opens CLEAR QUEUE, names the count, and removes only the queued items; a dropped connection marks the session lost, stops the active transfer with an error, keeps the local pane usable, and RECONNECT returns to the same site | pending | pending | PENDING |
 | M23 | Risk marks and writable tai | Browse `ux0:tai` and `ur0:tai`, copy a file in, rename it, delete it, and try `boot_config.txt` from the local pane. Passes when: the yellow risk mark and the ACTIONS risk text appear on the tai rows; the copy, rename, and delete inside tai succeed; `boot_config.txt` is refused by name and nothing is created; no system directory is removed | pending | pending | PENDING |
 | M24 | Every user mount and the read-only value | `ALL DRIVES` with `ux0:`, `ur0:`, and `app0:` present, a memory card for `gro0:`/`grw0:`, and a PCH-2000 for `imc0:`. Passes when: every present mount appears once in table order and an absent mount is an absent row, not an error; `gro0:` and `app0:` read `DRIVE RO`; a write, create, paste, rename, move, or delete there is refused with `READ-ONLY MOUNT` and changes nothing while COPY stays live; `savedata0:`, `vs0:`, and `os0:` never appear; free space is a value on `ux0:` and `--` where the platform cannot report it | pending; the `imc0:` leg is BLOCKED on the PCH-1000 and is covered only by the host fakes | `test_path`, `test_uistate`, `test_integration`, `test_render_workspace`; host run | PENDING |
-| M25 | Second local view and the switch | A connected site at a folder with two marks and a running download; two local folders. Passes when: `SWITCH TO LOCAL` and `SWITCH TO REMOTE` appear last in the right pane's seven-row ACTIONS and never on the left; a switch preserves the session, folder, cursor, scroll, marks, and the running transfer; the right local view opens at `ALL DRIVES` then returns to its last folder; a copy in one pane pastes into the other pane's folder and both keep their places; UPLOAD is dim on both local panes with `NO REMOTE VIEW`, the hint is `X TO OPEN` on a folder and `NO REMOTE VIEW` on a file, and the dock never reads `REMOTE`; a change in one local view reloads the other only when its exact folder changed, and a vanished folder falls back to `ALL DRIVES` | pending | `test_uistate`, `test_handoff`, `test_integration`, `test_app_thread`, `test_render_workspace`, `test_render_screens`; host run | PENDING |
-| M26 | Connect return and failure reasons | SITES holding a good site, a site with a bad password, an unresolvable host, and a refused port. Passes when: a success started from SITES closes SITES and returns to the WORKSPACE with the remote view active and its listing requested; a failure of every class stays on SITES with its reason; a success after the user left SITES switches the right view without changing the screen or focus, and the reason for a later failure appears in the dock and on the site card; a new attempt replaces the old session and a failed attempt leaves none | pending | `test_uistate`, `test_integration`, `test_render_screens`; host run | PENDING |
+| M25 | Second local view and the switch | A connected site at a folder with two marks and a running download; two local folders. Passes when: `SWITCH TO LOCAL` and `SWITCH TO REMOTE` appear last in the right pane's seven-row ACTIONS and never on the left; a switch preserves the session, folder, cursor, scroll, marks, and the running transfer; the right local view opens at `ALL DRIVES` then returns to its last folder; a copy in one pane pastes into the other pane's folder and both keep their places; UPLOAD is dim on both local panes with `NO REMOTE VIEW`, the hint is `X TO OPEN` on a folder and `NO REMOTE VIEW` on a file, and the dock never reads `REMOTE`; a change in one local view reloads the other only when its exact folder changed, and a vanished folder falls back to `ALL DRIVES` | b77: switching between local and remote works and preserves the current state; copy, paste, new folder, rename, and delete work across both local panes; the ACTIONS menu behaves as expected | b77 operator report 2026-11-17 (PCH-1000); `test_uistate`, `test_handoff`, `test_integration`, `test_app_thread`, `test_render_workspace`, `test_render_screens` host runs | PART |
+| M26 | Connect return and failure reasons | SITES holding a good site, a site with a bad password, an unresolvable host, and a refused port. Passes when: a success started from SITES closes SITES and returns to the WORKSPACE with the remote view active and its listing requested; a failure of every class stays on SITES with its reason; a success after the user left SITES switches the right view without changing the screen or focus, and the reason for a later failure appears in the dock and on the site card; a new attempt replaces the old session and a failed attempt leaves none | b77: a successful connect closes SITES and focuses the remote connected pane | b77 operator report 2026-11-17 (PCH-1000); `test_uistate`, `test_integration`, `test_render_screens` host runs | PART |
 | M27 | Stick, wrap, and the site book | A 40-row folder; a site book longer than six rows; an active network transfer. Passes when: the stick moves the selection one row at the deadzone edge, up to five at full deflection, at the 100 ms cadence, and the view follows; Up on the first row selects the last and Down on the last selects the first; Down on the last row focuses the dock only while a lane has an active or queued item; the site book wraps at both ends and resets its six-row window; ACTIONS, CONFIRM, and the editor still clamp | pending | `test_input`, `test_uistate`, `test_integration`; host run | PENDING |
 
 ## Install and launch

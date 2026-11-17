@@ -29,14 +29,20 @@ passes.
 
 - **Current artifact:** `vitaftpshell-v01.00-b77.vpk`, 269,901 bytes,
   SHA-256 `a173b76b7b1afedf6ef2666017a50462a8b73d5a0e2dd672715acf262480bc91`.
-- **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
+- **Latest hardware-observed build:** b77 (operator report, 2026-11-17,
+  PCH-1000): copy, paste, new folder, rename, and delete work across both local
+  panes; the remote client and the server work; the ACTIONS menu works; the
+  local/remote switch preserves state; a successful SITES connect closes SITES
+  and focuses the remote pane. M25 and M26 are PART.
+- **Previous hardware-observed build:** b60 (operator report, 2026-11-15):
   FileZilla upload and download work with two sessions; the app-local client
   transfers on all three volumes. The session log is `logs/session-b60.log`.
-- **Previous hardware-observed build:** b43 (operator report, 2026-11-14):
-  copy, paste, new folder, rename, and download work and the dock words read
-  correctly. b49 added the parallel lanes; b40 crashed (four core dumps analysed
-  in `VERIFICATION.md`). b28, b32, b36, b38, and b39 were not separately tested.
-- **Latest hardware evidence:** `logs/session-b60.log` (FileZilla two sessions;
+  b43 (2026-11-14) is the last row-level operator report: copy, paste, new
+  folder, rename, and download work and the dock words read correctly. b49
+  added the parallel lanes; b40 crashed (four core dumps analysed in
+  `VERIFICATION.md`). b28, b32, b36, b38, and b39 were not separately tested.
+- **Latest hardware evidence:** the b77 operator report (M25/M26 PART) in
+  `VERIFICATION.md`; `logs/session-b60.log` (FileZilla two sessions;
   STOR 265,539 and 786 bytes, RETR 786 bytes, all 226; app-local transfers on
   `ux0:`, `ur0:`, and `uma0:`); `logs/session-b57.log` (the old global-busy
   failure); `logs/b20/` (worker-stack core); `logs/b18/` (first diagnostic log).
@@ -45,10 +51,11 @@ passes.
 - **Matrix:** the b58 self-connection upload and download pass on hardware.
   b60 accepts up to four clients with one data transfer at a time (D86);
   FileZilla's browse and transfer connections both connect, and its upload and
-  download pass. b61-b77 are the current line, and none of them has run on
-  hardware since b60. M5 remains PART only for a FileZilla rename/delete and
-  the full three-volume browse; M10 and M13 are partly observed; every other
-  row awaits the code-freeze pass (D95).
+  download pass. b77 ran on a PCH-1000 on 2026-11-17 and moves M25 and M26 to
+  PART; its report does not exercise M24's mount and read-only surface or M27's
+  stick and wrap. M5 remains PART only for a FileZilla rename/delete and the
+  full three-volume browse; M10, M13, M14, M25, and M26 are partly observed;
+  every other row awaits the code-freeze pass (D95).
 
 ## Local workspace (b76, host)
 
