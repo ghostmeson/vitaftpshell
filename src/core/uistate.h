@@ -70,6 +70,10 @@ typedef struct {
     char site[SITE_NAME_MAX];
     char free_text[32];
     int free_known;
+    /* The current remote folder's write capability, learned from perm facts
+     * (R18). Unknown stays enabled; a new session clears it. */
+    int perm_known;
+    int perm_mask;
 
     const UiRow *rows;
     int row_count;
@@ -337,7 +341,9 @@ typedef enum {
     UI_EVT_SERVER_CLIENT,
     UI_EVT_TRANSFER_CANCELLED,
     UI_EVT_PANE_INFO,
-    UI_EVT_EDIT_SITE
+    UI_EVT_EDIT_SITE,
+    /* The current remote folder's write-capability facts (R18). */
+    UI_EVT_REMOTE_PERM
 } UiStateEventKind;
 
 typedef struct {
@@ -377,6 +383,8 @@ typedef struct {
     int rate_known;
     int file_kept;
     int notice;
+    int perm_known;
+    int perm_mask;
     int direction;
     int direction_known;
     unsigned prompt_id;

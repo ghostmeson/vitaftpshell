@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "core/fmt.h"
+#include "core/listing.h"
 #include "core/path.h"
 
 static void open_confirm(UiState *state, UiConfirmKind kind);
@@ -640,6 +641,14 @@ static void disable(UiActions *actions, UiAction action, const char *reason)
     fmt_copy(actions->reason[action], sizeof(actions->reason[action]), reason);
 }
 
+/* R18: only a folder whose perm facts were reported and grant none of write,
+ * create, delete, or mkdir is read-only. An unknown folder stays enabled. */
+static int pane_read_only(const UiPaneState *pane)
+{
+    return pane != NULL && pane->perm_known &&
+           (pane->perm_mask & LISTING_PERM_WRITES) == 0;
+}
+
 void ui_actions_prepare(UiState *state)
 {
     if (state == NULL)
@@ -650,6 +659,11 @@ void ui_actions_prepare(UiState *state)
     int local_pane = ui_pane_is_local(pane_index);
     UiPane remote_view = ui_pane_remote_view();
     UiPaneState *pane = &state->panes[pane_index];
+    /* The remote folder's perm facts decide every write row, including the
+     * local pane's UPLOAD into it (R19). */
+    int remote_read_only =
+        state->right_view == remote_view &&
+        pane_read_only(&state->panes[remote_view]);
     /* Never read the row arena while a listing is being written. */
     const UiRow *row = pane->loading ? NULL : selected_row(state, pane_index);
 
@@ -814,6 +828,17 @@ void ui_actions_prepare(UiState *state)
             (state->dock.direction == XFER_DIR_DOWNLOAD ||
              state->dock.direction == XFER_DIR_UPLOAD))
             disable(actions, UI_ACTION_DISCONNECT, "TRANSFER IN PROGRESS");
+        /* R19: the write rows dim for the folder, not for the selection.
+         * DOWNLOAD and REFRESH stay live while the clipboard is empty; PASTE
+         * takes DOWNLOAD's row when a local clipboard is armed (U5). */
+        if (remote_read_only) {
+            disable(actions, UI_ACTION_UPLOAD, "READ ONLY");
+            disable(actions, UI_ACTION_PASTE, "READ ONLY");
+            disable(actions, UI_ACTION_MOVE, "READ ONLY");
+            disable(actions, UI_ACTION_NEW_FOLDER, "READ ONLY");
+            disable(actions, UI_ACTION_RENAME, "READ ONLY");
+            disable(actions, UI_ACTION_DELETE, "READ ONLY");
+        }
     }
 
     if (local_pane) {
@@ -822,6 +847,8 @@ void ui_actions_prepare(UiState *state)
          * NO SELECTION cannot mask it. */
         if (state->right_view != remote_view)
             disable(actions, UI_ACTION_UPLOAD, "NO REMOTE VIEW");
+        else if (remote_read_only)
+            disable(actions, UI_ACTION_UPLOAD, "READ ONLY");
         else if (has_selection && !state->panes[remote_view].connected)
             disable(actions, UI_ACTION_UPLOAD, "NOT CONNECTED");
         else if (has_selection && state->panes[remote_view].loading)
@@ -2255,12 +2282,15 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         pane->error[0] = '\0';
         if (new_session) {
             /* The first listing of a session: no row or mark from the old
-             * server may survive a reconnect to the same-looking root. */
+             * server may survive a reconnect to the same-looking root. The
+             * write capability is a session fact too (R18). */
             pane->rows = NULL;
             pane->row_count = 0;
             pane->selected = 0;
             pane->scroll = 0;
             pane->truncated = 0;
+            pane->perm_known = 0;
+            pane->perm_mask = 0;
             clear_marks(pane);
         }
         if (path_changed) {
@@ -2309,6 +2339,8 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             pane->loading = 0;
             pane->pending_path[0] = '\0';
             pane->empty = pane->row_count == 0;
+            pane->perm_known = 0;
+            pane->perm_mask = 0;
             /* Do not keep showing the dead site as if it were still current. */
             pane->site[0] = '\0';
             if (event->pane == UI_PANE_REMOTE) {
@@ -2650,6 +2682,13 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             pane->free_known = event->total_known;
             fmt_size(pane->free_text, sizeof(pane->free_text), event->bytes,
                      event->total_known);
+        }
+        break;
+    case UI_EVT_REMOTE_PERM:
+        if (event->pane >= 0 && event->pane < UI_PANE_COUNT) {
+            UiPaneState *pane = &state->panes[event->pane];
+            pane->perm_known = event->perm_known;
+            pane->perm_mask = event->perm_mask;
         }
         break;
     case UI_EVT_EDIT_SITE:

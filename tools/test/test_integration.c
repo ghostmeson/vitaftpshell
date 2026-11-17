@@ -5,6 +5,7 @@
 
 #include "app/app.h"
 #include "core/handoff.h"
+#include "core/listing.h"
 #include "fake_clock.h"
 #include "fake_fs.h"
 #include "fake_ime.h"
@@ -1378,6 +1379,207 @@ static void test_remote_navigation(void)
     CHECK(remote->rows != NULL);
     if (remote->rows != NULL)
         CHECK(strcmp(remote->rows[1].name, "IN.TXT") == 0);
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+static void test_remote_read_only_folder(void)
+{
+    App *app = make_app_ex("ux0:data/A.TXT", "A", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    enter_ux0_data(app);
+
+    static const char *root =
+        "type=file;size=5;modify=20240101000000; TEST.BIN\r\n"
+        "type=file;size=100;modify=20240101000000; BIG.BIN\r\n";
+
+    FakePeer *peer = peer_new();
+    /* R18: the login folder grants only enter and list; the MLST after connect
+     * is the first fact, so the pane is read-only before the first action. */
+    fake_peer_set_mlst_perm(peer, "el", NULL);
+    connect_site_listing(app, peer, root, NULL);
+
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        if (app_state(app)->panes[UI_PANE_REMOTE].perm_known)
+            break;
+    }
+
+    UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
+    CHECK(remote->perm_known == 1);
+    CHECK((remote->perm_mask & LISTING_PERM_WRITES) == 0);
+
+    select_remote(app);
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_DOWNLOAD] == 1);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_REFRESH] == 1);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_DISCONNECT] == 1);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_NEW_FOLDER] == 0);
+    CHECK(strcmp(app_state(app)->actions.reason[UI_ACTION_NEW_FOLDER],
+                 "READ ONLY") == 0);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_RENAME] == 0);
+    CHECK(strcmp(app_state(app)->actions.reason[UI_ACTION_RENAME],
+                 "READ ONLY") == 0);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(strcmp(app_state(app)->actions.reason[UI_ACTION_DELETE],
+                 "READ ONLY") == 0);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_MOVE] == 0);
+    CHECK(strcmp(app_state(app)->actions.reason[UI_ACTION_MOVE],
+                 "READ ONLY") == 0);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_PASTE] == 0);
+    CHECK(strcmp(app_state(app)->actions.reason[UI_ACTION_PASTE],
+                 "READ ONLY") == 0);
+    press(app, INPUT_BIT(INPUT_CIRCLE));
+
+    /* The local pane's UPLOAD targets that same folder, so it dims too. */
+    select_local(app);
+    select_local_named(app, "A.TXT");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(strcmp(app_state(app)->actions.reason[UI_ACTION_UPLOAD],
+                 "READ ONLY") == 0);
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+static void test_remote_perm_unknown_enabled(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    select_remote(app);
+
+    for (int i = 0; i < 40; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        if (!app_state(app)->panes[UI_PANE_REMOTE].loading)
+            break;
+    }
+
+    /* R18: the fake peer refuses MLST and its listing has no cdir row, which
+     * is what the app's own server reports. Unknown stays enabled. */
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].perm_known == 0);
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_NEW_FOLDER] == 1);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_RENAME] == 1);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_DELETE] == 1);
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_REFRESH] == 1);
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+static void test_remote_perm_from_cdir(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    static const char *root =
+        "type=cdir;perm=el; .\r\n"
+        "type=file;size=5;modify=20240101000000; TEST.BIN\r\n"
+        "type=file;size=100;modify=20240101000000; BIG.BIN\r\n";
+
+    FakePeer *peer = peer_new();
+    /* The login listing's own row supplies the mask when MLST is absent. */
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_UNSUPPORTED);
+    connect_site_listing(app, peer, root, NULL);
+
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        if (app_state(app)->panes[UI_PANE_REMOTE].perm_known)
+            break;
+    }
+
+    UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
+    CHECK(remote->perm_known == 1);
+    CHECK((remote->perm_mask & LISTING_PERM_WRITES) == 0);
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+static void test_remote_perm_navigation_clears(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    static const char *root =
+        "type=dir;size=0;modify=20240101000000; SUB\r\n"
+        "type=file;size=5;modify=20240101000000; TEST.BIN\r\n";
+    static const char *sub =
+        "type=file;size=3;modify=20240101000000; IN.TXT\r\n";
+
+    FakePeer *peer = peer_new();
+    fake_peer_set_mlst_perm(peer, "el", NULL);
+    connect_site_listing(app, peer, root, NULL);
+
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        if (app_state(app)->panes[UI_PANE_REMOTE].perm_known)
+            break;
+    }
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].perm_known == 1);
+
+    fake_peer_set_sub_listing(peer, sub);
+    select_remote(app);
+    press(app, INPUT_BIT(INPUT_CROSS)); /* SUB is row 0 at the root */
+
+    for (int i = 0; i < 120; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        UiPaneState *r = &app_state(app)->panes[UI_PANE_REMOTE];
+        if (!r->loading && strcmp(r->path, "/SUB") == 0)
+            break;
+    }
+
+    /* The subfolder reports nothing: the root's read-only mark must not
+     * travel with the pane (R18). */
+    UiPaneState *remote = &app_state(app)->panes[UI_PANE_REMOTE];
+    CHECK(strcmp(remote->path, "/SUB") == 0);
+    CHECK(remote->perm_known == 0);
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    CHECK(app_state(app)->actions.enabled[UI_ACTION_NEW_FOLDER] == 1);
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
+static void test_remote_write_refusal_never_marks(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+
+    FakePeer *peer = peer_new();
+    fake_peer_set_mkd_fail(peer, 1);
+    connect_site(app, peer);
+    select_remote(app);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].perm_known == 0);
+
+    /* R18: a 550 on a write fails that entry and never turns the folder
+     * read-only; the refusal is also the reply for a missing or protected
+     * path. */
+    fake_ime_queue_text("NEWDIR");
+    press(app, INPUT_BIT(INPUT_TRIANGLE));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    CHECK(app_state(app)->actions.selected == UI_ACTION_NEW_FOLDER);
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, peer, 100);
+
+    CHECK(fake_peer_mkd_count(peer) == 1);
+    CHECK(app_state(app)->status[0] != '\0');
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].perm_known == 0);
 
     fake_peer_destroy(peer);
     app_destroy(app);
@@ -3727,6 +3929,11 @@ int main(void)
     test_hidden_local_view_falls_back_when_shown();
     test_aside_debris_row();
     test_remote_navigation();
+    test_remote_read_only_folder();
+    test_remote_perm_unknown_enabled();
+    test_remote_perm_from_cdir();
+    test_remote_perm_navigation_clears();
+    test_remote_write_refusal_never_marks();
     test_remote_mutations();
     test_remote_disconnect_and_reconnect();
     test_remote_unsafe_name();

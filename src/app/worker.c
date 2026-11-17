@@ -148,6 +148,14 @@ struct Worker {
     int collect_count;
     int remote_row_count;
     int collect_truncated;
+    /* R18: the current remote folder's write-capability facts, learned from an
+     * MLSD cdir/pdir row or an MLST after connect, navigation, and refresh.
+     * The folder walk will stamp destination folders from the same listing
+     * mask (KTD7). */
+    int remote_perm_known;
+    int remote_perm_mask;
+    int remote_perm_pending;
+    int remote_perm_active;
 
     FsOpFact facts[WORKER_FACTS_MAX];
     char fact_paths[WORKER_FACTS_MAX][PATH_MAX_LEN];
@@ -1510,6 +1518,56 @@ static FtpClientResult remote_list(Worker *worker, UiPane pane)
                            ftp_client_cwd_text(worker->client));
 }
 
+/* --- remote write capability (R18) ------------------------------------- */
+
+/* The UI learns the current folder's write facts from this event, never from
+ * a guess: an unknown folder stays enabled. */
+static void remote_perm_emit(Worker *worker)
+{
+    HandoffEvent event;
+    event_init(&event, HANDOFF_EVT_REMOTE_PERM);
+    event.pane = ui_pane_remote_view();
+    event.perm_known = worker->remote_perm_known;
+    event.perm_mask = worker->remote_perm_mask;
+    emit(worker, &event);
+}
+
+/* A new folder or a new session starts unknown, so the old folder's mark can
+ * never dim the new one. */
+static void remote_perm_clear(Worker *worker, int announce)
+{
+    worker->remote_perm_known = 0;
+    worker->remote_perm_mask = 0;
+    if (announce)
+        remote_perm_emit(worker);
+}
+
+static void remote_perm_set(Worker *worker, uint8_t mask)
+{
+    worker->remote_perm_known = 1;
+    worker->remote_perm_mask = (int)(mask & LISTING_PERM_WRITES);
+    remote_perm_emit(worker);
+}
+
+/* MLST the folder the user is in. A 550, an unsupported MLST, or a server
+ * that reports no perm fact leaves the fact as it is (R18). */
+static void remote_perm_pump(Worker *worker)
+{
+    if (!worker->remote_perm_pending || !worker->connected)
+        return;
+    if (worker->transfer_active || xfer_busy(&worker->queue) ||
+        ftp_server_busy(worker->server) || ftp_client_busy(worker->client))
+        return;
+
+    worker->remote_perm_pending = 0;
+    FtpClientResult result =
+        ftp_client_mlst(worker->client, ftp_client_cwd_text(worker->client));
+    if (result == FTP_CLIENT_OK)
+        worker->remote_perm_active = 1;
+    else if (result == FTP_CLIENT_BUSY)
+        worker->remote_perm_pending = 1;
+}
+
 /* --- site book and settings -------------------------------------------- */
 
 static void fill_snapshot(const Worker *worker, UiSiteSnapshot *snapshot)
@@ -2434,6 +2492,13 @@ static void reset_remote_session(Worker *worker)
     worker->connected = 0;
     worker->refresh_remote = 0;
     worker->remote_action_count = 0;
+    worker->remote_perm_known = 0;
+    worker->remote_perm_mask = 0;
+    worker->remote_perm_pending = 0;
+    worker->remote_perm_active = 0;
+    /* A new session starts unknown, so neither the dead session's mark nor a
+     * reconnect to a same-looking root can dim the new folder (R18). */
+    remote_perm_emit(worker);
     worker->upload_stat_active = 0;
     worker->upload_stat_ready = 0;
     worker->upload_stat_failed = 0;
@@ -3171,6 +3236,13 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
 
 static void client_listing_end(Worker *worker, const FtpClientEvent *event)
 {
+    /* The folder's own cdir/pdir row is not published, but its perm facts are
+     * the current folder's capability (R18). Only a successful listing of the
+     * folder the session sits in may stamp it; a preflight of another folder
+     * says nothing about the pane's folder. */
+    if (event->ok && event->perm_known && event->path != NULL &&
+        strcmp(event->path, ftp_client_cwd_text(worker->client)) == 0)
+        remote_perm_set(worker, event->perm_mask);
     if (!worker->collecting)
         return;
     remote_listing_end(worker, event->ok);
@@ -3191,8 +3263,11 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
         if (event->ok) {
             fmt_copy(worker->remote_path, sizeof(worker->remote_path),
                      ftp_client_cwd_text(worker->client));
-            /* The client is still inside its operation event; the listing
-             * starts from worker_step once the slot is released. */
+            /* A new folder is unknown until its own facts arrive. The client
+             * is still inside its operation event; the listing and the MLST
+             * start from worker_step once the slot is released. */
+            remote_perm_clear(worker, 1);
+            worker->remote_perm_pending = 1;
             worker->refresh_remote = 1;
         } else {
             emit_error(worker, UI_PANE_REMOTE,
@@ -3203,6 +3278,13 @@ static void client_operation_done(Worker *worker, const FtpClientEvent *event)
     }
 
     if (event->operation == FTP_CLIENT_OP_STAT) {
+        if (worker->remote_perm_active) {
+            worker->remote_perm_active = 0;
+            /* A 550 or an absent perm never marks the folder (R18). */
+            if (event->ok && event->exists && event->perm_known)
+                remote_perm_set(worker, event->perm_mask);
+            return;
+        }
         if (!worker->upload_stat_active)
             return;
         /* The answer keeps the token the request was started under, so a batch
@@ -3322,6 +3404,10 @@ static void client_event(void *ctx, const FtpClientEvent *event)
         } else if (event->state == FTP_CLIENT_READY) {
             if (!worker->connected) {
                 worker->connected = 1;
+                /* The login folder's own capability is unknown until the
+                 * probe answers; the first listing may already have supplied
+                 * it from its cdir row. */
+                worker->remote_perm_pending = 1;
                 emit_session(worker, 1, NULL);
                 if (worker->connecting_valid) {
                     log_event(worker, LOGEV_CONNECT,
@@ -3673,13 +3759,19 @@ static void handle_command(Worker *worker, const UiCommand *command)
         } else if (!worker->connected)
             emit_error(worker, ui_pane_remote_view(), "NOT CONNECTED",
                        OP_CAUSE_APP, OP_STAGE_COMMAND);
-        else if (worker->transfer_active || xfer_busy(&worker->queue) ||
-                 ftp_server_busy(worker->server))
-            /* Latch it; worker_step re-issues once the lanes are idle. */
-            worker->refresh_remote = 1;
-        else if (remote_list(worker, ui_pane_remote_view()) != FTP_CLIENT_OK)
-            emit_error(worker, UI_PANE_REMOTE, "BUSY - TRY AGAIN",
-                       OP_CAUSE_APP, OP_STAGE_COMMAND);
+        else {
+            /* R18: a refresh recomputes the folder's capability. */
+            remote_perm_clear(worker, 1);
+            worker->remote_perm_pending = 1;
+            if (worker->transfer_active || xfer_busy(&worker->queue) ||
+                ftp_server_busy(worker->server))
+                /* Latch it; worker_step re-issues once the lanes are idle. */
+                worker->refresh_remote = 1;
+            else if (remote_list(worker, ui_pane_remote_view()) !=
+                     FTP_CLIENT_OK)
+                emit_error(worker, UI_PANE_REMOTE, "BUSY - TRY AGAIN",
+                           OP_CAUSE_APP, OP_STAGE_COMMAND);
+        }
         break;
     case UI_CMD_CONNECT_SITE:
         handle_connect(worker, command);
@@ -4160,6 +4252,9 @@ void worker_step(Worker *worker)
                     worker->local_run != NULL ? 0 : WORKER_NET_WAIT_MS);
     ftp_server_tick(worker->server,
                     worker->local_run != NULL ? 0 : WORKER_NET_WAIT_MS);
+    /* The folder probe goes first after a connect, a navigation, or a refresh,
+     * so the pane learns the write facts before the new rows are acted on. */
+    remote_perm_pump(worker);
     if (worker->refresh_remote && worker->connected &&
         !worker->transfer_active && !xfer_busy(&worker->queue) &&
         !ftp_server_busy(worker->server) && !ftp_client_busy(worker->client)) {

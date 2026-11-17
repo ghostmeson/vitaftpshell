@@ -20,6 +20,17 @@ typedef enum {
     LISTING_OTHER
 } ListingType;
 
+/* MLSD `perm` facts, reduced to the four that decide whether a folder is
+ * writable (R18). A server that reports no perm fact leaves `perm_known` 0,
+ * and an unknown folder stays enabled. */
+#define LISTING_PERM_WRITE 0x01u  /* w: store files */
+#define LISTING_PERM_CREATE 0x02u /* c: create files */
+#define LISTING_PERM_DELETE 0x04u /* d: delete files */
+#define LISTING_PERM_MKDIR 0x08u  /* m: create directories */
+#define LISTING_PERM_WRITES                                                \
+    (LISTING_PERM_WRITE | LISTING_PERM_CREATE | LISTING_PERM_DELETE |      \
+     LISTING_PERM_MKDIR)
+
 typedef struct {
     char name[LISTING_NAME_MAX];
     ListingType type;
@@ -27,6 +38,8 @@ typedef struct {
     int size_known;
     uint64_t mtime; /* YYYYMMDDHHMMSS, or 0 when absent */
     int mtime_known;
+    uint8_t perm_mask; /* LISTING_PERM_* bits from `perm` */
+    int perm_known;    /* a `perm` fact was present */
 } ListingEntry;
 
 typedef enum {

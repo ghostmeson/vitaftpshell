@@ -53,6 +53,8 @@ typedef struct {
     uint64_t file_size;
     int file_size_known;
     int file_kept;
+    int perm_known;
+    int perm_mask;
 } Capture;
 
 static void capture_event(void *ctx, const FtpClientEvent *event)
@@ -77,6 +79,8 @@ static void capture_event(void *ctx, const FtpClientEvent *event)
     case FTP_CLIENT_EVENT_LISTING_END:
         cap->end++;
         cap->end_ok = event->ok;
+        cap->perm_known = event->perm_known;
+        cap->perm_mask = event->perm_mask;
         break;
     case FTP_CLIENT_EVENT_PROGRESS:
         cap->progress++;
@@ -101,6 +105,10 @@ static void capture_event(void *ctx, const FtpClientEvent *event)
         cap->file_size = event->file_size;
         cap->file_size_known = event->file_size_known;
         cap->file_kept = event->file_kept;
+        if (event->operation == FTP_CLIENT_OP_STAT) {
+            cap->perm_known = event->perm_known;
+            cap->perm_mask = event->perm_mask;
+        }
         break;
     }
 }
@@ -115,6 +123,8 @@ static void capture_reset_rows(Capture *cap)
     cap->bytes = 0;
     cap->total = 0;
     cap->total_known = 0;
+    cap->perm_known = 0;
+    cap->perm_mask = 0;
 }
 
 static void setup(void)
@@ -1616,6 +1626,93 @@ static void test_size_stat(void)
     ftp_client_destroy(client);
 }
 
+static void test_mlst_perm(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+    cap.done = 0;
+
+    /* R18: the MLST of a folder carries the same mask the cdir row would. */
+    CHECK(ftp_client_mlst(client, "/RO") == FTP_CLIENT_OK);
+    expect_cmd(&server, "MLST /RO");
+    fake_ftpd_send_raw(&server,
+                       "250-Listing /RO\r\n"
+                       " type=dir;perm=el; /RO\r\n"
+                       "250 End\r\n");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.exists == 1);
+    CHECK(cap.perm_known == 1);
+    CHECK((cap.perm_mask & LISTING_PERM_WRITES) == 0);
+
+    /* A server that reports no perm fact leaves the folder unknown, which the
+     * UI keeps enabled (the app's own server is one). */
+    cap.done = 0;
+    CHECK(ftp_client_mlst(client, "/RO") == FTP_CLIENT_OK);
+    expect_cmd(&server, "MLST /RO");
+    fake_ftpd_send_raw(&server,
+                       "250-Listing /RO\r\n"
+                       " type=dir; /RO\r\n"
+                       "250 End\r\n");
+    tick(client);
+    CHECK(cap.done == 1 && cap.ok == 1 && cap.exists == 1);
+    CHECK(cap.perm_known == 0);
+
+    /* A 550 fails the entry and never marks the folder. */
+    cap.done = 0;
+    CHECK(ftp_client_mlst(client, "/GONE") == FTP_CLIENT_OK);
+    expect_cmd(&server, "MLST /GONE");
+    reply(&server, 550, "Not found.");
+    tick(client);
+    CHECK(cap.done == 1 && cap.exists == 0);
+    CHECK(cap.perm_known == 0);
+
+    ftp_client_destroy(client);
+}
+
+static void test_mlsd_cdir_perm(void)
+{
+    setup();
+    Capture cap;
+    memset(&cap, 0, sizeof(cap));
+    FtpClient *client = make_client(&cap);
+    FakeFtpd server;
+
+    connect_ok(client, &server, &cap, NULL);
+    capture_reset_rows(&cap);
+
+    /* R18: a listing's cdir row supplies the current folder's mask. The row is
+     * never published, but the fact belongs to the listing end. */
+    CHECK(ftp_client_list(client, "/") == FTP_CLIENT_OK);
+    expect_cmd(&server, "PASV");
+    reply(&server, 227, "Entering Passive Mode (192,168,1,42,19,140).");
+    tick(client);
+    NetSocket *data = fake_net_last_connected();
+    expect_cmd(&server, "MLSD /");
+    reply(&server, 150, "Opening data connection.");
+    tick(client);
+    fake_net_queue_rx(data,
+                      "type=cdir;perm=el; .\r\n"
+                      "type=file;size=3; A.TXT\r\n",
+                      strlen("type=cdir;perm=el; .\r\n"
+                             "type=file;size=3; A.TXT\r\n"));
+    fake_net_shutdown(data);
+    reply(&server, 226, "Transfer complete.");
+    tick_until_settled(client);
+
+    CHECK(cap.end == 1 && cap.end_ok == 1);
+    CHECK(cap.rows == 1);
+    CHECK(cap.perm_known == 1);
+    CHECK((cap.perm_mask & LISTING_PERM_WRITES) == 0);
+
+    ftp_client_destroy(client);
+}
+
 static void test_mlst(void)
 {
     setup();
@@ -1694,6 +1791,8 @@ int main(void)
     test_nlst();
     test_mlst_send_failure();
     test_mlst();
+    test_mlst_perm();
+    test_mlsd_cdir_perm();
     test_size_stat();
     test_keepalive();
     test_idle_control_drop();

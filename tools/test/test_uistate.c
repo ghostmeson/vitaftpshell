@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core/listing.h"
 #include "core/uistate.h"
 
 static int s_failures;
@@ -1866,6 +1867,107 @@ static void test_remote_actions_availability(void)
           0);
 }
 
+static void test_remote_read_only_actions(void)
+{
+    /* R18/R19: a folder whose perm facts grant no write, create, delete, or
+     * mkdir dims every remote write row with READ ONLY. */
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 2; /* B.BIN */
+    s_state.panes[UI_PANE_REMOTE].perm_known = 1;
+    s_state.panes[UI_PANE_REMOTE].perm_mask = 0;
+    send_key(UI_KEY_TRIANGLE);
+
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_REFRESH] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_DISCONNECT] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_NEW_FOLDER], "READ ONLY") ==
+          0);
+    CHECK(s_state.actions.enabled[UI_ACTION_RENAME] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_RENAME], "READ ONLY") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DELETE], "READ ONLY") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_MOVE], "READ ONLY") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_UPLOAD], "READ ONLY") == 0);
+
+    /* With a local clipboard armed, PASTE holds DOWNLOAD's row and reads
+     * READ ONLY; DOWNLOAD itself disappears from the slot (U5), so the fact
+     * under test is the disabled paste. */
+    s_state.clip_mode = UI_CLIP_COPY;
+    s_state.clip_count = 1;
+    snprintf(s_state.clip_paths[0].text, sizeof(s_state.clip_paths[0].text),
+             "ux0:data/A.TXT");
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.enabled[UI_ACTION_PASTE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_PASTE], "READ ONLY") == 0);
+
+    /* A write grant from any of the four letters makes the folder writable. */
+    s_state.panes[UI_PANE_REMOTE].perm_mask = LISTING_PERM_WRITE;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_PASTE] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_RENAME] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 1);
+
+    /* An absent perm fact is unknown, so the folder stays enabled. */
+    s_state.panes[UI_PANE_REMOTE].perm_known = 0;
+    s_state.panes[UI_PANE_REMOTE].perm_mask = 0;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_PASTE] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_RENAME] == 1);
+
+    /* UPLOAD is the local pane's row into the remote view, so a read-only
+     * remote folder dims it too. */
+    reset();
+    s_state.panes[UI_PANE_LOCAL].selected = 2; /* A.TXT */
+    s_state.panes[UI_PANE_REMOTE].perm_known = 1;
+    s_state.panes[UI_PANE_REMOTE].perm_mask = 0;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_UPLOAD], "READ ONLY") == 0);
+
+    /* The capability arrives on its own event and a new session clears it. */
+    reset();
+    UiStateEvent perm;
+    memset(&perm, 0, sizeof(perm));
+    perm.kind = UI_EVT_REMOTE_PERM;
+    perm.pane = UI_PANE_REMOTE;
+    perm.perm_known = 1;
+    perm.perm_mask = 0;
+    send_event(&perm);
+    CHECK(s_state.panes[UI_PANE_REMOTE].perm_known == 1);
+    CHECK(s_state.panes[UI_PANE_REMOTE].perm_mask == 0);
+
+    UiStateEvent lost;
+    memset(&lost, 0, sizeof(lost));
+    lost.kind = UI_EVT_SESSION_LOST;
+    lost.pane = UI_PANE_REMOTE;
+    send_event(&lost);
+    CHECK(s_state.panes[UI_PANE_REMOTE].perm_known == 0);
+
+    memset(&perm, 0, sizeof(perm));
+    perm.kind = UI_EVT_REMOTE_PERM;
+    perm.pane = UI_PANE_REMOTE;
+    perm.perm_known = 1;
+    perm.perm_mask = 0;
+    send_event(&perm);
+    CHECK(s_state.panes[UI_PANE_REMOTE].perm_known == 1);
+
+    /* The first listing of a new session clears the old server's fact. */
+    UiStateEvent begin;
+    memset(&begin, 0, sizeof(begin));
+    begin.kind = UI_EVT_LISTING_BEGIN;
+    begin.pane = UI_PANE_REMOTE;
+    snprintf(begin.path, sizeof(begin.path), "/");
+    send_event(&begin);
+    CHECK(s_state.panes[UI_PANE_REMOTE].perm_known == 0);
+}
+
 static void test_action_switch(void)
 {
     /* The left pane keeps six rows and never offers a switch. */
@@ -2843,6 +2945,7 @@ int main(void)
     test_remote_volume_marks();
     test_remote_marks_pruned();
     test_remote_actions_availability();
+    test_remote_read_only_actions();
     test_action_switch();
     test_remote_disconnect_action();
     test_remote_refresh_action();

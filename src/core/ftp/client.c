@@ -152,6 +152,11 @@ struct FtpClient {
     int stat_unsupported;
     uint64_t stat_size;
     int stat_size_known;
+    int stat_perm_known;
+    uint8_t stat_perm_mask;
+
+    int list_perm_known;
+    uint8_t list_perm_mask;
 
     char last_detail[FTP_REPLY_TEXT_MAX];
 };
@@ -281,6 +286,8 @@ static void client_emit_listing_end(FtpClient *client, int ok)
     event.operation = client->op;
     event.path = client->list_path;
     event.ok = ok;
+    event.perm_known = client->list_perm_known;
+    event.perm_mask = client->list_perm_mask;
     client_emit(client, &event);
 }
 
@@ -307,6 +314,8 @@ static void client_emit_op_done(FtpClient *client, int ok, FtpCause cause,
         event.unsupported = client->stat_unsupported;
         event.file_size = client->stat_size;
         event.file_size_known = client->stat_size_known;
+        event.perm_known = client->stat_perm_known;
+        event.perm_mask = client->stat_perm_mask;
     }
     if (client->op == FTP_CLIENT_OP_LIST || client->op == FTP_CLIENT_OP_NLST)
         event.path = client->list_path;
@@ -610,8 +619,16 @@ static void client_emit_listing_line(FtpClient *client, const char *line,
             result = listing_parse_dos(line, &entry);
     }
 
-    if (result != LISTING_OK)
+    if (result != LISTING_OK) {
+        /* The cdir/pdir row is never published, but its perm facts are the
+         * listed folder's own (R18). `.` and `..` name the same folder. */
+        if (result == LISTING_SKIP && client->list_kind == CLIST_MLSD &&
+            entry.perm_known) {
+            client->list_perm_known = 1;
+            client->list_perm_mask = entry.perm_mask;
+        }
         return;
+    }
 
     client->listing_rows++;
     client_emit_listing_row(client, &entry);
@@ -665,6 +682,8 @@ static void client_begin_listing(FtpClient *client, int first)
     client->data_kind = CDATA_LIST;
     client->listing_open = 1;
     client->listing_rows = 0;
+    client->list_perm_known = 0;
+    client->list_perm_mask = 0;
     ftp_line_init(&client->list_lines);
     if (first)
         client_set_stage(client, FTP_STAGE_FIRST_LISTING);
@@ -939,9 +958,13 @@ static void client_parse_mlst(FtpClient *client, const Reply *reply)
     client->stat_is_dir = 0;
     client->stat_size = 0;
     client->stat_size_known = 0;
+    client->stat_perm_known = 0;
+    client->stat_perm_mask = 0;
 
     const char *body = reply->body[0] != '\0' ? reply->body : reply->text;
     const char *facts = strstr(body, "type=");
+    if (facts == NULL)
+        facts = strstr(body, "perm=");
     if (facts == NULL)
         return;
 
@@ -966,6 +989,10 @@ static void client_parse_mlst(FtpClient *client, const Reply *reply)
         client->stat_size = entry.size;
         client->stat_size_known = entry.size_known;
     }
+    /* The perm facts survive a line without `type=`; the folder is still the
+     * one the server just described (R18). */
+    client->stat_perm_known = entry.perm_known;
+    client->stat_perm_mask = entry.perm_mask;
 }
 
 static void client_handle_reply(FtpClient *client, const Reply *reply)
@@ -1221,6 +1248,8 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
         client->stat_is_dir = 0;
         client->stat_size = 0;
         client->stat_size_known = 0;
+        client->stat_perm_known = 0;
+        client->stat_perm_mask = 0;
         if (reply->code == 213) {
             char *end = NULL;
             unsigned long long size = strtoull(reply->text, &end, 10);
@@ -1263,6 +1292,8 @@ static void client_handle_reply(FtpClient *client, const Reply *reply)
         client->stat_is_dir = 0;
         client->stat_size = 0;
         client->stat_size_known = 0;
+        client->stat_perm_known = 0;
+        client->stat_perm_mask = 0;
         if (reply->code == 250) {
             client->stat_exists = 1;
             client_parse_mlst(client, reply);
@@ -1428,9 +1459,13 @@ static void client_reset_session(FtpClient *client)
     client->stat_unsupported = 0;
     client->stat_size = 0;
     client->stat_size_known = 0;
+    client->stat_perm_known = 0;
+    client->stat_perm_mask = 0;
     client->final_seen = 0;
     client->listing_open = 0;
     client->listing_rows = 0;
+    client->list_perm_known = 0;
+    client->list_perm_mask = 0;
     client->has_mlsd = 0;
     client->list_fallback = 0;
     client->first_listing = 0;
@@ -1810,6 +1845,8 @@ FtpClientResult ftp_client_mlst(FtpClient *client, const char *path)
     client->stat_unsupported = 0;
     client->stat_size = 0;
     client->stat_size_known = 0;
+    client->stat_perm_known = 0;
+    client->stat_perm_mask = 0;
     client->stage = FTP_STAGE_COMMAND;
     client->stage_deadline = now_ms(client) + CLIENT_COMMAND_MS;
     client->step = CSTEP_MLST;
@@ -1842,6 +1879,8 @@ FtpClientResult ftp_client_size(FtpClient *client, const char *path)
     client->stat_unsupported = 0;
     client->stat_size = 0;
     client->stat_size_known = 0;
+    client->stat_perm_known = 0;
+    client->stat_perm_mask = 0;
     client->stage = FTP_STAGE_COMMAND;
     client->stage_deadline = now_ms(client) + CLIENT_COMMAND_MS;
     client->step = CSTEP_SIZE_STAT;

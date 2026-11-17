@@ -71,6 +71,13 @@ void fake_peer_set_sub_listing(FakePeer *peer, const char *listing);
 void fake_peer_set_payload(FakePeer *peer, const char *payload);
 
 void fake_peer_set_mlst(FakePeer *peer, FakePeerMlst mode);
+/* MLST answers with the given perm facts: `root_perm` at "/", `sub_perm`
+ * elsewhere. Either may be NULL to keep the filesystem script (R18). */
+void fake_peer_set_mlst_perm(FakePeer *peer, const char *root_perm,
+                             const char *sub_perm);
+/* MKD answers 550 instead of 257, for a write refusal that must not mark the
+ * folder read-only (R18). */
+void fake_peer_set_mkd_fail(FakePeer *peer, int fail);
 /* The destination MLST and SIZE report as an existing file. */
 void fake_peer_set_exists_path(FakePeer *peer, const char *path);
 /* A second destination SIZE reports, for a batch of two names. */

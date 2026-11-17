@@ -120,6 +120,32 @@ ListingResult listing_parse_mlsd(const char *line, ListingEntry *out)
                     out->mtime = stamp;
                     out->mtime_known = 1;
                 }
+            } else if (key_len == 4 && ci_equal(p, "perm", 4)) {
+                /* RFC 3659 letters, reduced to the four that decide whether a
+                 * folder may be written (R18). A present fact is known even
+                 * when it grants nothing; an absent one stays unknown. */
+                out->perm_known = 1;
+                for (size_t i = 0; i < value_len; ++i) {
+                    char letter = value[i];
+                    if (letter >= 'A' && letter <= 'Z')
+                        letter = (char)(letter - 'A' + 'a');
+                    switch (letter) {
+                    case 'w':
+                        out->perm_mask |= LISTING_PERM_WRITE;
+                        break;
+                    case 'c':
+                        out->perm_mask |= LISTING_PERM_CREATE;
+                        break;
+                    case 'd':
+                        out->perm_mask |= LISTING_PERM_DELETE;
+                        break;
+                    case 'm':
+                        out->perm_mask |= LISTING_PERM_MKDIR;
+                        break;
+                    default:
+                        break;
+                    }
+                }
             }
         }
 

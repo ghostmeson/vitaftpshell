@@ -42,6 +42,37 @@ static void test_mlsd(void)
     CHECK(e.size_known == 0);
 }
 
+static void test_mlsd_perm(void)
+{
+    ListingEntry e;
+
+    /* R18: `perm=el` enters and lists but grants no write, create, delete, or
+     * mkdir, so the folder is read-only. */
+    CHECK(listing_parse_mlsd("type=dir;perm=el; FOLDER", &e) == LISTING_OK);
+    CHECK(e.perm_known == 1);
+    CHECK((e.perm_mask & LISTING_PERM_WRITES) == 0);
+
+    CHECK(listing_parse_mlsd("type=dir;perm=adfw; FOLDER", &e) == LISTING_OK);
+    CHECK(e.perm_known == 1);
+    CHECK((e.perm_mask & LISTING_PERM_WRITE) != 0);
+    CHECK((e.perm_mask & LISTING_PERM_DELETE) != 0);
+
+    CHECK(listing_parse_mlsd("type=dir;perm=cm; FOLDER", &e) == LISTING_OK);
+    CHECK(e.perm_known == 1);
+    CHECK((e.perm_mask & LISTING_PERM_CREATE) != 0);
+    CHECK((e.perm_mask & LISTING_PERM_MKDIR) != 0);
+    CHECK((e.perm_mask & LISTING_PERM_WRITE) == 0);
+
+    /* An absent fact is unknown, never "read-only". */
+    CHECK(listing_parse_mlsd("type=dir; FOLDER", &e) == LISTING_OK);
+    CHECK(e.perm_known == 0);
+
+    /* A cdir row is skipped as a row but still carries the folder's mask. */
+    CHECK(listing_parse_mlsd("type=cdir;perm=el; .", &e) == LISTING_SKIP);
+    CHECK(e.perm_known == 1);
+    CHECK((e.perm_mask & LISTING_PERM_WRITES) == 0);
+}
+
 static void test_unix(void)
 {
     ListingEntry e;
@@ -124,6 +155,7 @@ static void test_overlong_name(void)
 int main(void)
 {
     test_mlsd();
+    test_mlsd_perm();
     test_unix();
     test_dos();
     test_sort();

@@ -57,7 +57,9 @@ typedef enum {
     HANDOFF_EVT_SERVER_CLIENT,
     HANDOFF_EVT_TRANSFER_CANCELLED,
     HANDOFF_EVT_BATCH_DONE,
-    HANDOFF_EVT_EDIT_SITE
+    HANDOFF_EVT_EDIT_SITE,
+    /* The current remote folder's write-capability facts (R18). */
+    HANDOFF_EVT_REMOTE_PERM
 } HandoffEventKind;
 
 typedef struct {
@@ -76,6 +78,10 @@ typedef struct {
     UiPane pane;
     int truncated;
     int connected;
+    /* The current remote folder's write-capability facts (R18): an MLSD
+     * cdir/pdir row or an MLST. An unknown folder stays enabled. */
+    int perm_known;
+    int perm_mask;
     char op[32];
     int item_index;
     int item_total;

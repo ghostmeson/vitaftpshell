@@ -32,7 +32,12 @@ struct FakePeer {
     const char *exists_path2;
     uint64_t exists_size;
     FakePeerMlst mlst;
+    /* The `perm` facts MLST reports at "/" and elsewhere (R18). NULL answers
+     * the filesystem script instead. */
+    const char *root_perm;
+    const char *sub_perm;
     int size_supported;
+    int mkd_fail;
     int hold_data;
     int hold_final;
     int list_fail;
@@ -132,6 +137,25 @@ void fake_peer_set_mlst(FakePeer *peer, FakePeerMlst mode)
 {
     if (peer != NULL)
         peer->mlst = mode;
+}
+
+/* MLST answers with the given perm facts: `root_perm` at "/", `sub_perm`
+ * elsewhere. Either may be NULL to keep the filesystem script (R18). */
+void fake_peer_set_mlst_perm(FakePeer *peer, const char *root_perm,
+                             const char *sub_perm)
+{
+    if (peer != NULL) {
+        peer->root_perm = root_perm;
+        peer->sub_perm = sub_perm;
+    }
+}
+
+/* MKD answers 550 instead of 257, for a write refusal that must not mark the
+ * folder read-only (R18). */
+void fake_peer_set_mkd_fail(FakePeer *peer, int fail)
+{
+    if (peer != NULL)
+        peer->mkd_fail = fail;
 }
 
 void fake_peer_set_exists_path(FakePeer *peer, const char *path)
@@ -289,11 +313,20 @@ static void peer_send_listing(FakePeer *peer)
 static void peer_send_mlst(FakePeer *peer, const char *path)
 {
     char reply_text[PEER_REPLY_MAX];
+    const char *perm =
+        strcmp(peer->cwd, "/") == 0 ? peer->root_perm : peer->sub_perm;
 
     if (peer->mlst == FAKE_PEER_MLST_UNSUPPORTED) {
         fake_ftpd_reply(&peer->server, 502, "Not implemented.");
     } else if (peer->mlst == FAKE_PEER_MLST_FAIL) {
         fake_ftpd_reply(&peer->server, 421, "Service not available.");
+    } else if (perm != NULL) {
+        snprintf(reply_text, sizeof(reply_text),
+                 "250-Listing %s\r\n"
+                 " type=dir;perm=%s; %s\r\n"
+                 "250 End\r\n",
+                 path, perm, path);
+        fake_ftpd_send_raw(&peer->server, reply_text);
     } else if (peer->mlst == FAKE_PEER_MLST_DIR) {
         snprintf(reply_text, sizeof(reply_text),
                  "250-Listing %s\r\n"
@@ -374,7 +407,10 @@ static void peer_handle_command(FakePeer *peer, const char *line)
         fake_ftpd_reply(&peer->server, 250, "Directory changed.");
     } else if (strncmp(line, "MKD ", 4) == 0) {
         peer->mkds++;
-        fake_ftpd_reply(&peer->server, 257, "Created.");
+        if (peer->mkd_fail)
+            fake_ftpd_reply(&peer->server, 550, "Permission denied.");
+        else
+            fake_ftpd_reply(&peer->server, 257, "Created.");
     } else if (strncmp(line, "DELE ", 5) == 0) {
         peer->deles++;
         fake_ftpd_reply(&peer->server, 250, "Deleted.");

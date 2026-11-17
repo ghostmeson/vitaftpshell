@@ -93,6 +93,11 @@ typedef struct {
     int unsupported;
     uint64_t file_size;
     int file_size_known;
+    /* The current folder's write-capability facts, from the MLSD cdir/pdir row
+     * or the MLST answer (R18). `perm_known` is 0 when the server reported no
+     * perm facts; an unknown folder stays enabled. */
+    int perm_known;
+    uint8_t perm_mask;
     /* The transfer ended without its final reply but the file is complete and
      * stays at its destination. Only a download can set this. */
     int file_kept;

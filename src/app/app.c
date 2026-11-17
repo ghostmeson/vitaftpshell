@@ -405,6 +405,15 @@ static void drain_events(App *app)
             ui.total_known = event.free_known;
             feed(app, &ui);
             break;
+        case HANDOFF_EVT_REMOTE_PERM:
+            /* The remote folder's write capability is a fact of its own: a
+             * connect or a navigation can learn it without a new listing. */
+            ui.kind = UI_EVT_REMOTE_PERM;
+            ui.pane = event.pane;
+            ui.perm_known = event.perm_known;
+            ui.perm_mask = event.perm_mask;
+            feed(app, &ui);
+            break;
         case HANDOFF_EVT_SITE_BOOK: {
             if (event.detail[0] != '\0') {
                 UiStateEvent saved;
