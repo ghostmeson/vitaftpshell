@@ -162,6 +162,24 @@ static const char *direction_done_word(XferDirection direction)
     }
 }
 
+static const char *phase_word(const UiDock *dock)
+{
+    if (!dock->phase_known)
+        return direction_word(dock->direction);
+    switch ((XferPhase)dock->phase) {
+    case XFER_PHASE_SCAN:
+        return "SCANNING";
+    case XFER_PHASE_VERIFY:
+        return "VERIFYING";
+    case XFER_PHASE_DELETE:
+        return "DELETING";
+    case XFER_PHASE_COPY:
+    case XFER_PHASE_NONE:
+    default:
+        return direction_word(dock->direction);
+    }
+}
+
 static const char *pane_name(UiPane pane)
 {
     return ui_pane_is_local(pane) ? "LOCAL" : "REMOTE";
@@ -260,11 +278,15 @@ static void active_dock(const UiDock *d, DockPanel *p)
     static char rate[32];
     static char index[32];
 
-    p->word = direction_word(d->direction);
+    p->word = phase_word(d);
     p->word_color = C_YELLOW;
     p->subject = d->name;
     p->path = NULL;
-    p->progress_valid = d->total_known && d->total > 0;
+    /* KTD5: the bar hides during a phase; the phase word is the progress. */
+    p->progress_valid = d->total_known && d->total > 0 &&
+                        (!d->phase_known ||
+                         (XferPhase)d->phase == XFER_PHASE_COPY ||
+                         (XferPhase)d->phase == XFER_PHASE_NONE);
     p->progress = p->progress_valid ? (float)((double)d->done / (double)d->total)
                                     : 0.0f;
     p->bar_color = C_YELLOW;
@@ -315,6 +337,13 @@ static void done_dock(const UiDock *d, DockPanel *p)
          * and "COPIED" in red next to a failure reads as a contradiction. */
         p->word = "FAILED";
         p->word_color = C_RED;
+    } else if (d->move) {
+        /* KTD5: one flag turns the copy's done word into the move's word. */
+        p->word = "MOVED";
+        if (failed > 0)
+            p->word_color = C_YELLOW;
+        else
+            p->word_color = C_GREEN;
     } else {
         p->word = direction_done_word(d->direction);
         if (failed > 0)

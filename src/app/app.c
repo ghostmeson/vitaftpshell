@@ -266,6 +266,9 @@ static void drain_events(App *app)
             ui.elapsed_known = event.elapsed_known;
             ui.item_index = event.item_index;
             ui.item_total = event.item_total;
+            ui.phase = (int)event.phase;
+            ui.phase_known = event.phase_known;
+            ui.move = event.move;
             feed(app, &ui);
             break;
         case HANDOFF_EVT_TRANSFER_STARTED:
@@ -277,6 +280,9 @@ static void drain_events(App *app)
             ui.total_known = event.total_known;
             ui.item_index = event.item_index;
             ui.item_total = event.item_total;
+            ui.phase = (int)event.phase;
+            ui.phase_known = event.phase_known;
+            ui.move = event.move;
             snprintf(ui.text, sizeof(ui.text), "%s", event.detail);
             feed(app, &ui);
             break;
@@ -296,6 +302,9 @@ static void drain_events(App *app)
             ui.item_total = event.item_total;
             ui.file_kept = event.file_kept;
             ui.notice = event.notice;
+            ui.phase = (int)event.phase;
+            ui.phase_known = event.phase_known;
+            ui.move = event.move;
             fmt_copy(ui.text, sizeof(ui.text),
                      event.detail[0] != '\0' ? event.detail : event.path);
             feed(app, &ui);

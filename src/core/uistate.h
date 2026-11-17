@@ -125,6 +125,11 @@ typedef struct {
     int file_kept;
     /* A success that left debris; `message` carries the notice text. */
     int notice;
+    /* KTD5: the folder job's phase and move flag; the move turns the done word
+     * into MOVED and the phase hides the bar while it scans or checks. */
+    int phase;
+    int phase_known;
+    int move;
     int skipped;
     int failed;
     int cancelled;
@@ -387,6 +392,10 @@ typedef struct {
     int perm_mask;
     int direction;
     int direction_known;
+    /* KTD5: the folder job's phase and move flag (see HandoffEvent). */
+    int phase;
+    int phase_known;
+    int move;
     unsigned prompt_id;
     int existing_count;
     int batch_skipped;

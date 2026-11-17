@@ -432,6 +432,71 @@ static void test_conflict_names_cap(void)
     xfer_plan_free(plan);
 }
 
+/* U4: a destination that turns out to be a file skips the planned folder and
+ * every child already under it; the worklist never lists it afterwards. */
+static void test_skip_entry_subtree(void)
+{
+    XferPlan *plan = new_plan(XFER_PLAN_DOWNLOAD);
+    if (plan == NULL)
+        return;
+
+    int root = xfer_plan_add_root(plan, "/R", "ux0:data/R", XFER_ENTRY_DIR, 0,
+                                  1);
+    int sub = xfer_plan_add_child(plan, root, "B", XFER_ENTRY_DIR, 0, 1);
+    int deep = xfer_plan_add_child(plan, sub, "C.TXT", XFER_ENTRY_FILE, 5, 1);
+    int file = xfer_plan_add_child(plan, root, "A.TXT", XFER_ENTRY_FILE, 5, 1);
+    CHECK(xfer_plan_next_dir(plan) == root);
+    CHECK(xfer_plan_next_dir(plan) == sub);
+
+    CHECK(xfer_plan_skip_entry(plan, sub, XFER_SKIP_DEST_IS_FILE) == 1);
+    CHECK(plan->entries[sub].status == XFER_STATUS_SKIPPED);
+    CHECK(plan->entries[sub].skip_reason == XFER_SKIP_DEST_IS_FILE);
+    CHECK(plan->entries[deep].status == XFER_STATUS_SKIPPED);
+    CHECK(plan->entries[root].status == XFER_STATUS_PENDING);
+    CHECK(plan->entries[file].status == XFER_STATUS_PENDING);
+    CHECK(xfer_plan_next_dir(plan) == XFER_PLAN_NO_INDEX);
+
+    CHECK(xfer_plan_finalize(plan) == 1);
+    CHECK(plan->skipped_count == 2);
+    CHECK(xfer_plan_list_count(plan, XFER_LIST_MISSING) == 2);
+    CHECK(xfer_plan_next_dir(plan) == XFER_PLAN_NO_INDEX);
+
+    xfer_plan_free(plan);
+}
+
+/* A root file's own parent listing is the one that proves it exists; when that
+ * listing fails, the root itself is the unverified entry (R13). */
+static void test_verify_root_file_failure(void)
+{
+    XferPlan *plan = new_plan(XFER_PLAN_DOWNLOAD);
+    if (plan == NULL)
+        return;
+    int file = xfer_plan_add_root(plan, "/F.BIN", "ux0:data/F.BIN",
+                                  XFER_ENTRY_FILE, 5, 1);
+    CHECK(xfer_plan_finalize(plan) == 1);
+    CHECK(xfer_plan_mark_moved(plan, file, 5) == 1);
+
+    xfer_plan_verify_folder_failed(plan, XFER_PLAN_NO_INDEX);
+    CHECK(plan->entries[file].status == XFER_STATUS_UNVERIFIED);
+    CHECK(xfer_plan_move_ready(plan) == 0);
+    CHECK(xfer_plan_list_count(plan, XFER_LIST_MISSING) == 1);
+    xfer_plan_free(plan);
+
+    XferPlan *ok = new_plan(XFER_PLAN_DOWNLOAD);
+    if (ok == NULL)
+        return;
+    int good = xfer_plan_add_root(ok, "/F.BIN", "ux0:data/F.BIN",
+                                  XFER_ENTRY_FILE, 5, 1);
+    CHECK(xfer_plan_finalize(ok) == 1);
+    CHECK(xfer_plan_mark_moved(ok, good, 5) == 1);
+    CHECK(xfer_plan_verify_row(ok, XFER_PLAN_NO_INDEX, "F.BIN",
+                               XFER_ENTRY_FILE, 5, 1) ==
+          XFER_VERIFY_VERIFIED);
+    xfer_plan_verify_folder_end(ok, XFER_PLAN_NO_INDEX);
+    CHECK(xfer_plan_move_ready(ok) == 1);
+    xfer_plan_free(ok);
+}
+
 int main(void)
 {
     test_three_level_tree();
@@ -445,6 +510,8 @@ int main(void)
     test_verify_extra_ignored();
     test_report_rows();
     test_conflict_names_cap();
+    test_skip_entry_subtree();
+    test_verify_root_file_failure();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_xfer_plan: %d failure(s)\n", s_failures);

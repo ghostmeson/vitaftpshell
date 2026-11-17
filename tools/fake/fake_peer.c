@@ -48,9 +48,13 @@ struct FakePeer {
     const char *sub_perm;
     int size_supported;
     int mkd_fail;
+    int stor_fail;
     int hold_data;
     int hold_final;
     int list_fail;
+    /* U4: one source path whose DELE or RMD answers 550, so a delete-phase
+     * failure can be proved to keep its copy. */
+    const char *delete_fail_path;
 
     /* U2: per-path listings, keyed by the path the MLSD/LIST named. */
     PeerPathScript scripts[PEER_PATH_SCRIPTS];
@@ -272,6 +276,18 @@ void fake_peer_set_list_fail(FakePeer *peer, int fail)
         peer->list_fail = fail;
 }
 
+void fake_peer_set_delete_fail(FakePeer *peer, const char *path)
+{
+    if (peer != NULL)
+        peer->delete_fail_path = path;
+}
+
+void fake_peer_set_stor_fail(FakePeer *peer, int fail)
+{
+    if (peer != NULL)
+        peer->stor_fail = fail;
+}
+
 unsigned fake_peer_listing_count(const FakePeer *peer)
 {
     return peer != NULL ? peer->listings : 0;
@@ -363,7 +379,10 @@ static void peer_reap_stor(FakePeer *peer)
     while (fake_net_read_tx(peer->stor_data, sink, sizeof(sink)) > 0) {
     }
     if (!fake_net_is_open(peer->stor_data)) {
-        fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
+        if (peer->stor_fail)
+            fake_ftpd_reply(&peer->server, 550, "Transfer refused.");
+        else
+            fake_ftpd_reply(&peer->server, 226, "Transfer complete.");
         peer->stor_data = NULL;
     }
 }
@@ -521,10 +540,18 @@ static void peer_handle_command(FakePeer *peer, const char *line)
             fake_ftpd_reply(&peer->server, 257, "Created.");
     } else if (strncmp(line, "DELE ", 5) == 0) {
         peer->deles++;
-        fake_ftpd_reply(&peer->server, 250, "Deleted.");
+        if (peer->delete_fail_path != NULL &&
+            strcmp(line + 5, peer->delete_fail_path) == 0)
+            fake_ftpd_reply(&peer->server, 550, "Permission denied.");
+        else
+            fake_ftpd_reply(&peer->server, 250, "Deleted.");
     } else if (strncmp(line, "RMD ", 4) == 0) {
         peer->rmds++;
-        fake_ftpd_reply(&peer->server, 250, "Removed.");
+        if (peer->delete_fail_path != NULL &&
+            strcmp(line + 4, peer->delete_fail_path) == 0)
+            fake_ftpd_reply(&peer->server, 550, "Permission denied.");
+        else
+            fake_ftpd_reply(&peer->server, 250, "Removed.");
     } else if (strncmp(line, "RNFR ", 5) == 0) {
         peer->renames++;
         fake_ftpd_reply(&peer->server, 350, "Ready for RNTO.");

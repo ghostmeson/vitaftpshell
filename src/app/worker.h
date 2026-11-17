@@ -92,6 +92,46 @@ int worker_walk_folders(const Worker *worker);
 /* The last refusal or stop reason, "" before one (for the job's terminal). */
 const char *worker_walk_refusal(const Worker *worker);
 
+/*
+ * U3/U4: the one cross-pane folder job.
+ *
+ * A request names one marked set and one destination folder. `direction`
+ * decides which side is remote: a download's sources are absolute remote paths
+ * and its destination is a local folder; an upload's sources are local paths
+ * and its destination is a remote folder. `types` and `sizes` are optional
+ * per-root hints from the pane (UI_ROW_FILE or UI_ROW_DIR); an upload stats
+ * each local source anyway. `move` verifies the copy and then deletes the
+ * sources; `origin` is the view that issued the job, used for the report
+ * folder when U7 writes it.
+ *
+ * `worker_folder_begin` claims the network lane and returns 0 with an error
+ * event when the lane is busy, the session is not ready, or a job is already
+ * running. One job owns the lane for its whole life; a second folder transfer
+ * is refused while a file transfer still queues behind it.
+ */
+typedef struct {
+    XferPlanDirection direction;
+    int move;
+    UiPane origin;
+    const char *destination; /* local folder (download) or remote (upload) */
+    int source_count;
+    const char *const *sources;
+    const int *types;
+    const uint64_t *sizes;
+    const int *size_known;
+} WorkerFolderRequest;
+
+int worker_folder_begin(Worker *worker, const WorkerFolderRequest *request);
+int worker_folder_active(const Worker *worker);
+/* XFER_PHASE_NONE when no job is running. */
+XferPhase worker_folder_phase(const Worker *worker);
+/* The one-terminal invariant: a job emits exactly one terminal, and a test can
+ * count them to prove a session loss, a cancel, and a phase exit did not each
+ * emit their own. */
+unsigned worker_folder_terminal_count(const Worker *worker);
+/* The last job's skipped-entry count, for the dock's honest partial report. */
+int worker_folder_last_skipped(const Worker *worker);
+
 /* Valid after worker_start and before the worker thread runs. The app copies
  * what it needs; nothing else reads these across threads. */
 const Settings *worker_settings(const Worker *worker);

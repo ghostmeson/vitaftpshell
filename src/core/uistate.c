@@ -558,6 +558,16 @@ static void open_confirm(UiState *state, UiConfirmKind kind)
         snprintf(c->warning, sizeof(c->warning),
                  "SAVE DUPLICATES KEEPS THE ORIGINAL.");
         break;
+    case UI_CONFIRM_MOVE:
+        /* R15: the roots and the count are already on the prompt; this is the
+         * one warning that must not be missed before a source can vanish. */
+        c->choices[0] = UI_CHOICE_CANCEL;
+        c->choices[1] = UI_CHOICE_MOVE;
+        c->choice_count = 2;
+        snprintf(c->title, sizeof(c->title), "MOVE");
+        snprintf(c->warning, sizeof(c->warning),
+                 "IF ANY ENTRY IS SKIPPED OR UNVERIFIED, NO SOURCE IS DELETED.");
+        break;
     case UI_CONFIRM_NONE:
     default:
         break;
@@ -2460,6 +2470,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->failed = 0;
         lane->cancelled = 0;
         lane->notice = 0;
+        lane->phase = event->phase;
+        lane->phase_known = event->phase_known;
+        lane->move = event->move;
         set_transfer_dock(lane, event, UI_DOCK_ACTIVE);
         lane->done = 0;
         lane->item_index = event->item_index;
@@ -2479,6 +2492,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             break;
         lane->active = 1;
         set_transfer_dock(lane, event, UI_DOCK_ACTIVE);
+        lane->phase = event->phase;
+        lane->phase_known = event->phase_known;
+        lane->move = event->move;
         lane->rate = event->rate;
         lane->rate_known = event->rate_known;
         lane->elapsed_ms = event->elapsed_ms;
@@ -2497,6 +2513,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         set_transfer_dock(lane, event, UI_DOCK_DONE);
         lane->file_kept = 0;
         lane->notice = event->notice;
+        lane->phase = event->phase;
+        lane->phase_known = event->phase_known;
+        lane->move = event->move;
         lane->rate = event->rate;
         lane->rate_known = event->rate_known;
         lane->elapsed_ms = event->elapsed_ms;
@@ -2515,6 +2534,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->queued = 0;
         lane->state = UI_DOCK_IDLE;
         lane->message[0] = '\0';
+        lane->phase = XFER_PHASE_NONE;
+        lane->phase_known = 0;
+        lane->move = 0;
         if (lane == &state->dock && lane->focused)
             set_focus(state, UI_FOCUS_LIST);
         set_status(state, lane == &state->dock ? "NETWORK CANCELLED"
@@ -2529,6 +2551,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         set_transfer_dock(lane, event, UI_DOCK_FAILED);
         lane->notice = 0;
         lane->file_kept = event->file_kept;
+        lane->phase = event->phase;
+        lane->phase_known = event->phase_known;
+        lane->move = event->move;
         if (event->item_index > 0)
             lane->item_index = event->item_index;
         if (event->item_total > 0)

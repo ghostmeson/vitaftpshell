@@ -308,6 +308,14 @@ static void client_emit_op_done(FtpClient *client, int ok, FtpCause cause,
     event.ok = ok;
     event.detail = detail;
     event.file_kept = client->file_kept;
+    if (client->op == FTP_CLIENT_OP_DOWNLOAD ||
+        client->op == FTP_CLIENT_OP_UPLOAD) {
+        /* The job records the bytes the transfer completed per entry (KTD4);
+         * the queue's terminal reports them too. */
+        event.bytes = client->transferred;
+        event.total = client->total;
+        event.total_known = client->total_known;
+    }
     if (client->op == FTP_CLIENT_OP_STAT) {
         event.exists = client->stat_exists;
         event.is_dir = client->stat_is_dir;

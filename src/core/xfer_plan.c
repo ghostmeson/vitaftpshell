@@ -319,11 +319,55 @@ int xfer_plan_add_skip(XferPlan *plan, int parent, const char *source,
                      XFER_STATUS_SKIPPED, reason);
 }
 
+static int entry_is_under(const XferPlan *plan, int entry, int ancestor)
+{
+    int guard = plan->entry_count + 1;
+    int parent = entry_parent(plan, entry);
+    while (parent >= 0 && guard-- > 0) {
+        if (parent == ancestor)
+            return 1;
+        parent = entry_parent(plan, parent);
+    }
+    return 0;
+}
+
+int xfer_plan_skip_entry(XferPlan *plan, int entry, XferSkipReason reason)
+{
+    if (plan == NULL || !plan->ok || entry < 0 ||
+        entry >= plan->entry_count)
+        return 0;
+    if (plan->entries[entry].status == XFER_STATUS_SKIPPED)
+        return 0;
+
+    plan->entries[entry].status = XFER_STATUS_SKIPPED;
+    plan->entries[entry].skip_reason = (uint8_t)reason;
+    /* A folder's whole subtree stays one missing record (R5). */
+    for (int i = 0; i < plan->entry_count; ++i) {
+        if (i == entry || plan->entries[i].status == XFER_STATUS_SKIPPED)
+            continue;
+        if (!entry_is_under(plan, i, entry))
+            continue;
+        plan->entries[i].status = XFER_STATUS_SKIPPED;
+        plan->entries[i].skip_reason = (uint8_t)reason;
+    }
+    mark_subtree_bad(plan, entry);
+    return 1;
+}
+
 int xfer_plan_next_dir(XferPlan *plan)
 {
-    if (plan == NULL || !plan->ok || plan->work_head >= plan->work_tail)
+    if (plan == NULL || !plan->ok)
         return XFER_PLAN_NO_INDEX;
-    return (int)plan->worklist[plan->work_head++];
+    while (plan->work_head < plan->work_tail) {
+        int index = (int)plan->worklist[plan->work_head++];
+        const XferPlanEntry *entry = &plan->entries[index];
+        /* A folder skipped after it entered the worklist is not listed. */
+        if (entry->status == XFER_STATUS_SKIPPED ||
+            entry->type != XFER_ENTRY_DIR)
+            continue;
+        return index;
+    }
+    return XFER_PLAN_NO_INDEX;
 }
 
 void xfer_plan_note_dest_exists(XferPlan *plan, int entry)
@@ -427,6 +471,12 @@ const char *xfer_skip_reason_text(XferSkipReason reason)
         return "DESTINATION IS A FILE";
     case XFER_SKIP_LOCAL_UNREADABLE:
         return "UNREADABLE";
+    case XFER_SKIP_EXISTING:
+        return "EXISTED";
+    case XFER_SKIP_DEST_IS_DIR:
+        return "DESTINATION IS A FOLDER";
+    case XFER_SKIP_PATH_BUSY:
+        return "PATH IN USE";
     case XFER_SKIP_NONE:
     default:
         return "SKIPPED";
@@ -536,8 +586,24 @@ XferVerifyResult xfer_plan_verify_row(XferPlan *plan, int parent,
 
 void xfer_plan_verify_folder_end(XferPlan *plan, int parent)
 {
-    if (plan == NULL || !plan->ok || parent < 0 ||
-        parent >= plan->entry_count)
+    if (plan == NULL || !plan->ok)
+        return;
+    if (parent == XFER_PLAN_NO_INDEX) {
+        /* The folder holding root files has no planned folder entry; a file
+         * that the listing did not name is unverified. Root folders are proved
+         * by their own listings, never by this one. */
+        for (int i = 0; i < plan->entry_count; ++i) {
+            XferPlanEntry *entry = &plan->entries[i];
+            if (entry_parent(plan, i) != -1 ||
+                entry->type != XFER_ENTRY_FILE ||
+                entry->status == XFER_STATUS_SKIPPED ||
+                entry->status == XFER_STATUS_VERIFIED)
+                continue;
+            mark_unverified(plan, i);
+        }
+        return;
+    }
+    if (parent < 0 || parent >= plan->entry_count)
         return;
     XferPlanEntry *folder = &plan->entries[parent];
     if (folder->type != XFER_ENTRY_DIR ||
@@ -563,8 +629,18 @@ void xfer_plan_verify_folder_end(XferPlan *plan, int parent)
 
 void xfer_plan_verify_folder_failed(XferPlan *plan, int parent)
 {
-    if (plan == NULL || !plan->ok || parent < 0 ||
-        parent >= plan->entry_count)
+    if (plan == NULL || !plan->ok)
+        return;
+    if (parent == XFER_PLAN_NO_INDEX) {
+        for (int i = 0; i < plan->entry_count; ++i) {
+            if (entry_parent(plan, i) != -1 ||
+                plan->entries[i].status == XFER_STATUS_SKIPPED)
+                continue;
+            mark_unverified(plan, i);
+        }
+        return;
+    }
+    if (parent < 0 || parent >= plan->entry_count)
         return;
     if (plan->entries[parent].type != XFER_ENTRY_DIR)
         return;

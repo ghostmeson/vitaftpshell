@@ -31,6 +31,7 @@ FIXED_CHAIN_MAX = 64 * 1024
 FIXED_CHAIN = (
     "worker_step",
     "handle_action",
+    "folder_job_pump",
     "fsop_run_step",
     "logev_emit",
     "local_batch_emit_done",

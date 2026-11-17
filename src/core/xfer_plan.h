@@ -62,7 +62,15 @@ typedef enum {
     XFER_SKIP_LIST_REFUSED,
     XFER_SKIP_LIST_CAP,
     XFER_SKIP_DEST_IS_FILE,
-    XFER_SKIP_LOCAL_UNREADABLE
+    XFER_SKIP_LOCAL_UNREADABLE,
+    /* SKIP EXISTING applied to this file (R4): the source stays and a move
+     * never deletes it. */
+    XFER_SKIP_EXISTING,
+    /* A file's destination is a folder; the entry cannot be replaced. */
+    XFER_SKIP_DEST_IS_DIR,
+    /* The source's local root is held by the other lane and the user skipped
+     * it at the WAIT/SKIP/CANCEL question (KTD11). */
+    XFER_SKIP_PATH_BUSY
 } XferSkipReason;
 
 typedef enum {
@@ -159,6 +167,17 @@ int xfer_plan_add_child(XferPlan *plan, int parent, const char *name,
 int xfer_plan_add_skip(XferPlan *plan, int parent, const char *source,
                        const char *dest, XferEntryType type,
                        XferSkipReason reason);
+
+/*
+ * Mark an already-planned entry, and every descendant it already has, as
+ * skipped with `reason`. The walk uses it when the destination turns out to be
+ * unusable (a file where a folder is expected, or a read-only subtree); the
+ * entry stays in the plan as the one missing record for its subtree. Returns 0
+ * for an invalid, finalization-refused, or already-skipped entry. A skip after
+ * finalization must be followed by another xfer_plan_finalize before the
+ * totals, conflict set, or move guard are read.
+ */
+int xfer_plan_skip_entry(XferPlan *plan, int entry, XferSkipReason reason);
 
 /* The next folder to list, or -1 when the walk is complete. */
 int xfer_plan_next_dir(XferPlan *plan);

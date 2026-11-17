@@ -2903,6 +2903,70 @@ static void test_session_loss_only_remote(void)
     CHECK(s_state.panes[UI_PANE_LOCAL_RIGHT].selected == right_selected);
 }
 
+/* KTD5/R15: the move question and the move/phase fields on the dock. */
+static void test_folder_move_prompt_and_dock(void)
+{
+    reset();
+    s_confirm_items[0].name = "SRC";
+    s_confirm_items[0].size = 0;
+    s_confirm_items[0].size_known = 0;
+    UiStateEvent event;
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_CONFIRM_REQUEST;
+    event.confirm = UI_CONFIRM_MOVE;
+    event.pane = UI_PANE_REMOTE;
+    event.items = s_confirm_items;
+    event.item_count = 1;
+    snprintf(event.text, sizeof(event.text), "4 ENTRIES");
+    send_event(&event);
+
+    CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_MOVE);
+    CHECK(strcmp(s_state.confirm.title, "MOVE") == 0);
+    CHECK(strcmp(s_state.confirm.context, "4 ENTRIES") == 0);
+    CHECK(strstr(s_state.confirm.warning, "NO SOURCE IS DELETED") != NULL);
+    CHECK(s_state.confirm.choices[0] == UI_CHOICE_CANCEL);
+    CHECK(s_state.confirm.choices[1] == UI_CHOICE_MOVE);
+    CHECK(s_state.confirm.choice_count == 2);
+    send_key(UI_KEY_RIGHT);
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_CONFIRM) != NULL);
+    CHECK(command(UI_CMD_CONFIRM)->choice == UI_CHOICE_MOVE);
+
+    reset();
+    UiStateEvent started;
+    memset(&started, 0, sizeof(started));
+    started.kind = UI_EVT_TRANSFER_STARTED;
+    started.direction = XFER_DIR_DOWNLOAD;
+    started.direction_known = 1;
+    started.phase = XFER_PHASE_SCAN;
+    started.phase_known = 1;
+    started.move = 1;
+    snprintf(started.text, sizeof(started.text), "SRC");
+    send_event(&started);
+    CHECK(s_state.dock.active == 1);
+    CHECK(s_state.dock.phase == XFER_PHASE_SCAN);
+    CHECK(s_state.dock.phase_known == 1);
+    CHECK(s_state.dock.move == 1);
+
+    UiStateEvent done;
+    memset(&done, 0, sizeof(done));
+    done.kind = UI_EVT_TRANSFER_DONE;
+    done.direction = XFER_DIR_DOWNLOAD;
+    done.direction_known = 1;
+    done.phase = XFER_PHASE_DELETE;
+    done.phase_known = 1;
+    done.move = 1;
+    done.bytes = 5;
+    done.total = 5;
+    done.total_known = 1;
+    snprintf(done.text, sizeof(done.text), "SRC");
+    send_event(&done);
+    CHECK(s_state.dock.state == UI_DOCK_DONE);
+    CHECK(s_state.dock.move == 1);
+    CHECK(s_state.dock.phase == XFER_PHASE_DELETE);
+}
+
 int main(void)
 {
     test_workspace_nav();
@@ -2937,6 +3001,7 @@ int main(void)
     test_confirm_busy_guard();
     test_path_busy_prompt();
     test_duplicate_prompt();
+    test_folder_move_prompt_and_dock();
     test_two_lane_dock();
     test_waiting_lane_cancel();
     test_paste_guards();

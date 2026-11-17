@@ -35,6 +35,19 @@ typedef enum {
     XFER_CONFLICT_CANCEL
 } XferConflict;
 
+/*
+ * KTD5: a folder job's progress and terminal events name the phase that is
+ * running. COPY keeps the direction word; the other phases have their own
+ * present-participle word in the dock.
+ */
+typedef enum {
+    XFER_PHASE_NONE = 0,
+    XFER_PHASE_SCAN,
+    XFER_PHASE_COPY,
+    XFER_PHASE_VERIFY,
+    XFER_PHASE_DELETE
+} XferPhase;
+
 typedef enum {
     XFER_ITEM_QUEUED = 0,
     XFER_ITEM_ACTIVE

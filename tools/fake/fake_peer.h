@@ -108,6 +108,11 @@ void fake_peer_set_hold_data(FakePeer *peer, int hold);
 void fake_peer_set_hold_final(FakePeer *peer, int hold);
 /* Refuse MLSD and LIST with 550, for the read-error path. */
 void fake_peer_set_list_fail(FakePeer *peer, int fail);
+/* Answer DELE (or RMD) of exactly `path` with 550, for U4's delete failure. */
+void fake_peer_set_delete_fail(FakePeer *peer, const char *path);
+/* Accept the STOR's data and then answer 550 instead of 226, for a failed
+ * upload whose remote partial must be removed. */
+void fake_peer_set_stor_fail(FakePeer *peer, int fail);
 
 unsigned fake_peer_listing_count(const FakePeer *peer);
 unsigned fake_peer_list_fail_count(const FakePeer *peer);

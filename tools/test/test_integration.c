@@ -4480,6 +4480,999 @@ static void test_walk_stream_failure_skips_folder(void)
     fake_peer_destroy(peer);
 }
 
+/* --- U3/U4: the folder job --------------------------------------------- */
+
+#define FOLDER_TICKS_MAX 800
+
+static int folder_download(App *app, const char *remote, const char *local,
+                           int move)
+{
+    const char *sources[1] = {remote};
+    int types[1] = {UI_ROW_DIR};
+    uint64_t sizes[1] = {0};
+    int known[1] = {1};
+    WorkerFolderRequest request;
+    memset(&request, 0, sizeof(request));
+    request.direction = XFER_PLAN_DOWNLOAD;
+    request.move = move;
+    request.origin = UI_PANE_REMOTE;
+    request.destination = local;
+    request.source_count = 1;
+    request.sources = sources;
+    request.types = types;
+    request.sizes = sizes;
+    request.size_known = known;
+    return worker_folder_begin(app_worker(app), &request);
+}
+
+static int folder_upload(App *app, const char *local, const char *remote,
+                         int move)
+{
+    const char *sources[1] = {local};
+    int types[1] = {UI_ROW_DIR};
+    WorkerFolderRequest request;
+    memset(&request, 0, sizeof(request));
+    request.direction = XFER_PLAN_UPLOAD;
+    request.move = move;
+    request.origin = UI_PANE_LOCAL;
+    request.destination = remote;
+    request.source_count = 1;
+    request.sources = sources;
+    request.types = types;
+    return worker_folder_begin(app_worker(app), &request);
+}
+
+static int folder_prompt(App *app, FakePeer *peer, UiConfirmKind kind,
+                         int ticks)
+{
+    for (int i = 0; i < ticks; ++i) {
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM &&
+            app_state(app)->confirm.kind == kind)
+            return 1;
+        if (!worker_folder_active(app_worker(app)))
+            return 0;
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    return 0;
+}
+
+static void folder_answer(App *app, UiChoice choice)
+{
+    UiCommand answer;
+    memset(&answer, 0, sizeof(answer));
+    answer.type = UI_CMD_CONFIRM;
+    answer.confirm = app_state(app)->confirm.kind;
+    answer.prompt_id = app_state(app)->confirm.prompt_id;
+    answer.choice = choice;
+    CHECK(handoff_command_push(app_handoff(app), &answer) == 1);
+}
+
+static void folder_run(App *app, FakePeer *peer)
+{
+    for (int i = 0; i < FOLDER_TICKS_MAX &&
+                    worker_folder_active(app_worker(app));
+         ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+}
+
+static void folder_expect_idle(App *app)
+{
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE ||
+          app_state(app)->dock.state == UI_DOCK_FAILED);
+}
+
+/* A folder download scans, copies, and ends DOWNLOADED (U3 scenario 1). */
+static void test_folder_download_copy(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    CHECK(worker_folder_active(app_worker(app)) == 1);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.direction == XFER_DIR_DOWNLOAD);
+    CHECK(app_state(app)->dock.move == 0);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(worker_folder_last_skipped(app_worker(app)) == 0);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A folder upload ends UPLOADED and sends one MKD and one STOR (scenario 2). */
+static void test_folder_upload_copy(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    PaneSnapshot remote;
+    pane_snapshot(app, &remote);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 0) == 1);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    /* The job's own listings never move the pane; the terminal's R9 refresh
+     * may publish new rows, so the folder and cursor are what stay put. */
+    CHECK(strcmp(app_state(app)->panes[UI_PANE_REMOTE].path, remote.path) == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].selected == remote.selected);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.direction == XFER_DIR_UPLOAD);
+    CHECK(fake_peer_mkd_count(peer) == 1);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(strcmp(fake_peer_last_stor(peer), "/SRC/F.TXT") == 0);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* SKIP at the one conflict question leaves the existing file and transfers
+ * the rest (R4, U3 scenario 3). */
+static void test_folder_conflict_skip(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/A", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/A/A.TXT", "OLD", 3);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n"
+        "type=file;size=5;modify=20240101000000; B.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_CONFLICT, 200) == 1);
+    CHECK(app_state(app)->confirm.item_count == 1);
+    CHECK(strcmp(app_state(app)->confirm.items[0].name, "A.TXT") == 0);
+    folder_answer(app, UI_CHOICE_SKIP);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(content_is("ux0:data/A/A.TXT", "OLD"));
+    CHECK(content_is("ux0:data/A/B.TXT", "HELLO"));
+    CHECK(fake_peer_retr_count(peer) == 1);
+    CHECK(worker_folder_last_skipped(app_worker(app)) == 1);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R15: the move question names the roots and warns that a skip or an
+ * unverified copy keeps every source; CANCEL ends before the first byte. */
+static void test_folder_move_confirm_cancel(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    CHECK(strstr(app_state(app)->confirm.warning,
+                 "NO SOURCE IS DELETED") != NULL);
+    CHECK(app_state(app)->confirm.item_count == 1);
+    CHECK(strcmp(app_state(app)->confirm.items[0].name, "A") == 0);
+    folder_answer(app, UI_CHOICE_CANCEL);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(!fake_fs_exists("ux0:data/A/A.TXT"));
+    CHECK(fake_peer_retr_count(peer) == 0);
+    CHECK(fake_peer_dele_count(peer) == 0);
+    CHECK(fake_peer_rmd_count(peer) == 0);
+    CHECK(!fake_fs_exists("ux0:data/skipped.txt"));
+    CHECK(!fake_fs_exists("ux0:data/A/skipped.txt"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A verified download move deletes the remote source and ends MOVED. */
+static void test_folder_download_move(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    CHECK(folder_download(app, "/A", "ux0:data", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.move == 1);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(fake_peer_dele_count(peer) == 1);
+    CHECK(fake_peer_rmd_count(peer) == 1);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A verified upload move deletes the local source and ends MOVED. */
+static void test_folder_upload_move(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *dest =
+        "type=file;size=5;modify=20240101000000; F.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/SRC", dest);
+
+    PaneSnapshot remote;
+    pane_snapshot(app, &remote);
+
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(strcmp(app_state(app)->panes[UI_PANE_REMOTE].path, remote.path) == 0);
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].selected == remote.selected);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.move == 1);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(!fake_fs_exists("ux0:data/SRC/F.TXT"));
+    CHECK(!fake_fs_exists("ux0:data/SRC"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R13: a short file, an unknown size, and a case-only name each leave the
+ * source unverified; no source is deleted (U4 scenarios 2-4). */
+static void test_folder_verify_unverified_keeps_sources(void)
+{
+    static const struct {
+        const char *listing;
+        const char *label;
+    } cases[] = {
+        {"type=file;size=4;modify=20240101000000; F.TXT\r\n", "short"},
+        {"type=file; F.TXT\r\n", "unknown"},
+        {"type=file;size=5;modify=20240101000000; f.txt\r\n", "case"},
+    };
+
+    for (int c = 0; c < 3; ++c) {
+        App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+        if (app == NULL)
+            return;
+        fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+        FakePeer *peer = peer_new();
+        connect_site(app, peer);
+        fake_peer_set_path_listing(peer, "/SRC", cases[c].listing);
+
+        CHECK(folder_upload(app, "ux0:data/SRC", "/", 1) == 1);
+        CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+        folder_answer(app, UI_CHOICE_MOVE);
+        folder_run(app, peer);
+
+        CHECK(worker_folder_active(app_worker(app)) == 0);
+        CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
+        CHECK(strstr(app_state(app)->dock.message, "UNVERIFIED") != NULL);
+        CHECK(fake_fs_exists("ux0:data/SRC/F.TXT"));
+        CHECK(fake_peer_dele_count(peer) == 0);
+        CHECK(fake_peer_rmd_count(peer) == 0);
+
+        app_destroy(app);
+        fake_peer_destroy(peer);
+    }
+}
+
+/* Unmatched destination rows are ignored, never counted as truncation (R13). */
+static void test_folder_verify_extra_rows(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *dest =
+        "type=file;size=5;modify=20240101000000; F.TXT\r\n"
+        "type=file;size=9;modify=20240101000000; EXTRA.TXT\r\n"
+        "type=dir;modify=20240101000000; OTHER\r\n";
+    fake_peer_set_path_listing(peer, "/SRC", dest);
+
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.move == 1);
+    CHECK(!fake_fs_exists("ux0:data/SRC/F.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A destination folder larger than the collector verifies its planned entry
+ * with MLST instead of calling the folder truncated (R13, KTD4). */
+static void test_folder_verify_overflow(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    size_t cap = (size_t)(WORKER_LIST_CAP + 2) * 40u;
+    char *listing = malloc(cap);
+    CHECK(listing != NULL);
+    if (listing == NULL) {
+        app_destroy(app);
+        fake_peer_destroy(peer);
+        return;
+    }
+    size_t used = 0;
+    for (int i = 0; i <= WORKER_LIST_CAP; ++i)
+        used += (size_t)snprintf(listing + used, cap - used,
+                                 "type=file;size=1; X%04d.BIN\r\n", i);
+    fake_peer_set_path_listing(peer, "/SRC", listing);
+    fake_peer_set_mlst(peer, FAKE_PEER_MLST_NORMAL);
+    fake_peer_set_exists_path(peer, "/SRC/F.TXT");
+    fake_peer_set_exists_size(peer, 5);
+
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(app_state(app)->dock.move == 1);
+    CHECK(!fake_fs_exists("ux0:data/SRC/F.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+    free(listing);
+}
+
+/* A failed delete keeps the verified copy and stops before its folder. */
+static void test_folder_delete_failure_keeps_copy(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_delete_fail(peer, "/A/A.TXT");
+
+    CHECK(folder_download(app, "/A", "ux0:data", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(fake_peer_dele_count(peer) == 1);
+    CHECK(fake_peer_rmd_count(peer) == 0);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+static void folder_push_cancel(App *app)
+{
+    UiCommand cancel;
+    memset(&cancel, 0, sizeof(cancel));
+    cancel.type = UI_CMD_CANCEL_NETWORK;
+    CHECK(handoff_command_push(app_handoff(app), &cancel) == 1);
+}
+
+static void folder_push_file_transfer(App *app, const char *remote,
+                                      const char *local)
+{
+    UiCommand command;
+    memset(&command, 0, sizeof(command));
+    command.type = UI_CMD_TRANSFER;
+    command.pane = UI_PANE_REMOTE;
+    command.source_type = UI_ROW_FILE;
+    command.total = 5;
+    command.total_known = 1;
+    snprintf(command.path, sizeof(command.path), "%s", remote);
+    snprintf(command.path2, sizeof(command.path2), "%s", local);
+    CHECK(handoff_command_push(app_handoff(app), &command) == 1);
+}
+
+/* A cancel during the scan moves nothing and writes no report (R3, U3). */
+static void test_folder_cancel_scan(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 1) == 1);
+    folder_push_cancel(app);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    CHECK(!fake_fs_exists("ux0:data/A/A.TXT"));
+    CHECK(fake_peer_retr_count(peer) == 0);
+    CHECK(!fake_fs_exists("ux0:data/skipped.txt"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A cancel during the copy removes the in-flight partial and ends one
+ * terminal (R8, R14). */
+static void test_folder_cancel_copy(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_hold_data(peer, 1);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    for (int i = 0; i < 200 && fake_peer_retr_count(peer) == 0; ++i) {
+        fake_clock_advance(10);
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(fake_peer_retr_count(peer) == 1);
+    folder_push_cancel(app);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    CHECK(!fake_fs_exists("ux0:data/A/A.TXT"));
+    CHECK(!fake_fs_exists("ux0:data/A/A.TXT.vftp.part"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A cancel during the delete stops between commands; the remaining source and
+ * its verified copy stay (R14). */
+static void test_folder_cancel_delete(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n"
+        "type=file;size=5;modify=20240101000000; B.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+
+    int cancelled = 0;
+    for (int i = 0; i < FOLDER_TICKS_MAX; ++i) {
+        if (!worker_folder_active(app_worker(app)))
+            break;
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        if (!cancelled && fake_peer_dele_count(peer) >= 1) {
+            folder_push_cancel(app);
+            cancelled = 1;
+        }
+    }
+    folder_run(app, peer);
+
+    CHECK(cancelled == 1);
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(fake_peer_dele_count(peer) == 1);
+    CHECK(fake_peer_rmd_count(peer) == 0);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(content_is("ux0:data/A/B.TXT", "HELLO"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A session loss in each phase ends the job exactly once (AE7). */
+static void folder_loss_run(App *app, FakePeer *peer)
+{
+    for (int i = 0; i < 300 && worker_folder_active(app_worker(app)); ++i) {
+        fake_clock_advance(10000);
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+}
+
+static void test_folder_session_loss_phases(void)
+{
+    unsigned before;
+
+    /* SCAN */
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    (void)app_tick(app);
+    fake_net_reset_peer(fake_peer_control(peer));
+    folder_loss_run(app, peer);
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    for (int i = 0; i < 20; ++i) {
+        fake_clock_advance(10000);
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    app_destroy(app);
+    fake_peer_destroy(peer);
+
+    /* COPY */
+    app = make_app();
+    if (app == NULL)
+        return;
+    peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_hold_data(peer, 1);
+    before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    for (int i = 0; i < 200 && fake_peer_retr_count(peer) == 0; ++i) {
+        fake_clock_advance(10);
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(fake_peer_retr_count(peer) == 1);
+    fake_net_reset_peer(fake_peer_control(peer));
+    folder_loss_run(app, peer);
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    app_destroy(app);
+    fake_peer_destroy(peer);
+
+    /* VERIFY: two destination folders keep the phase alive across a step. */
+    app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:data/SRC/B");
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    fake_fs_seed_file("ux0:data/SRC/B/C.TXT", "HELLO", 5);
+    peer = peer_new();
+    connect_site(app, peer);
+    static const char *b =
+        "type=file;size=5;modify=20240101000000; C.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/SRC", b);
+    fake_peer_set_path_listing(peer, "/SRC/B", b);
+    before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    int lost = 0;
+    for (int i = 0; i < FOLDER_TICKS_MAX; ++i) {
+        if (!worker_folder_active(app_worker(app)))
+            break;
+        (void)app_tick(app);
+        if (!lost && worker_folder_phase(app_worker(app)) == XFER_PHASE_VERIFY) {
+            fake_net_reset_peer(fake_peer_control(peer));
+            lost = 1;
+        }
+        fake_peer_serve(peer);
+    }
+    folder_loss_run(app, peer);
+    CHECK(lost == 1);
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(fake_fs_exists("ux0:data/SRC/F.TXT"));
+    app_destroy(app);
+    fake_peer_destroy(peer);
+
+    /* DELETE: a download move has remote deletes to lose. */
+    app = make_app();
+    if (app == NULL)
+        return;
+    peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_path_listing(peer, "/A", a);
+    before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    lost = 0;
+    for (int i = 0; i < FOLDER_TICKS_MAX; ++i) {
+        if (!worker_folder_active(app_worker(app)))
+            break;
+        (void)app_tick(app);
+        if (!lost && worker_folder_phase(app_worker(app)) == XFER_PHASE_DELETE) {
+            fake_net_reset_peer(fake_peer_control(peer));
+            lost = 1;
+        }
+        fake_peer_serve(peer);
+    }
+    folder_loss_run(app, peer);
+    CHECK(lost == 1);
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A file transfer queues behind the job while a second folder job is refused
+ * (R3, U3 scenario 4). */
+static void test_folder_queue_and_second_folder(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n"
+        "type=file;size=5;modify=20240101000000; B.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    unsigned terminals = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    folder_push_file_transfer(app, "/TEST.BIN", "ux0:data");
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == terminals);
+    folder_run(app, peer);
+    for (int i = 0; i < 200 && worker_folder_active(app_worker(app)); ++i)
+        (void)app_tick(app);
+    /* Let the queued file run after the job's terminal. */
+    for (int i = 0; i < 200 && !content_is("ux0:data/TEST.BIN", "HELLO"); ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+
+    CHECK(worker_folder_terminal_count(app_worker(app)) == terminals + 1);
+    CHECK(fake_peer_retr_count(peer) == 3);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(content_is("ux0:data/A/B.TXT", "HELLO"));
+    CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A REFRESH queued behind the job waits for its terminal and never runs
+ * between the job's own listings (R3, U3 scenario 5). */
+static void test_folder_refresh_waits(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    CHECK(folder_download(app, "/A", "ux0:data", 0) == 1);
+    UiCommand refresh;
+    memset(&refresh, 0, sizeof(refresh));
+    refresh.type = UI_CMD_REFRESH;
+    refresh.pane = UI_PANE_REMOTE;
+    CHECK(handoff_command_push(app_handoff(app), &refresh) == 1);
+
+    for (int i = 0; i < 3; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(worker_folder_active(app_worker(app)) == 1);
+    CHECK(fake_peer_listing_count(peer) <= 2); /* connect + the scan */
+    folder_run(app, peer);
+    for (int i = 0; i < 40; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(fake_peer_listing_count(peer) == 3);
+    CHECK(strcmp(fake_peer_last_list_path(peer), "/") == 0);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A protected source refuses the move's delete and keeps the copy (KTD8). */
+static void test_folder_protected_source(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    CHECK(fake_fs_exists("ur0:tai"));
+
+    CHECK(folder_upload(app, "ur0:tai", "/", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
+    CHECK(strstr(app_state(app)->dock.message, "PROTECTED") != NULL);
+    CHECK(fake_fs_exists("ur0:tai"));
+    CHECK(fake_peer_dele_count(peer) == 0);
+    CHECK(fake_peer_rmd_count(peer) == 0);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A destination that is a file where the plan needs a folder is skipped with
+ * its whole subtree (R4, R5). */
+static void test_folder_over_file_skipped(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    static const char *listing =
+        "type=file;size=5;modify=20240101000000; SRC\r\n"
+        "type=file;size=5;modify=20240101000000; OTHER.BIN\r\n";
+    connect_site_listing(app, peer, listing, "HELLO");
+
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 0) == 1);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(worker_folder_last_skipped(app_worker(app)) >= 1);
+    CHECK(fake_peer_mkd_count(peer) == 0);
+    CHECK(fake_peer_stor_count(peer) == 0);
+    CHECK(fake_fs_exists("ux0:data/SRC/F.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A failed upload deletes its remote partial (R8, U4 scenario 11). */
+static void test_folder_upload_partial_cleanup(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    fake_peer_set_stor_fail(peer, 1);
+
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 0) == 1);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_FAILED);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(fake_peer_dele_count(peer) == 1);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* A cancel during verification keeps every copy and deletes no source
+ * (R13, R14). */
+static void test_folder_cancel_verify(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:data/SRC/B");
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    fake_fs_seed_file("ux0:data/SRC/B/C.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *b =
+        "type=file;size=5;modify=20240101000000; C.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/SRC", b);
+    fake_peer_set_path_listing(peer, "/SRC/B", b);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 1) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+
+    int cancelled = 0;
+    for (int i = 0; i < FOLDER_TICKS_MAX; ++i) {
+        if (!worker_folder_active(app_worker(app)))
+            break;
+        (void)app_tick(app);
+        if (!cancelled &&
+            worker_folder_phase(app_worker(app)) == XFER_PHASE_VERIFY) {
+            folder_push_cancel(app);
+            cancelled = 1;
+        }
+        fake_peer_serve(peer);
+    }
+    folder_run(app, peer);
+
+    CHECK(cancelled == 1);
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    CHECK(fake_fs_exists("ux0:data/SRC/F.TXT"));
+    CHECK(fake_peer_dele_count(peer) == 0);
+    CHECK(fake_peer_rmd_count(peer) == 0);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* KTD11: a local job holding a descendant asks WAIT/SKIP/CANCEL before the
+ * folder scan can take its root reservation. */
+static void test_folder_path_busy(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    fake_fs_add_dir("ux0:data/SRC");
+    fake_fs_add_dir("ux0:data/DEST");
+    fake_fs_add_dir("ux0:data/DEST/A");
+    enum { FILES = 20 };
+    char path[PATH_MAX_LEN];
+    for (int i = 0; i < FILES; ++i) {
+        snprintf(path, sizeof(path), "ux0:data/SRC/F%02d.TXT", i);
+        fake_fs_seed_file(path, "HELLO", 5);
+    }
+
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+
+    for (int i = 0; i < FILES; ++i) {
+        UiCommand copy;
+        memset(&copy, 0, sizeof(copy));
+        copy.type = UI_CMD_RUN_ACTION;
+        copy.pane = UI_PANE_LOCAL;
+        copy.action = UI_ACTION_COPY;
+        copy.batch_id = 7;
+        copy.batch_index = i;
+        copy.batch_total = FILES;
+        copy.batch_last = i + 1 == FILES;
+        snprintf(copy.path, sizeof(copy.path), "ux0:data/SRC/F%02d.TXT", i);
+        snprintf(copy.path2, sizeof(copy.path2), "ux0:data/DEST/A");
+        CHECK(handoff_command_push(app_handoff(app), &copy) == 1);
+    }
+    for (int i = 0; i < 3; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(app_state(app)->local_dock.active == 1);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    CHECK(folder_download(app, "/A", "ux0:data/DEST", 0) == 1);
+    int asked = 0;
+    for (int i = 0; i < 200 && worker_folder_active(app_worker(app)); ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        if (app_state(app)->screen == UI_SCREEN_CONFIRM &&
+            app_state(app)->confirm.kind == UI_CONFIRM_PATH_BUSY) {
+            asked = 1;
+            break;
+        }
+    }
+    CHECK(asked == 1);
+    folder_answer(app, UI_CHOICE_CANCEL);
+    folder_run(app, peer);
+
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(!fake_fs_exists("ux0:data/DEST/A/A.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* R5/U6: an upload into the pane's read-only folder skips every source before
+ * the first byte. */
+static void test_folder_upload_read_only_destination(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    static const char *root =
+        "type=file;size=5;modify=20240101000000; TEST.BIN\r\n"
+        "type=file;size=100;modify=20240101000000; BIG.BIN\r\n";
+    fake_peer_set_mlst_perm(peer, "el", NULL);
+    connect_site_listing(app, peer, root, NULL);
+    for (int i = 0; i < 80; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+        if (app_state(app)->panes[UI_PANE_REMOTE].perm_known)
+            break;
+    }
+    CHECK(app_state(app)->panes[UI_PANE_REMOTE].perm_known == 1);
+
+    CHECK(folder_upload(app, "ux0:data/SRC", "/", 0) == 1);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.state == UI_DOCK_DONE);
+    CHECK(worker_folder_last_skipped(app_worker(app)) >= 1);
+    CHECK(fake_peer_mkd_count(peer) == 0);
+    CHECK(fake_peer_stor_count(peer) == 0);
+    CHECK(fake_fs_exists("ux0:data/SRC/F.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
 int main(void)
 {
     test_download_destination_failure();
@@ -4568,6 +5561,28 @@ int main(void)
     test_walk_later_listing_failure_skips_folder();
     test_walk_stream_failure_skips_folder();
     test_walk_begin_guards();
+    test_folder_download_copy();
+    test_folder_upload_copy();
+    test_folder_conflict_skip();
+    test_folder_move_confirm_cancel();
+    test_folder_download_move();
+    test_folder_upload_move();
+    test_folder_verify_unverified_keeps_sources();
+    test_folder_verify_extra_rows();
+    test_folder_verify_overflow();
+    test_folder_delete_failure_keeps_copy();
+    test_folder_upload_partial_cleanup();
+    test_folder_cancel_scan();
+    test_folder_cancel_copy();
+    test_folder_cancel_verify();
+    test_folder_cancel_delete();
+    test_folder_session_loss_phases();
+    test_folder_queue_and_second_folder();
+    test_folder_refresh_waits();
+    test_folder_protected_source();
+    test_folder_over_file_skipped();
+    test_folder_path_busy();
+    test_folder_upload_read_only_destination();
 
     if (s_failures != 0) {
         fprintf(stderr, "test_integration: %d failure(s)\n", s_failures);

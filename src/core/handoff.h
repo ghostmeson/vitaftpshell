@@ -101,6 +101,11 @@ typedef struct {
     int port;
     XferDirection direction;
     int direction_known;
+    /* KTD5: the folder job's phase and move flag. `phase_known` is 0 for a
+     * single-file transfer and for a terminal that names only its word. */
+    XferPhase phase;
+    int phase_known;
+    int move;
     int value;
     char address[32];
     int address_known;

@@ -50,7 +50,10 @@ typedef enum {
     PENDING_LOCAL_CONFLICT,
     PENDING_BATCH_CONFLICT,
     PENDING_BUSY,
-    PENDING_REMOTE_WAIT
+    PENDING_REMOTE_WAIT,
+    PENDING_FOLDER_CONFLICT,
+    PENDING_FOLDER_MOVE,
+    PENDING_FOLDER_BUSY
 } PendingKind;
 
 /* What a preflight parent-listing refresh did. The caller must tell them apart:
@@ -125,6 +128,117 @@ typedef struct {
     int overflow;            /* rows past WORKER_LIST_CAP in the folder */
     char refusal[128];       /* the last refusal or stop reason */
 } Walk;
+
+/*
+ * U3/U4: the one cross-pane folder job (KTD1). It is heap-owned because it
+ * carries the plan, and its local steps run inside its own pump rather than as
+ * a local-lane batch. One phase machine; every exit goes through
+ * folder_job_end, which emits exactly one terminal.
+ */
+typedef enum {
+    FOLDER_STAGE_SCAN = 0,
+    FOLDER_STAGE_CONFLICT,
+    FOLDER_STAGE_MOVE_CONFIRM,
+    FOLDER_STAGE_COPY,
+    FOLDER_STAGE_VERIFY,
+    FOLDER_STAGE_DELETE,
+    FOLDER_STAGE_TERMINAL
+} FolderStage;
+
+/* What the job's private listing currently fills. Neither kind ever publishes
+ * a pane row, path, or generation (the visible pane must not move). */
+typedef enum {
+    FOLDER_LIST_NONE = 0,
+    FOLDER_LIST_DEST,   /* an upload's existing destination folder */
+    FOLDER_LIST_VERIFY  /* a destination folder during verification */
+} FolderListKind;
+
+typedef struct {
+    XferPlan *plan;
+    FolderStage stage;
+    int move;
+    UiPane origin;
+    /* R21's folder is resolved at the start, not at the terminal. */
+    char report_folder[PATH_MAX_LEN];
+    char dest_folder[PATH_MAX_LEN];
+
+    char roots[WORKER_WALK_ROOTS][PATH_MAX_LEN];
+    int root_count;
+
+    int conflict_asked;
+    int move_asked;
+    int conflict_skip;
+
+    /* KTD11: the local tree root reservations, taken one root at a time so a
+     * held path can ask WAIT/SKIP/CANCEL before the scan starts. */
+    int reserve_index;
+    int walk_started;
+    int busy_root;
+    int busy_wait;
+    int busy_prompt;
+
+    /* SCAN, upload side: the local walk and the destination listings. */
+    int local_walk_done;
+    int dest_root_listed;
+    int dest_scan_index;
+    int dest_retry;
+    int dest_retry_parent;
+    char dest_retry_path[PATH_MAX_LEN];
+    uint8_t dest_present[XFER_PLAN_ENTRY_MAX];
+
+    /* The job's own listing request; shared by the upload scan and verify. */
+    FolderListKind listing_kind;
+    int listing_active;
+    int listing_parent;
+    char listing_path[PATH_MAX_LEN];
+    int listing_rows;
+    int listing_overflow;
+
+    /* COPY: one entry at a time, the next only after OP_DONE. */
+    int copy_started;
+    int copy_index;
+    int current;   /* the entry in flight, or -1 */
+    int awaiting;  /* a client operation for this job is in flight */
+    int awaiting_op;
+    int store_started; /* the STOR was accepted: a remote partial may exist */
+    int cleanup;   /* deleting a failed upload's remote partial */
+    int cleanup_pending;
+    char cleanup_path[PATH_MAX_LEN];
+    uint64_t done_bytes;
+    int entries_done;
+    int entry_total;
+    int cancel;
+    int skips;
+    int progress_entries;
+    int progress_folders;
+
+    /* VERIFY: one destination folder at a time, local or remote, then the
+     * MLST/SIZE (or stat) fallback when the listing overflowed the collector. */
+    int verify_index;
+    int verify_local;
+    int verify_probe_parent;
+    int verify_probe_index;
+    int verify_probing;
+    int verify_probe_entry;
+    int verify_probe_mlst;
+    int verify_force_size;
+    int verify_overflow;
+    int verify_retry;
+    int verify_retry_parent;
+    char verify_retry_path[PATH_MAX_LEN];
+
+    /* DELETE: bottom-up over the plan's delete list. */
+    int delete_checked;
+    int delete_index;
+    int delete_total;
+    int deleted;
+
+    uint64_t start_ms;
+    int terminal;
+    OpCause cause;
+    OpStage stage_reason;
+    char detail[160];
+} FolderJob;
 
 struct Worker {
     WorkerPorts ports;
@@ -273,6 +387,9 @@ struct Worker {
     uint64_t server_transfer_start_ms;
 
     Walk walk; /* U2: one folder transfer's scan, or all-zero when idle */
+    FolderJob *folder_job;
+    unsigned folder_terminals;
+    int folder_last_skipped;
 
     char last_error[160];
     unsigned log_lost_seen;
@@ -304,6 +421,20 @@ static int run_plan_begin(Worker *worker, const UiCommand *command,
                           FsOpPlan *plan);
 static void execute_action(Worker *worker, const UiCommand *command,
                            FsOpConflict conflict);
+/* The stack gate measures this frame inside the linked worker chain (D77).
+ * Keep it a separate symbol so -O2 cannot fold it into worker_step and leave
+ * the gate unable to find the frame it checks. */
+static void folder_job_pump(Worker *worker) __attribute__((noinline));
+static void folder_job_end(Worker *worker, int ok, int cancelled,
+                           const char *detail, OpCause cause, OpStage stage,
+                           XferPhase phase);
+static void folder_job_cancel(Worker *worker);
+static int folder_job_listing_begin(Worker *worker,
+                                    const FtpClientEvent *event);
+static int folder_job_listing_row(Worker *worker, const FtpClientEvent *event);
+static int folder_job_listing_end(Worker *worker, const FtpClientEvent *event);
+static int folder_job_client_done(Worker *worker,
+                                  const FtpClientEvent *event);
 
 static uint64_t now_ms(Worker *worker)
 {
@@ -1874,6 +2005,1809 @@ static void worker_walk_pump(Worker *worker)
         walk_stop(worker, "WALK LOOP");
 }
 
+/* --- U3/U4: the cross-pane folder job ---------------------------------- */
+
+static XferPhase folder_phase_for_stage(FolderStage stage)
+{
+    switch (stage) {
+    case FOLDER_STAGE_SCAN:
+        return XFER_PHASE_SCAN;
+    case FOLDER_STAGE_COPY:
+        return XFER_PHASE_COPY;
+    case FOLDER_STAGE_VERIFY:
+        return XFER_PHASE_VERIFY;
+    case FOLDER_STAGE_DELETE:
+        return XFER_PHASE_DELETE;
+    default:
+        return XFER_PHASE_NONE;
+    }
+}
+
+static const char *folder_path_reason(PathResult result)
+{
+    switch (result) {
+    case PATH_READ_ONLY:
+        return "READ-ONLY MOUNT";
+    case PATH_PROTECTED:
+        return "PROTECTED PATH";
+    case PATH_DENIED:
+        return "DENIED PATH";
+    case PATH_INVALID:
+    default:
+        return "INVALID PATH";
+    }
+}
+
+static void folder_job_clear_pending(Worker *worker)
+{
+    if (!worker->pending.valid)
+        return;
+    if (worker->pending.kind == PENDING_FOLDER_CONFLICT ||
+        worker->pending.kind == PENDING_FOLDER_MOVE ||
+        worker->pending.kind == PENDING_FOLDER_BUSY)
+        worker->pending.valid = 0;
+}
+
+static void folder_job_emit_started(Worker *worker, XferPhase phase)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL || job->plan == NULL)
+        return;
+    HandoffEvent event;
+    event_init(&event, HANDOFF_EVT_TRANSFER_STARTED);
+    event.direction = job->plan->direction == XFER_PLAN_DOWNLOAD
+                          ? XFER_DIR_DOWNLOAD
+                          : XFER_DIR_UPLOAD;
+    event.direction_known = 1;
+    event.phase = phase;
+    event.phase_known = 1;
+    event.move = job->move;
+    event.total = job->plan->total_bytes;
+    event.total_known = job->plan->bytes_known;
+    event.item_index = phase == XFER_PHASE_COPY ? 1 : 0;
+    event.item_total = job->entry_total;
+    if (job->plan->entry_count > 0) {
+        fmt_copy(event.detail, sizeof(event.detail),
+                 last_name(xfer_plan_source(job->plan, 0)));
+        fmt_copy(event.path, sizeof(event.path),
+                 xfer_plan_source(job->plan, 0));
+    } else {
+        fmt_copy(event.detail, sizeof(event.detail), "FOLDER");
+    }
+    emit(worker, &event);
+}
+
+static void folder_job_emit_progress(Worker *worker, XferPhase phase,
+                                     uint64_t bytes, uint64_t total,
+                                     int total_known, int item_index,
+                                     int item_total)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL)
+        return;
+    HandoffEvent event;
+    event_init(&event, HANDOFF_EVT_PROGRESS);
+    event.direction = job->plan->direction == XFER_PLAN_DOWNLOAD
+                          ? XFER_DIR_DOWNLOAD
+                          : XFER_DIR_UPLOAD;
+    event.direction_known = 1;
+    event.phase = phase;
+    event.phase_known = 1;
+    event.move = job->move;
+    event.bytes = bytes;
+    event.total = total;
+    event.total_known = total_known;
+    event.item_index = item_index;
+    event.item_total = item_total;
+    uint64_t elapsed = now_ms(worker) - job->start_ms;
+    event.elapsed_ms = elapsed;
+    event.elapsed_known = elapsed > 0;
+    if (elapsed > 0) {
+        event.rate = bytes * 1000u / elapsed;
+        event.rate_known = 1;
+    }
+    emit(worker, &event);
+}
+
+/* The SCAN line names the entries found so far (R3). One event per change,
+ * not one per row. */
+static void folder_job_scan_progress(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL || job->plan == NULL)
+        return;
+    int count = job->plan->entry_count;
+    int folders = job->local_walk_done ? job->plan->dir_count
+                                       : worker_walk_folders(worker);
+    if (count < 0)
+        count = 0;
+    if (count == job->progress_entries && folders == job->progress_folders)
+        return;
+    job->progress_entries = count;
+    job->progress_folders = folders;
+    folder_job_emit_progress(worker, XFER_PHASE_SCAN, (uint64_t)count, 0, 0,
+                             folders, 0);
+}
+
+static int folder_child_named(const XferPlan *plan, int parent,
+                              const char *name)
+{
+    if (name == NULL || name[0] == '\0')
+        return XFER_PLAN_NO_INDEX;
+    for (int i = 0; i < plan->entry_count; ++i) {
+        if (xfer_plan_parent(plan, i) != parent)
+            continue;
+        if (strcmp(last_name(xfer_plan_dest(plan, i)), name) == 0)
+            return i;
+    }
+    return XFER_PLAN_NO_INDEX;
+}
+
+static void folder_job_request_conflict(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    worker->prompt_count = 0;
+    int named = plan->conflicts.named;
+    if (named > WORKER_CONFIRM_ITEMS)
+        named = WORKER_CONFIRM_ITEMS;
+    for (int i = 0; i < named; ++i)
+        prompt_item_add(worker, plan->conflicts.names[i].text, 0, 0, 0);
+
+    char context[128];
+    snprintf(context, sizeof(context), "%d EXISTING", plan->conflicts.count);
+    request_prompt(worker, UI_CONFIRM_CONFLICT, job->origin, context, named,
+                   named);
+    job->conflict_asked = 1;
+    job->stage = FOLDER_STAGE_CONFLICT;
+    worker->pending.valid = 1;
+    worker->pending.kind = PENDING_FOLDER_CONFLICT;
+}
+
+static void folder_job_request_move(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    worker->prompt_count = 0;
+    int named = plan->root_count;
+    if (named > WORKER_CONFIRM_ITEMS)
+        named = WORKER_CONFIRM_ITEMS;
+    for (int i = 0; i < named; ++i) {
+        const char *source = xfer_plan_source(plan, i);
+        prompt_item_add(worker, last_name(source), 0, 0, 0);
+    }
+    char context[128];
+    snprintf(context, sizeof(context), "%d ENTRIES", job->entry_total);
+    request_prompt(worker, UI_CONFIRM_MOVE, job->origin, context, named, 0);
+    job->move_asked = 1;
+    job->stage = FOLDER_STAGE_MOVE_CONFIRM;
+    worker->pending.valid = 1;
+    worker->pending.kind = PENDING_FOLDER_MOVE;
+}
+
+static void folder_job_copy_begin(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    job->stage = FOLDER_STAGE_COPY;
+    job->copy_index = 0;
+    job->copy_started = 1;
+    job->progress_entries = 0;
+    job->progress_folders = 0;
+    folder_job_emit_started(worker, XFER_PHASE_COPY);
+    folder_job_emit_progress(worker, XFER_PHASE_COPY, 0,
+                             job->plan->total_bytes, job->plan->bytes_known, 1,
+                             job->entry_total > 0 ? job->entry_total : 1);
+}
+
+static void folder_job_after_conflict(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (job->move && !job->move_asked) {
+        folder_job_request_move(worker);
+        return;
+    }
+    folder_job_copy_begin(worker);
+}
+
+static void folder_job_after_scan(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (!xfer_plan_finalize(job->plan)) {
+        folder_job_end(worker, 0, 0,
+                       job->plan->reason[0] != '\0' ? job->plan->reason
+                                                    : "PLAN REFUSED",
+                       OP_CAUSE_APP, OP_STAGE_PLAN, XFER_PHASE_SCAN);
+        return;
+    }
+    job->entry_total = job->plan->file_count + job->plan->dir_count;
+    job->skips = job->plan->skipped_count;
+    if (job->plan->conflicts.count > 0 && !job->conflict_asked) {
+        folder_job_request_conflict(worker);
+        return;
+    }
+    folder_job_after_conflict(worker);
+}
+
+/* --- U3: the scan ------------------------------------------------------- */
+
+/* KTD11: take each local root as a tree reservation before any byte. A root
+ * the other lane holds asks the one question; WAIT retries silently, SKIP
+ * records the root as a miss, CANCEL ends the job. */
+static int folder_job_reserve_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    while (job->reserve_index < job->root_count) {
+        int entry = job->reserve_index;
+        const char *local = plan->direction == XFER_PLAN_DOWNLOAD
+                                ? xfer_plan_dest(plan, entry)
+                                : xfer_plan_source(plan, entry);
+        if (local[0] == '\0' ||
+            plan->entries[entry].status == XFER_STATUS_SKIPPED) {
+            job->reserve_index++;
+            continue;
+        }
+        char blocker[PATH_MAX_LEN];
+        if (reserve_conflict(worker->reserve, RESERVE_TREE, local, blocker,
+                             sizeof(blocker))) {
+            if (job->busy_wait)
+                return 0; /* WAIT: retry the same root on the next step */
+            if (!job->busy_prompt) {
+                worker->prompt_count = 0;
+                request_prompt(worker, UI_CONFIRM_PATH_BUSY, job->origin,
+                               blocker, 0, 0);
+                worker->pending.valid = 1;
+                worker->pending.kind = PENDING_FOLDER_BUSY;
+                job->busy_prompt = 1;
+                job->busy_root = entry;
+            }
+            return 0;
+        }
+        if (!reserve_add(worker->reserve, RESERVE_LANE_NETWORK, RESERVE_TREE,
+                         local)) {
+            folder_job_end(worker, 0, 0, "TOO MANY PATHS", OP_CAUSE_APP,
+                           OP_STAGE_PLAN, XFER_PHASE_SCAN);
+            return 0;
+        }
+        job->busy_wait = 0;
+        job->reserve_index++;
+    }
+    return 1;
+}
+
+static void folder_job_local_list(Worker *worker, int dir)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    const char *source = xfer_plan_source(plan, dir);
+    const char *dest = xfer_plan_dest(plan, dir);
+
+    FsDir *handle = NULL;
+    FsResult result = worker->ports.fs->list_open(worker->ports.fs->ctx, source,
+                                                  &handle);
+    if (result != FS_OK) {
+        /* R5: the folder cannot be read, so its whole subtree is one skip. */
+        xfer_plan_skip_entry(plan, dir, XFER_SKIP_LOCAL_UNREADABLE);
+        return;
+    }
+
+    int rows = 0;
+    int overflow = 0;
+    for (;;) {
+        FsEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        result = worker->ports.fs->list_next(worker->ports.fs->ctx, handle,
+                                             &entry);
+        if (result == FS_END)
+            break;
+        if (result != FS_OK) {
+            worker->ports.fs->list_close(worker->ports.fs->ctx, handle);
+            xfer_plan_skip_entry(plan, dir, XFER_SKIP_LOCAL_UNREADABLE);
+            return;
+        }
+        if (strcmp(entry.name, ".") == 0 || strcmp(entry.name, "..") == 0)
+            continue;
+        if (rows >= WORKER_LIST_CAP) {
+            overflow = 1;
+            continue;
+        }
+        XferEntryType type =
+            entry.type == FS_ENTRY_DIR ? XFER_ENTRY_DIR : XFER_ENTRY_FILE;
+        if (xfer_plan_add_child(plan, dir, entry.name, type, entry.size,
+                                entry.size_known) < 0) {
+            worker->ports.fs->list_close(worker->ports.fs->ctx, handle);
+            folder_job_end(worker, 0, 0,
+                           plan->reason[0] != '\0' ? plan->reason
+                                                   : "PLAN REFUSED",
+                           OP_CAUSE_APP, OP_STAGE_PLAN, XFER_PHASE_SCAN);
+            return;
+        }
+        rows++;
+    }
+    worker->ports.fs->list_close(worker->ports.fs->ctx, handle);
+    if (overflow)
+        (void)xfer_plan_add_skip(plan, dir, source, dest, XFER_ENTRY_DIR,
+                                 XFER_SKIP_LIST_CAP);
+}
+
+/* One destination listing already told the plan which names exist; a row that
+ * matches a planned folder opens that folder for its own listing, a file row
+ * marks the one conflict, and a type mismatch skips the subtree (R4, R5). */
+static void folder_job_dest_row(Worker *worker, int parent,
+                                const ListingEntry *row)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    int child = folder_child_named(plan, parent, row->name);
+    if (child == XFER_PLAN_NO_INDEX)
+        return; /* an extra destination row is not a conflict */
+    if (plan->entries[child].status == XFER_STATUS_SKIPPED)
+        return;
+
+    int row_is_dir = row->type == LISTING_DIR;
+    if (plan->entries[child].type == XFER_ENTRY_DIR) {
+        if (row_is_dir)
+            job->dest_present[child] = 1;
+        else
+            xfer_plan_skip_entry(plan, child, XFER_SKIP_DEST_IS_FILE);
+        return;
+    }
+
+    if (row_is_dir)
+        xfer_plan_skip_entry(plan, child, XFER_SKIP_DEST_IS_DIR);
+    else
+        xfer_plan_note_dest_exists(plan, child);
+}
+
+static void folder_job_dest_listing_started(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    job->listing_kind = FOLDER_LIST_DEST;
+    job->listing_active = 1;
+    job->listing_rows = 0;
+    job->listing_overflow = 0;
+}
+
+/* Start one destination folder's listing. The index is advanced only when the
+ * request was accepted, so a BUSY slot is retried rather than skipped. */
+static int folder_job_list_dest(Worker *worker, int parent, const char *path)
+{
+    FolderJob *job = worker->folder_job;
+    job->listing_parent = parent;
+    fmt_copy(job->listing_path, sizeof(job->listing_path), path);
+    folder_job_dest_listing_started(worker);
+    FtpClientResult result = ftp_client_list(worker->client, path);
+    if (result == FTP_CLIENT_OK)
+        return 1;
+    job->listing_active = 0;
+    if (result == FTP_CLIENT_BUSY)
+        return 0;
+    folder_job_end(worker, 0, 0,
+                   result == FTP_CLIENT_NOT_CONNECTED
+                       ? "SESSION LOST"
+                       : "DESTINATION LISTING FAILED",
+                   OP_CAUSE_APP,
+                   result == FTP_CLIENT_NOT_CONNECTED ? OP_STAGE_CONNECT
+                                                      : OP_STAGE_COMMAND,
+                   XFER_PHASE_SCAN);
+    return 0;
+}
+
+static void folder_job_dest_scan_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (job->listing_active)
+        return;
+    if (ftp_client_busy(worker->client))
+        return;
+
+    if (!job->dest_root_listed) {
+        if (folder_job_list_dest(worker, XFER_PLAN_NO_INDEX,
+                                 job->dest_folder))
+            return;
+        if (worker->folder_job == NULL)
+            return;
+        /* BUSY: retry on the next step. */
+        return;
+    }
+
+    XferPlan *plan = job->plan;
+    if (job->dest_retry) {
+        job->dest_retry = 0;
+        if (folder_job_list_dest(worker, job->dest_retry_parent,
+                                 job->dest_retry_path))
+            return;
+        if (worker->folder_job == NULL)
+            return;
+        job->dest_retry = 1;
+        return;
+    }
+    while (job->dest_scan_index < plan->entry_count) {
+        int entry = job->dest_scan_index;
+        if (plan->entries[entry].type != XFER_ENTRY_DIR ||
+            plan->entries[entry].status == XFER_STATUS_SKIPPED ||
+            !job->dest_present[entry]) {
+            job->dest_scan_index++;
+            continue; /* an absent destination folder has no conflicts */
+        }
+        const char *path = xfer_plan_dest(plan, entry);
+        if (folder_job_list_dest(worker, entry, path)) {
+            job->dest_scan_index++;
+            return;
+        }
+        if (worker->folder_job == NULL)
+            return;
+        /* BUSY: keep the entry for the next step. */
+        job->dest_retry = 1;
+        job->dest_retry_parent = entry;
+        fmt_copy(job->dest_retry_path, sizeof(job->dest_retry_path), path);
+        return;
+    }
+
+    folder_job_after_scan(worker);
+}
+
+static void folder_job_scan_download_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (worker_walk_active(worker)) {
+        folder_job_scan_progress(worker);
+        return;
+    }
+    if (!worker_walk_done(worker)) {
+        const char *why = worker_walk_refusal(worker);
+        folder_job_end(worker, 0, 0,
+                       why[0] != '\0' ? why : "SCAN FAILED", OP_CAUSE_APP,
+                       OP_STAGE_PLAN, XFER_PHASE_SCAN);
+        return;
+    }
+
+    XferPlan *plan = job->plan;
+    for (int i = 0; i < plan->entry_count; ++i) {
+        if (plan->entries[i].status == XFER_STATUS_SKIPPED)
+            continue;
+        const char *dest = xfer_plan_dest(plan, i);
+        FsEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        FsResult found = worker->ports.fs->stat(worker->ports.fs->ctx, dest,
+                                                &entry);
+        if (found != FS_OK)
+            continue;
+        if (plan->entries[i].type == XFER_ENTRY_DIR) {
+            if (entry.type == FS_ENTRY_DIR)
+                job->dest_present[i] = 1;
+            else
+                xfer_plan_skip_entry(plan, i, XFER_SKIP_DEST_IS_FILE);
+        } else if (entry.type == FS_ENTRY_DIR) {
+            xfer_plan_skip_entry(plan, i, XFER_SKIP_DEST_IS_DIR);
+        } else {
+            xfer_plan_note_dest_exists(plan, i);
+        }
+    }
+    folder_job_after_scan(worker);
+}
+
+/* An upload's destination folders are listed breadth-first, and only the
+ * folders the previous listing proved exist. An absent folder therefore
+ * contributes no conflicts and is never requested (R2). */
+static void folder_job_scan_upload_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+
+    if (!job->local_walk_done) {
+        int dir = xfer_plan_next_dir(plan);
+        if (dir >= 0) {
+            folder_job_local_list(worker, dir);
+            if (worker->folder_job == NULL)
+                return;
+            folder_job_scan_progress(worker);
+            return;
+        }
+        job->local_walk_done = 1;
+        folder_job_scan_progress(worker);
+        return;
+    }
+
+    folder_job_dest_scan_pump(worker);
+}
+
+static void folder_job_scan_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (!folder_job_reserve_pump(worker))
+        return;
+    if (job->plan->direction == XFER_PLAN_DOWNLOAD) {
+        if (!job->walk_started) {
+            const char *roots[WORKER_WALK_ROOTS];
+            for (int i = 0; i < job->root_count; ++i)
+                roots[i] = job->roots[i];
+            if (!worker_walk_begin(worker, job->plan, roots,
+                                   job->root_count)) {
+                const char *why = worker_walk_refusal(worker);
+                folder_job_end(worker, 0, 0,
+                               why[0] != '\0' ? why : "SCAN REFUSED",
+                               OP_CAUSE_APP, OP_STAGE_PLAN, XFER_PHASE_SCAN);
+                return;
+            }
+            job->walk_started = 1;
+        }
+        folder_job_scan_download_pump(worker);
+    } else {
+        folder_job_scan_upload_pump(worker);
+    }
+}
+
+/* --- U3: the copy ------------------------------------------------------- */
+
+/* Remember the failure and, for an upload whose STOR started, arrange the
+ * remote partial's removal on the next pump. The client's own operation slot
+ * is still held when this is called from its callback, so the delete cannot be
+ * started here. */
+static void folder_job_transfer_failed(Worker *worker, const char *detail)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL)
+        return;
+    fmt_copy(job->detail, sizeof(job->detail),
+             detail != NULL ? detail : "TRANSFER FAILED");
+    job->cause = OP_CAUSE_APP;
+    job->stage_reason = OP_STAGE_TRANSFER;
+    if (job->plan->direction == XFER_PLAN_UPLOAD && !job->cancel &&
+        job->current >= 0 && job->store_started) {
+        /* R8: the STOR started, so its remote partial must not be left. */
+        const char *dest = xfer_plan_dest(job->plan, job->current);
+        if (dest[0] != '\0') {
+            fmt_copy(job->cleanup_path, sizeof(job->cleanup_path), dest);
+            job->cleanup_pending = 1;
+            return;
+        }
+    }
+    folder_job_end(worker, 0, 0, job->detail, job->cause, job->stage_reason,
+                   XFER_PHASE_COPY);
+}
+
+static void folder_job_copy_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    if (job->awaiting)
+        return;
+    if (ftp_client_busy(worker->client))
+        return;
+
+    while (job->copy_index < plan->entry_count) {
+        int entry = job->copy_index++;
+        if (plan->entries[entry].status == XFER_STATUS_SKIPPED)
+            continue;
+
+        if (job->conflict_skip && plan->entries[entry].type == XFER_ENTRY_FILE &&
+            plan->entries[entry].dest_existed) {
+            (void)xfer_plan_skip_entry(plan, entry, XFER_SKIP_EXISTING);
+            continue;
+        }
+
+        if (plan->entries[entry].type == XFER_ENTRY_DIR) {
+            const char *dest = xfer_plan_dest(plan, entry);
+            if (dest[0] == '\0') {
+                folder_job_transfer_failed(worker, "INVALID PATH");
+                return;
+            }
+            if (job->dest_present[entry]) {
+                job->entries_done++;
+                continue;
+            }
+            if (plan->direction == XFER_PLAN_DOWNLOAD) {
+                FsResult result = worker->ports.fs->mkdir(
+                    worker->ports.fs->ctx, dest);
+                if (result != FS_OK && result != FS_EXISTS) {
+                    folder_job_transfer_failed(worker,
+                                               fs_result_text(result));
+                    return;
+                }
+            } else {
+                FtpClientResult result =
+                    ftp_client_mkdir(worker->client, dest);
+                if (result == FTP_CLIENT_BUSY) {
+                    job->copy_index = entry;
+                    return;
+                }
+                if (result != FTP_CLIENT_OK) {
+                    folder_job_transfer_failed(
+                        worker, result == FTP_CLIENT_NOT_CONNECTED
+                                    ? "SESSION LOST"
+                                    : "MKDIR FAILED");
+                    return;
+                }
+                job->current = entry;
+                job->awaiting = 1;
+                job->awaiting_op = FTP_CLIENT_OP_MKDIR;
+                return;
+            }
+            job->entries_done++;
+            continue;
+        }
+
+        FtpClientTransfer transfer;
+        memset(&transfer, 0, sizeof(transfer));
+        transfer.remote_path = plan->direction == XFER_PLAN_DOWNLOAD
+                                   ? xfer_plan_source(plan, entry)
+                                   : xfer_plan_dest(plan, entry);
+        transfer.local_path = plan->direction == XFER_PLAN_DOWNLOAD
+                                  ? xfer_plan_dest(plan, entry)
+                                  : xfer_plan_source(plan, entry);
+        transfer.total = plan->entries[entry].size;
+        transfer.total_known = plan->entries[entry].size_known;
+
+        job->current = entry;
+        job->store_started = 0;
+        FtpClientResult result;
+        if (plan->direction == XFER_PLAN_DOWNLOAD)
+            result = ftp_client_download(worker->client, &transfer, NULL);
+        else
+            result = ftp_client_upload(worker->client, &transfer);
+        if (result == FTP_CLIENT_BUSY) {
+            job->current = -1;
+            job->copy_index = entry;
+            return;
+        }
+        if (result != FTP_CLIENT_OK) {
+            const char *detail =
+                result == FTP_CLIENT_LOCAL_FAILED
+                    ? ftp_client_last_detail(worker->client)
+                    : (result == FTP_CLIENT_DENIED ? "DENIED PATH"
+                      : result == FTP_CLIENT_NOT_CONNECTED ? "SESSION LOST"
+                                                           : "TRANSFER REFUSED");
+            folder_job_transfer_failed(worker, detail);
+            return;
+        }
+        job->awaiting = 1;
+        job->awaiting_op = plan->direction == XFER_PLAN_DOWNLOAD
+                               ? FTP_CLIENT_OP_DOWNLOAD
+                               : FTP_CLIENT_OP_UPLOAD;
+        return;
+    }
+
+    /* Every entry started and finished. A copy ends here; a move verifies
+     * before it may delete anything (KTD4). */
+    if (job->copy_started && job->entries_done == job->entry_total) {
+        if (!job->move) {
+            char detail[64];
+            if (job->plan->skipped_count > 0) {
+                snprintf(detail, sizeof(detail), "%d SKIPPED",
+                         job->plan->skipped_count);
+                folder_job_end(worker, 1, 0, detail, OP_CAUSE_APP,
+                               OP_STAGE_TRANSFER, XFER_PHASE_COPY);
+            } else {
+                folder_job_end(worker, 1, 0, NULL, OP_CAUSE_APP,
+                               OP_STAGE_TRANSFER, XFER_PHASE_COPY);
+            }
+            return;
+        }
+        job->stage = FOLDER_STAGE_VERIFY;
+        job->verify_index = 0;
+        job->verify_local = plan->direction == XFER_PLAN_DOWNLOAD;
+        job->verify_overflow = 0;
+        folder_job_emit_progress(worker, XFER_PHASE_VERIFY, job->done_bytes,
+                                 plan->total_bytes, plan->bytes_known,
+                                 job->entries_done,
+                                 job->entry_total > 0 ? job->entry_total : 1);
+    }
+}
+
+/* --- U4: verification --------------------------------------------------- */
+
+static int folder_job_next_verify(Worker *worker, int *parent, char *path,
+                                  size_t cap)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    for (int i = job->verify_index; i < plan->entry_count; ++i) {
+        const XferPlanEntry *entry = &plan->entries[i];
+        if (entry->status == XFER_STATUS_SKIPPED)
+            continue;
+        if (entry->type == XFER_ENTRY_DIR) {
+            const char *dest = xfer_plan_dest(plan, i);
+            if (dest[0] == '\0')
+                continue;
+            *parent = i;
+            fmt_copy(path, cap, dest);
+            job->verify_index = i + 1;
+            return 1;
+        }
+        if (xfer_plan_parent(plan, i) != XFER_PLAN_NO_INDEX)
+            continue; /* a file inside a planned folder is listed with it */
+
+        /* A root file's parent folder is not a plan entry; list it once. */
+        char folder[PATH_MAX_LEN];
+        int found;
+        if (job->verify_local) {
+            Path parent_path;
+            found = path_parent(xfer_plan_dest(plan, i), &parent_path) ==
+                    PATH_OK;
+            if (found)
+                fmt_copy(folder, sizeof(folder), parent_path.text);
+        } else {
+            found = remote_parent(xfer_plan_dest(plan, i), folder,
+                                  sizeof(folder));
+        }
+        if (!found)
+            continue;
+        int seen = 0;
+        for (int j = 0; j < i; ++j) {
+            if (xfer_plan_parent(plan, j) != XFER_PLAN_NO_INDEX ||
+                plan->entries[j].type != XFER_ENTRY_FILE ||
+                plan->entries[j].status == XFER_STATUS_SKIPPED)
+                continue;
+            char other[PATH_MAX_LEN];
+            int other_ok;
+            if (job->verify_local) {
+                Path other_path;
+                other_ok = path_parent(xfer_plan_dest(plan, j), &other_path) ==
+                           PATH_OK;
+                if (other_ok)
+                    fmt_copy(other, sizeof(other), other_path.text);
+            } else {
+                other_ok = remote_parent(xfer_plan_dest(plan, j), other,
+                                         sizeof(other));
+            }
+            if (other_ok && path_ci_equal(other, folder)) {
+                seen = 1;
+                break;
+            }
+        }
+        if (seen)
+            continue;
+        *parent = XFER_PLAN_NO_INDEX;
+        fmt_copy(path, cap, folder);
+        job->verify_index = i + 1;
+        return 1;
+    }
+    return 0;
+}
+
+static void folder_job_verify_local_pump(Worker *worker, int parent,
+                                         const char *path)
+{
+    FolderJob *job = worker->folder_job;
+    FsDir *handle = NULL;
+    FsResult result = worker->ports.fs->list_open(worker->ports.fs->ctx, path,
+                                                  &handle);
+    if (result != FS_OK) {
+        xfer_plan_verify_folder_failed(job->plan, parent);
+        return;
+    }
+
+    int rows = 0;
+    int overflow = 0;
+    for (;;) {
+        FsEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        result = worker->ports.fs->list_next(worker->ports.fs->ctx, handle,
+                                             &entry);
+        if (result == FS_END)
+            break;
+        if (result != FS_OK) {
+            worker->ports.fs->list_close(worker->ports.fs->ctx, handle);
+            xfer_plan_verify_folder_failed(job->plan, parent);
+            return;
+        }
+        rows++;
+        if (rows > WORKER_LIST_CAP) {
+            overflow = 1;
+            continue; /* the planner's entries are checked by stat below */
+        }
+        XferEntryType type =
+            entry.type == FS_ENTRY_DIR ? XFER_ENTRY_DIR : XFER_ENTRY_FILE;
+        (void)xfer_plan_verify_row(job->plan, parent, entry.name, type,
+                                   entry.size, entry.size_known);
+    }
+    worker->ports.fs->list_close(worker->ports.fs->ctx, handle);
+
+    if (!overflow) {
+        xfer_plan_verify_folder_end(job->plan, parent);
+        return;
+    }
+    /* R13: a destination larger than the collector falls back to a per-entry
+     * check instead of calling every unmatched row a truncation. */
+    job->verify_overflow = 1;
+    job->verify_probe_parent = parent;
+    job->verify_probe_index = 0;
+}
+
+/* Record one planned entry's probe answer through the same matcher, so the
+ * exact-name, type, and moved-bytes rules live in one place (KTD4). */
+static void folder_job_probe_answer(Worker *worker, int entry, int exists,
+                                    int is_dir, uint64_t size,
+                                    int size_known)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    int parent = xfer_plan_parent(plan, entry);
+    XferEntryType type;
+    if (!exists) {
+        /* The opposite type is how an absent entry reaches the matcher as
+         * unverified: a planned folder is probed as a file and a planned file
+         * with an unknown size. */
+        type = XFER_ENTRY_FILE;
+        size_known = 0;
+    } else {
+        type = is_dir ? XFER_ENTRY_DIR : XFER_ENTRY_FILE;
+    }
+    (void)xfer_plan_verify_row(plan, parent, last_name(xfer_plan_dest(plan,
+                                                                     entry)),
+                               type, size, size_known);
+}
+
+static void folder_job_local_probe_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    while (job->verify_probe_index < plan->entry_count) {
+        int entry = job->verify_probe_index++;
+        if (xfer_plan_parent(plan, entry) != job->verify_probe_parent)
+            continue;
+        if (plan->entries[entry].status == XFER_STATUS_SKIPPED ||
+            plan->entries[entry].status == XFER_STATUS_VERIFIED ||
+            plan->entries[entry].status == XFER_STATUS_UNVERIFIED)
+            continue;
+        FsEntry found;
+        memset(&found, 0, sizeof(found));
+        int exists = worker->ports.fs->stat(worker->ports.fs->ctx,
+                                            xfer_plan_dest(plan, entry),
+                                            &found) == FS_OK;
+        folder_job_probe_answer(worker, entry, exists,
+                                exists && found.type == FS_ENTRY_DIR,
+                                found.size, found.size_known);
+    }
+    xfer_plan_verify_folder_end(plan, job->verify_probe_parent);
+    job->verify_overflow = 0;
+    job->verify_probe_parent = XFER_PLAN_NO_INDEX;
+    job->verify_probing = 0;
+}
+
+static void folder_job_remote_probe_next(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    while (job->verify_probe_index < plan->entry_count) {
+        int entry = job->verify_probe_index++;
+        if (xfer_plan_parent(plan, entry) != job->verify_probe_parent)
+            continue;
+        if (plan->entries[entry].status == XFER_STATUS_SKIPPED ||
+            plan->entries[entry].status == XFER_STATUS_VERIFIED ||
+            plan->entries[entry].status == XFER_STATUS_UNVERIFIED)
+            continue;
+
+        int is_file = plan->entries[entry].type == XFER_ENTRY_FILE;
+        int use_size = is_file &&
+                       (!ftp_client_has_mlsd(worker->client) ||
+                        job->verify_force_size);
+        const char *dest = xfer_plan_dest(plan, entry);
+        FtpClientResult result =
+            use_size ? ftp_client_size(worker->client, dest)
+                     : ftp_client_mlst(worker->client, dest);
+        if (result == FTP_CLIENT_BUSY) {
+            job->verify_probe_index = entry; /* retry this entry */
+            return;
+        }
+        if (result != FTP_CLIENT_OK) {
+            folder_job_probe_answer(worker, entry, 0, 0, 0, 0);
+            continue;
+        }
+        job->verify_probe_entry = entry;
+        job->verify_probe_mlst = !use_size;
+        job->verify_probing = 1;
+        job->awaiting = 1;
+        job->awaiting_op = FTP_CLIENT_OP_STAT;
+        return;
+    }
+    xfer_plan_verify_folder_end(plan, job->verify_probe_parent);
+    job->verify_overflow = 0;
+    job->verify_probe_parent = XFER_PLAN_NO_INDEX;
+    job->verify_probing = 0;
+}
+
+static void folder_job_verify_probe_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (job->verify_probing)
+        return;
+    if (job->verify_local)
+        folder_job_local_probe_pump(worker);
+    else
+        folder_job_remote_probe_next(worker);
+}
+
+static void folder_job_verify_start(Worker *worker, int parent,
+                                    const char *path)
+{
+    FolderJob *job = worker->folder_job;
+    if (job->verify_local) {
+        folder_job_verify_local_pump(worker, parent, path);
+        return;
+    }
+
+    job->listing_kind = FOLDER_LIST_VERIFY;
+    job->listing_parent = parent;
+    fmt_copy(job->listing_path, sizeof(job->listing_path), path);
+    job->listing_active = 1;
+    job->listing_rows = 0;
+    job->listing_overflow = 0;
+    FtpClientResult result = ftp_client_list(worker->client, path);
+    if (result == FTP_CLIENT_OK) {
+        job->verify_retry = 0;
+        return;
+    }
+    job->listing_active = 0;
+    if (result == FTP_CLIENT_BUSY) {
+        job->verify_retry = 1;
+        job->verify_retry_parent = parent;
+        fmt_copy(job->verify_retry_path, sizeof(job->verify_retry_path), path);
+        return;
+    }
+    xfer_plan_verify_folder_failed(job->plan, parent);
+    if (result == FTP_CLIENT_NOT_CONNECTED) {
+        folder_job_end(worker, 0, 0, "SESSION LOST", OP_CAUSE_NETWORK,
+                       OP_STAGE_CONNECT, XFER_PHASE_VERIFY);
+    }
+}
+
+static void folder_job_verify_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (job->listing_active)
+        return;
+    if (job->verify_overflow) {
+        folder_job_verify_probe_pump(worker);
+        return;
+    }
+    if (ftp_client_busy(worker->client))
+        return;
+
+    int parent;
+    char path[PATH_MAX_LEN];
+    if (job->verify_retry) {
+        parent = job->verify_retry_parent;
+        fmt_copy(path, sizeof(path), job->verify_retry_path);
+        job->verify_retry = 0;
+        folder_job_verify_start(worker, parent, path);
+        return;
+    }
+    if (folder_job_next_verify(worker, &parent, path, sizeof(path))) {
+        folder_job_verify_start(worker, parent, path);
+        return;
+    }
+
+    /* R14: any skip makes the move incomplete, even when every transferred
+     * entry verified. The copies stay; every source stays with them. */
+    if (xfer_plan_move_ready(job->plan) && job->plan->skipped_count == 0) {
+        job->stage = FOLDER_STAGE_DELETE;
+        job->delete_index = 0;
+        job->delete_checked = 0;
+        job->deleted = 0;
+        job->delete_total = xfer_plan_list_count(job->plan, XFER_LIST_DELETE);
+        folder_job_emit_progress(worker, XFER_PHASE_DELETE, 0,
+                                 (uint64_t)job->delete_total, 1, 0,
+                                 job->delete_total);
+        return;
+    }
+
+    if (job->cancel) {
+        folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                       OP_STAGE_TRANSFER, XFER_PHASE_VERIFY);
+        return;
+    }
+    folder_job_end(worker, 0, 0,
+                   job->plan->skipped_count > 0 ? "COPY INCOMPLETE"
+                                                : "COPY UNVERIFIED",
+                   OP_CAUSE_APP, OP_STAGE_TRANSFER, XFER_PHASE_VERIFY);
+}
+
+/* --- U4: delete --------------------------------------------------------- */
+
+static int folder_job_delete_ready(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    if (job->delete_checked)
+        return 1;
+    if (plan->direction == XFER_PLAN_UPLOAD) {
+        /* KTD8: every source root is checked before the first remove, so a
+         * protected, denied, or read-only source refuses the move and keeps
+         * every copy. */
+        for (int i = 0; i < plan->entry_count; ++i) {
+            if (xfer_plan_parent(plan, i) != XFER_PLAN_NO_INDEX ||
+                plan->entries[i].status == XFER_STATUS_SKIPPED)
+                continue;
+            PathResult result = path_check_delete(xfer_plan_source(plan, i), 0,
+                                                  NULL);
+            if (result != PATH_OK) {
+                folder_job_end(worker, 0, 0, folder_path_reason(result),
+                               OP_CAUSE_APP, OP_STAGE_COMMAND,
+                               XFER_PHASE_DELETE);
+                return 0;
+            }
+        }
+    }
+    job->delete_checked = 1;
+    return 1;
+}
+
+static void folder_job_delete_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    XferPlan *plan = job->plan;
+    if (job->awaiting)
+        return;
+    if (!folder_job_delete_ready(worker))
+        return;
+
+    if (job->cancel) {
+        folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                       OP_STAGE_COMMAND, XFER_PHASE_DELETE);
+        return;
+    }
+
+    int entry = xfer_plan_list_at(plan, XFER_LIST_DELETE, job->delete_index);
+    if (entry == XFER_PLAN_NO_INDEX) {
+        folder_job_end(worker, 1, 0, NULL, OP_CAUSE_APP, OP_STAGE_COMMAND,
+                       XFER_PHASE_DELETE);
+        return;
+    }
+    job->delete_index++;
+
+    int is_dir = plan->entries[entry].type == XFER_ENTRY_DIR;
+    const char *source = xfer_plan_source(plan, entry);
+    if (plan->direction == XFER_PLAN_UPLOAD) {
+        FsResult result = is_dir
+                              ? worker->ports.fs->rmdir(worker->ports.fs->ctx,
+                                                        source)
+                              : worker->ports.fs->remove(worker->ports.fs->ctx,
+                                                         source);
+        if (result != FS_OK && result != FS_NOT_FOUND) {
+            folder_job_end(worker, 0, 0, "DELETE FAILED", OP_CAUSE_STORAGE,
+                           OP_STAGE_COMMAND, XFER_PHASE_DELETE);
+            return;
+        }
+        job->deleted++;
+        folder_job_emit_progress(worker, XFER_PHASE_DELETE,
+                                 (uint64_t)job->deleted,
+                                 (uint64_t)job->delete_total, 1,
+                                 job->deleted, job->delete_total);
+        return;
+    }
+
+    if (ftp_client_busy(worker->client))
+        return;
+    FtpClientResult result =
+        is_dir ? ftp_client_rmdir(worker->client, source)
+               : ftp_client_delete(worker->client, source);
+    if (result == FTP_CLIENT_BUSY) {
+        job->delete_index--;
+        return;
+    }
+    if (result != FTP_CLIENT_OK) {
+        folder_job_end(worker, 0, 0,
+                       result == FTP_CLIENT_NOT_CONNECTED ? "SESSION LOST"
+                                                          : "DELETE FAILED",
+                       OP_CAUSE_APP, OP_STAGE_COMMAND, XFER_PHASE_DELETE);
+        return;
+    }
+    job->awaiting = 1;
+    job->awaiting_op = is_dir ? FTP_CLIENT_OP_RMDIR : FTP_CLIENT_OP_DELETE;
+}
+
+/* --- U3: the job lifecycle --------------------------------------------- */
+
+static void folder_job_start_cleanup(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL || !job->cleanup_pending)
+        return;
+    if (ftp_client_state(worker->client) == FTP_CLIENT_READY &&
+        !ftp_client_busy(worker->client) &&
+        ftp_client_delete(worker->client, job->cleanup_path) == FTP_CLIENT_OK) {
+        job->cleanup_pending = 0;
+        job->cleanup = 1;
+        job->awaiting = 1;
+        job->awaiting_op = FTP_CLIENT_OP_DELETE;
+        return;
+    }
+    job->cleanup_pending = 0;
+    if (job->cancel)
+        folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                       OP_STAGE_TRANSFER, XFER_PHASE_COPY);
+    else
+        folder_job_end(worker, 0, 0,
+                       job->detail[0] != '\0' ? job->detail
+                                              : "TRANSFER FAILED",
+                       job->cause, job->stage_reason, XFER_PHASE_COPY);
+}
+
+static void folder_job_pump(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL || job->terminal)
+        return;
+
+    if (job->cleanup_pending) {
+        if (ftp_client_busy(worker->client))
+            return; /* the failed operation's slot is still held */
+        folder_job_start_cleanup(worker);
+        return;
+    }
+
+    if (job->cancel) {
+        if (job->cleanup || job->awaiting)
+            return; /* the command settles before the one terminal */
+        if (worker_walk_active(worker)) {
+            worker_walk_cancel(worker);
+            return;
+        }
+        if (job->listing_active) {
+            (void)ftp_client_cancel(worker->client);
+            return;
+        }
+        folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                       OP_STAGE_TRANSFER, folder_phase_for_stage(job->stage));
+        return;
+    }
+
+    if (worker->pending.valid)
+        return;
+    if (ftp_server_busy(worker->server))
+        return;
+
+    switch (job->stage) {
+    case FOLDER_STAGE_SCAN:
+        folder_job_scan_pump(worker);
+        break;
+    case FOLDER_STAGE_CONFLICT:
+    case FOLDER_STAGE_MOVE_CONFIRM:
+        break; /* waiting on the one prompt */
+    case FOLDER_STAGE_COPY:
+        folder_job_copy_pump(worker);
+        break;
+    case FOLDER_STAGE_VERIFY:
+        folder_job_verify_pump(worker);
+        break;
+    case FOLDER_STAGE_DELETE:
+        folder_job_delete_pump(worker);
+        break;
+    case FOLDER_STAGE_TERMINAL:
+    default:
+        break;
+    }
+}
+
+static void folder_job_cancel(Worker *worker)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL || job->terminal)
+        return;
+    job->cancel = 1;
+    /* A listing or a transfer can be interrupted; a simple command and a
+     * delete are allowed to settle so the remote state is known. */
+    if (job->listing_active)
+        (void)ftp_client_cancel(worker->client);
+    else if (job->awaiting &&
+             (job->awaiting_op == FTP_CLIENT_OP_DOWNLOAD ||
+              job->awaiting_op == FTP_CLIENT_OP_UPLOAD))
+        (void)ftp_client_cancel(worker->client);
+}
+
+static void folder_job_end(Worker *worker, int ok, int cancelled,
+                           const char *detail, OpCause cause, OpStage stage,
+                           XferPhase phase)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL || job->terminal)
+        return;
+    job->terminal = 1;
+    job->stage = FOLDER_STAGE_TERMINAL;
+    worker->folder_terminals++;
+    folder_job_clear_pending(worker);
+
+    XferPlan *plan = job->plan;
+    int move = job->move;
+    int skipped = plan != NULL ? plan->skipped_count : job->skips;
+    int entries_done = job->entries_done;
+    int entry_total = job->entry_total;
+    uint64_t done_bytes = job->done_bytes;
+    uint64_t total_bytes = plan != NULL ? plan->total_bytes : 0;
+    int total_known = plan != NULL ? plan->bytes_known : 0;
+    XferDirection direction = plan != NULL && plan->direction == XFER_PLAN_UPLOAD
+                                  ? XFER_DIR_UPLOAD
+                                  : XFER_DIR_DOWNLOAD;
+    uint64_t elapsed = now_ms(worker) - job->start_ms;
+    int copy_started = job->copy_started;
+    int deleted_sources = job->deleted > 0;
+    char report_folder[PATH_MAX_LEN];
+    char dest_folder[PATH_MAX_LEN];
+    fmt_copy(report_folder, sizeof(report_folder), job->report_folder);
+    fmt_copy(dest_folder, sizeof(dest_folder), job->dest_folder);
+
+    if (worker_walk_active(worker))
+        walk_stop(worker, cancelled ? "CANCELLED" : "JOB ENDED");
+    if (job->listing_active) {
+        job->listing_active = 0;
+        job->listing_kind = FOLDER_LIST_NONE;
+    }
+    worker->transfer_active = 0;
+    worker->folder_job = NULL;
+    worker->folder_last_skipped = skipped;
+    reserve_release(worker->reserve, RESERVE_LANE_NETWORK);
+
+    /* R9: the views that changed refresh once, at the terminal. A move that
+     * deleted its sources also refreshes the side they came from. */
+    if (copy_started || deleted_sources) {
+        if (direction == XFER_DIR_DOWNLOAD) {
+            reload_views_showing(worker, dest_folder);
+            if (move && deleted_sources && worker->connected)
+                worker->refresh_remote = 1;
+        } else {
+            if (move && deleted_sources)
+                reload_views_showing(worker, report_folder);
+            if (worker->connected)
+                worker->refresh_remote = 1;
+        }
+    }
+
+    HandoffEvent event;
+    if (cancelled) {
+        event_init(&event, HANDOFF_EVT_TRANSFER_CANCELLED);
+        event.ok = 0;
+        event.direction = direction;
+        event.direction_known = 1;
+        event.phase = phase;
+        event.phase_known = 1;
+        event.move = move;
+        if (detail != NULL)
+            fmt_copy(event.detail, sizeof(event.detail), detail);
+    } else {
+        event_init(&event, HANDOFF_EVT_TRANSFER_DONE);
+        event.ok = ok;
+        event.direction = direction;
+        event.direction_known = 1;
+        event.phase = phase;
+        event.phase_known = 1;
+        event.move = move;
+        event.bytes = done_bytes;
+        event.total = total_bytes;
+        event.total_known = total_known;
+        event.item_index = entries_done > 0 ? entries_done : 1;
+        event.item_total = entry_total > 0 ? entry_total : 1;
+        event.cause = cause;
+        event.stage = stage;
+        if (detail != NULL)
+            fmt_copy(event.detail, sizeof(event.detail), detail);
+        if (skipped > 0 && detail == NULL) {
+            snprintf(event.detail, sizeof(event.detail), "%d SKIPPED", skipped);
+            event.notice = 1;
+        }
+        if (elapsed > 0) {
+            event.elapsed_ms = elapsed;
+            event.elapsed_known = 1;
+            event.rate = done_bytes * 1000u / elapsed;
+            event.rate_known = 1;
+        }
+    }
+    emit(worker, &event);
+
+    free(job);
+    xfer_plan_free(plan);
+}
+
+static int folder_job_listing_matches(Worker *worker,
+                                      const FtpClientEvent *event)
+{
+    FolderJob *job = worker->folder_job;
+    return job != NULL && job->listing_active && event->path != NULL &&
+           strcmp(event->path, job->listing_path) == 0;
+}
+
+static int folder_job_listing_begin(Worker *worker,
+                                    const FtpClientEvent *event)
+{
+    if (!folder_job_listing_matches(worker, event))
+        return 0;
+    FolderJob *job = worker->folder_job;
+    job->listing_rows = 0;
+    job->listing_overflow = 0;
+    return 1;
+}
+
+static int folder_job_listing_row(Worker *worker, const FtpClientEvent *event)
+{
+    if (!folder_job_listing_matches(worker, event))
+        return 0;
+    FolderJob *job = worker->folder_job;
+    if (event->row == NULL)
+        return 1;
+    job->listing_rows++;
+    if (job->listing_rows > WORKER_LIST_CAP) {
+        job->listing_overflow = 1;
+        return 1;
+    }
+    if (job->listing_kind == FOLDER_LIST_DEST)
+        folder_job_dest_row(worker, job->listing_parent, event->row);
+    else if (job->listing_kind == FOLDER_LIST_VERIFY) {
+        XferEntryType type =
+            event->row->type == LISTING_DIR ? XFER_ENTRY_DIR : XFER_ENTRY_FILE;
+        (void)xfer_plan_verify_row(job->plan, job->listing_parent,
+                                   event->row->name, type, event->row->size,
+                                   event->row->size_known);
+    }
+    return 1;
+}
+
+static int folder_job_listing_end(Worker *worker, const FtpClientEvent *event)
+{
+    if (!folder_job_listing_matches(worker, event))
+        return 0;
+    FolderJob *job = worker->folder_job;
+    int kind = job->listing_kind;
+    int parent = job->listing_parent;
+    int overflow = job->listing_overflow;
+    job->listing_active = 0;
+    job->listing_kind = FOLDER_LIST_NONE;
+
+    if (kind == FOLDER_LIST_DEST) {
+        if (job->cancel) {
+            folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                           OP_STAGE_TRANSFER, XFER_PHASE_SCAN);
+            return 1;
+        }
+        if (!event->ok) {
+            folder_job_end(worker, 0, 0, "DESTINATION LISTING FAILED",
+                           OP_CAUSE_APP, OP_STAGE_COMMAND, XFER_PHASE_SCAN);
+            return 1;
+        }
+        if (overflow) {
+            folder_job_end(worker, 0, 0, "DESTINATION LISTING LIMIT",
+                           OP_CAUSE_APP, OP_STAGE_COMMAND, XFER_PHASE_SCAN);
+            return 1;
+        }
+        /* R5: a read-only destination folder skips its whole subtree. The
+         * upload root is the pane's current folder, so its U6 perm fact is
+         * authoritative when the listing itself carried no cdir row. */
+        int perm_known = event->perm_known;
+        int perm_mask = event->perm_mask;
+        if (!perm_known && parent == XFER_PLAN_NO_INDEX &&
+            worker->remote_perm_known) {
+            perm_known = 1;
+            perm_mask = worker->remote_perm_mask;
+        }
+        if (perm_known && (perm_mask & LISTING_PERM_WRITES) == 0) {
+            if (parent == XFER_PLAN_NO_INDEX) {
+                for (int i = 0; i < job->plan->entry_count; ++i) {
+                    if (xfer_plan_parent(job->plan, i) ==
+                        XFER_PLAN_NO_INDEX)
+                        (void)xfer_plan_skip_entry(job->plan, i,
+                                                   XFER_SKIP_READ_ONLY);
+                }
+            } else {
+                (void)xfer_plan_skip_entry(job->plan, parent,
+                                           XFER_SKIP_READ_ONLY);
+            }
+        }
+        if (parent == XFER_PLAN_NO_INDEX)
+            job->dest_root_listed = 1;
+        return 1;
+    }
+
+    if (kind == FOLDER_LIST_VERIFY) {
+        if (job->cancel) {
+            folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                           OP_STAGE_TRANSFER, XFER_PHASE_VERIFY);
+            return 1;
+        }
+        if (!event->ok) {
+            xfer_plan_verify_folder_failed(job->plan, parent);
+            return 1;
+        }
+        if (overflow) {
+            job->verify_overflow = 1;
+            job->verify_probe_parent = parent;
+            job->verify_probe_index = 0;
+            return 1;
+        }
+        xfer_plan_verify_folder_end(job->plan, parent);
+        return 1;
+    }
+    return 1;
+}
+
+static int folder_job_client_done(Worker *worker,
+                                  const FtpClientEvent *event)
+{
+    FolderJob *job = worker->folder_job;
+    if (job == NULL)
+        return 0;
+
+    if (job->cleanup) {
+        if (event->operation != FTP_CLIENT_OP_DELETE)
+            return 0;
+        job->cleanup = 0;
+        job->awaiting = 0;
+        if (job->cancel)
+            folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                           OP_STAGE_TRANSFER, XFER_PHASE_COPY);
+        else
+            folder_job_end(worker, 0, 0,
+                           job->detail[0] != '\0' ? job->detail
+                                                  : "TRANSFER FAILED",
+                           job->cause, job->stage_reason, XFER_PHASE_COPY);
+        return 1;
+    }
+
+    if (job->verify_probing && event->operation == FTP_CLIENT_OP_STAT) {
+        int entry = job->verify_probe_entry;
+        job->verify_probing = 0;
+        job->awaiting = 0;
+
+        if (!event->ok) {
+            folder_job_probe_answer(worker, entry, 0, 0, 0, 0);
+        } else if (!event->exists) {
+            folder_job_probe_answer(worker, entry, 0, 0, 0, 0);
+        } else if (event->unsupported && job->verify_probe_mlst) {
+            /* MLST is unavailable; a file can still be checked with SIZE,
+             * which is the other half of KTD4's fallback. */
+            if (job->plan->entries[entry].type == XFER_ENTRY_FILE) {
+                job->verify_probe_index = entry; /* retry this entry as SIZE */
+                job->verify_probe_mlst = 0;
+                job->verify_force_size = 1;
+                job->verify_overflow = 1;
+                job->verify_probe_parent =
+                    xfer_plan_parent(job->plan, entry);
+                return 1;
+            }
+            folder_job_probe_answer(worker, entry, 0, 0, 0, 0);
+        } else {
+            folder_job_probe_answer(worker, entry, 1, event->is_dir,
+                                    event->file_size, event->file_size_known);
+        }
+        return 1;
+    }
+
+    if (!job->awaiting)
+        return 0;
+    if ((int)event->operation != job->awaiting_op)
+        return 0;
+    job->awaiting = 0;
+
+    switch (event->operation) {
+    case FTP_CLIENT_OP_MKDIR:
+        job->current = -1;
+        if (job->cancel) {
+            folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                           OP_STAGE_TRANSFER, XFER_PHASE_COPY);
+        } else if (!event->ok) {
+            folder_job_end(worker, 0, 0,
+                           event->detail != NULL ? event->detail
+                                                 : "MKDIR FAILED",
+                           event->cause, event->stage, XFER_PHASE_COPY);
+        } else {
+            job->entries_done++;
+        }
+        return 1;
+
+    case FTP_CLIENT_OP_DOWNLOAD:
+    case FTP_CLIENT_OP_UPLOAD:
+        if (event->ok) {
+            int entry = job->current;
+            if (entry >= 0) {
+                (void)xfer_plan_mark_moved(job->plan, entry, event->bytes);
+                job->done_bytes += event->bytes;
+                job->entries_done++;
+            }
+            job->current = -1;
+            job->store_started = 0;
+            if (job->cancel)
+                folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                               OP_STAGE_TRANSFER, XFER_PHASE_COPY);
+            return 1;
+        }
+        if (job->cancel) {
+            if (job->plan->direction == XFER_PLAN_UPLOAD &&
+                job->current >= 0 && job->store_started) {
+                const char *dest = xfer_plan_dest(job->plan, job->current);
+                if (dest[0] != '\0') {
+                    fmt_copy(job->cleanup_path, sizeof(job->cleanup_path),
+                             dest);
+                    job->store_started = 0;
+                    job->cleanup_pending = 1;
+                    return 1;
+                }
+            }
+            folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                           OP_STAGE_TRANSFER, XFER_PHASE_COPY);
+            return 1;
+        }
+        folder_job_transfer_failed(
+            worker, event->detail != NULL ? event->detail : "TRANSFER FAILED");
+        return 1;
+
+    case FTP_CLIENT_OP_DELETE:
+    case FTP_CLIENT_OP_RMDIR:
+        if (job->cancel) {
+            folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                           OP_STAGE_COMMAND, XFER_PHASE_DELETE);
+            return 1;
+        }
+        if (!event->ok) {
+            folder_job_end(worker, 0, 0,
+                           event->detail != NULL ? event->detail
+                                                 : "DELETE FAILED",
+                           event->cause, event->stage, XFER_PHASE_DELETE);
+            return 1;
+        }
+        job->deleted++;
+        folder_job_emit_progress(worker, XFER_PHASE_DELETE,
+                                 (uint64_t)job->deleted,
+                                 (uint64_t)job->delete_total, 1, job->deleted,
+                                 job->delete_total);
+        return 1;
+
+    default:
+        return 1;
+    }
+}
+
+int worker_folder_begin(Worker *worker, const WorkerFolderRequest *request)
+{
+    if (worker == NULL || request == NULL || request->sources == NULL ||
+        request->source_count <= 0 ||
+        request->source_count > WORKER_WALK_ROOTS)
+        return 0;
+
+    if (worker->folder_job != NULL) {
+        emit_error(worker, UI_PANE_REMOTE, "TRANSFER IN PROGRESS",
+                   OP_CAUSE_APP, OP_STAGE_PLAN);
+        return 0;
+    }
+    if (!worker->connected || worker->client == NULL ||
+        ftp_client_state(worker->client) != FTP_CLIENT_READY) {
+        emit_error(worker, UI_PANE_REMOTE, "NOT CONNECTED", OP_CAUSE_APP,
+                   OP_STAGE_CONNECT);
+        return 0;
+    }
+    if (worker->transfer_active || xfer_busy(&worker->queue) ||
+        ftp_server_busy(worker->server)) {
+        emit_error(worker, UI_PANE_REMOTE, "TRANSFER IN PROGRESS",
+                   OP_CAUSE_APP, OP_STAGE_PLAN);
+        return 0;
+    }
+    /* A folder job may start behind the connect's perm probe: its walk waits
+     * for the client. Any other operation means the pane's own listing is
+     * still running, and the job would interleave with it. */
+    if (ftp_client_busy(worker->client) && !worker->remote_perm_active) {
+        emit_error(worker, UI_PANE_REMOTE, "TRANSFER IN PROGRESS",
+                   OP_CAUSE_APP, OP_STAGE_PLAN);
+        return 0;
+    }
+
+    char dest_folder[PATH_MAX_LEN];
+    if (request->destination == NULL || request->destination[0] == '\0') {
+        emit_error(worker, UI_PANE_REMOTE, "NO DESTINATION", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
+        return 0;
+    }
+    if (request->direction == XFER_PLAN_DOWNLOAD) {
+        Path canonical;
+        if (path_canonicalize(request->destination, &canonical) != PATH_OK) {
+            emit_error(worker, UI_PANE_REMOTE, "INVALID DESTINATION",
+                       OP_CAUSE_APP, OP_STAGE_PLAN);
+            return 0;
+        }
+        fmt_copy(dest_folder, sizeof(dest_folder), canonical.text);
+    } else {
+        if (!ftp_remote_normalize(ftp_client_cwd_text(worker->client),
+                                  request->destination, dest_folder,
+                                  sizeof(dest_folder))) {
+            emit_error(worker, UI_PANE_REMOTE, "INVALID DESTINATION",
+                       OP_CAUSE_APP, OP_STAGE_PLAN);
+            return 0;
+        }
+    }
+
+    FolderJob *job = calloc(1, sizeof(*job));
+    if (job == NULL) {
+        emit_error(worker, UI_PANE_REMOTE, "OUT OF MEMORY", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
+        return 0;
+    }
+    job->stage = FOLDER_STAGE_SCAN;
+    job->move = request->move ? 1 : 0;
+    job->origin = request->origin;
+    job->current = -1;
+    job->start_ms = now_ms(worker);
+    fmt_copy(job->dest_folder, sizeof(job->dest_folder), dest_folder);
+    if (request->direction == XFER_PLAN_DOWNLOAD) {
+        fmt_copy(job->report_folder, sizeof(job->report_folder), dest_folder);
+    } else {
+        UiPane origin = ui_pane_is_local(request->origin) ? request->origin
+                                                          : UI_PANE_LOCAL;
+        fmt_copy(job->report_folder, sizeof(job->report_folder),
+                 worker->local_path[local_index(origin)]);
+    }
+
+    job->plan = xfer_plan_create(request->direction);
+    if (job->plan == NULL) {
+        free(job);
+        emit_error(worker, UI_PANE_REMOTE, "OUT OF MEMORY", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
+        return 0;
+    }
+
+    for (int i = 0; i < request->source_count; ++i) {
+        const char *source = request->sources[i];
+        if (source == NULL || source[0] == '\0')
+            continue;
+
+        if (request->direction == XFER_PLAN_DOWNLOAD) {
+            char remote[PATH_MAX_LEN];
+            if (!ftp_remote_normalize(NULL, source, remote, sizeof(remote))) {
+                emit_error(worker, UI_PANE_REMOTE, "INVALID SOURCE",
+                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            const char *name = remote_last_name(remote);
+            if (!path_name_is_safe(name)) {
+                emit_error(worker, UI_PANE_REMOTE, "UNSAFE REMOTE NAME",
+                           OP_CAUSE_SERVER, OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            Path dest;
+            if (path_join(dest_folder, name, &dest) != PATH_OK) {
+                emit_error(worker, UI_PANE_REMOTE, "LOCAL PATH TOO LONG",
+                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            PathResult writable = path_check_write(dest.text, 0, NULL);
+            if (writable != PATH_OK) {
+                emit_error(worker, UI_PANE_REMOTE, folder_path_reason(writable),
+                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            int type = request->types != NULL ? request->types[i] : -1;
+            XferEntryType entry_type =
+                type == UI_ROW_DIR ? XFER_ENTRY_DIR : XFER_ENTRY_FILE;
+            uint64_t size = request->sizes != NULL ? request->sizes[i] : 0;
+            int size_known =
+                request->size_known != NULL ? request->size_known[i] : 0;
+            if (xfer_plan_add_root(job->plan, remote, dest.text, entry_type,
+                                   size, size_known) < 0) {
+                emit_error(worker, UI_PANE_REMOTE, job->plan->reason,
+                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            fmt_copy(job->roots[job->root_count],
+                     sizeof(job->roots[job->root_count]), remote);
+            job->root_count++;
+        } else {
+            Path canonical;
+            if (path_canonicalize(source, &canonical) != PATH_OK) {
+                emit_error(worker, UI_PANE_REMOTE, "INVALID SOURCE",
+                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            const char *name = last_name(canonical.text);
+            if (!path_name_is_safe(name)) {
+                emit_error(worker, UI_PANE_REMOTE, "UNSAFE NAME", OP_CAUSE_APP,
+                           OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            if (job->move) {
+                Volume volume;
+                if (path_volume(canonical.text, &volume) &&
+                    path_volume_is_read_only(volume)) {
+                    emit_error(worker, UI_PANE_REMOTE, "READ-ONLY MOUNT",
+                               OP_CAUSE_APP, OP_STAGE_PLAN);
+                    xfer_plan_free(job->plan);
+                    free(job);
+                    return 0;
+                }
+            }
+            char remote[PATH_MAX_LEN];
+            if (!remote_join(dest_folder, name, remote, sizeof(remote))) {
+                emit_error(worker, UI_PANE_REMOTE, "REMOTE PATH TOO LONG",
+                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            FsEntry entry;
+            memset(&entry, 0, sizeof(entry));
+            int stat_ok = worker->ports.fs->stat(worker->ports.fs->ctx,
+                                                 canonical.text, &entry) ==
+                          FS_OK;
+            XferEntryType type = stat_ok && entry.type == FS_ENTRY_DIR
+                                     ? XFER_ENTRY_DIR
+                                     : XFER_ENTRY_FILE;
+            int root = xfer_plan_add_root(job->plan, canonical.text, remote,
+                                          type, stat_ok ? entry.size : 0,
+                                          stat_ok ? entry.size_known : 0);
+            if (root < 0) {
+                emit_error(worker, UI_PANE_REMOTE, job->plan->reason,
+                           OP_CAUSE_APP, OP_STAGE_PLAN);
+                xfer_plan_free(job->plan);
+                free(job);
+                return 0;
+            }
+            if (!stat_ok || entry.type == FS_ENTRY_OTHER)
+                (void)xfer_plan_skip_entry(job->plan, root,
+                                           XFER_SKIP_LOCAL_UNREADABLE);
+            job->root_count++;
+        }
+    }
+
+    if (job->root_count == 0) {
+        emit_error(worker, UI_PANE_REMOTE, "NO SOURCE", OP_CAUSE_APP,
+                   OP_STAGE_PLAN);
+        xfer_plan_free(job->plan);
+        free(job);
+        return 0;
+    }
+
+    /* R21: an upload's report belongs in the local folder that holds its
+     * root. When the pane sat at ALL DRIVES there is no current folder, so
+     * the first root's parent is the one honest answer. */
+    if (request->direction == XFER_PLAN_UPLOAD &&
+        (job->report_folder[0] == '\0' ||
+         strcmp(job->report_folder, "*") == 0) &&
+        job->plan->entry_count > 0) {
+        Path parent;
+        if (path_parent(xfer_plan_source(job->plan, 0), &parent) == PATH_OK)
+            fmt_copy(job->report_folder, sizeof(job->report_folder),
+                     parent.text);
+    }
+
+    worker->folder_job = job;
+    worker->transfer_active = 1;
+    folder_job_emit_started(worker, XFER_PHASE_SCAN);
+    /* The first scan pump takes the root reservations and, for a download,
+     * starts the walk once they are held (KTD11). */
+    return 1;
+}
+
+int worker_folder_active(const Worker *worker)
+{
+    return worker != NULL && worker->folder_job != NULL;
+}
+
+XferPhase worker_folder_phase(const Worker *worker)
+{
+    if (worker == NULL || worker->folder_job == NULL)
+        return XFER_PHASE_NONE;
+    return folder_phase_for_stage(worker->folder_job->stage);
+}
+
+unsigned worker_folder_terminal_count(const Worker *worker)
+{
+    return worker != NULL ? worker->folder_terminals : 0;
+}
+
+int worker_folder_last_skipped(const Worker *worker)
+{
+    return worker != NULL ? worker->folder_last_skipped : 0;
+}
+
 static FtpClientResult remote_list(Worker *worker, UiPane pane)
 {
     if (worker->client == NULL ||
@@ -1924,6 +3858,8 @@ static void remote_perm_set(Worker *worker, uint8_t mask)
 static void remote_perm_pump(Worker *worker)
 {
     if (!worker->remote_perm_pending || !worker->connected)
+        return;
+    if (worker->folder_job != NULL)
         return;
     if (worker->transfer_active || xfer_busy(&worker->queue) ||
         ftp_server_busy(worker->server) || ftp_client_busy(worker->client))
@@ -2797,6 +4733,8 @@ static FtpClientResult remote_action_begin(Worker *worker,
 
 static void pump_remote_actions(Worker *worker)
 {
+    if (worker->folder_job != NULL)
+        return; /* the job owns the lane for its whole life (KTD1) */
     while (worker->remote_action_count > 0) {
         if (!worker->connected) {
             worker->remote_action_count = 0;
@@ -2859,6 +4797,11 @@ static void batch_reset(Worker *worker)
  */
 static void reset_remote_session(Worker *worker)
 {
+    if (worker->folder_job != NULL) {
+        XferPhase phase = folder_phase_for_stage(worker->folder_job->stage);
+        folder_job_end(worker, 0, 0, "SESSION LOST", OP_CAUSE_NETWORK,
+                       OP_STAGE_CONNECT, phase);
+    }
     worker->connected = 0;
     worker->refresh_remote = 0;
     worker->remote_action_count = 0;
@@ -2921,6 +4864,14 @@ static void handle_action(Worker *worker, const UiCommand *command)
         if (command->action == UI_ACTION_NEW_FOLDER ||
             command->action == UI_ACTION_RENAME ||
             command->action == UI_ACTION_DELETE) {
+            if (worker->folder_job != NULL) {
+                /* R3: the remote write rows are dim during a job; a command
+                 * that outlived the dim must not run after it on a stale
+                 * path. */
+                emit_error(worker, UI_PANE_REMOTE, "TRANSFER IN PROGRESS",
+                           OP_CAUSE_APP, OP_STAGE_COMMAND);
+                return;
+            }
             queue_remote_action(worker, command);
             return;
         }
@@ -3302,6 +5253,8 @@ static void pump_queue(Worker *worker)
      * would otherwise need more than the 128 KiB worker stack (D57, D66).
      */
     for (;;) {
+        if (worker->folder_job != NULL)
+            return; /* a folder job owns the network lane (KTD1) */
         if (worker->transfer_active || worker->pending.valid)
             return;
         if (ftp_server_busy(worker->server))
@@ -3502,16 +5455,46 @@ static void default_local_dir(Worker *worker, char *out, size_t cap)
     fmt_copy(out, cap, "ux0:data");
 }
 
+static void enqueue_folder_transfer(Worker *worker, const UiCommand *command)
+{
+    char fallback[PATH_MAX_LEN];
+    const char *destination = command->path2;
+    XferPlanDirection direction = ui_pane_is_local(command->pane)
+                                      ? XFER_PLAN_UPLOAD
+                                      : XFER_PLAN_DOWNLOAD;
+    if (direction == XFER_PLAN_DOWNLOAD &&
+        (destination[0] == '\0' || strcmp(destination, "*") == 0)) {
+        default_local_dir(worker, fallback, sizeof(fallback));
+        destination = fallback;
+    }
+
+    const char *sources[1] = {command->path};
+    int types[1] = {UI_ROW_DIR};
+    uint64_t sizes[1] = {command->total};
+    int size_known[1] = {command->total_known};
+    WorkerFolderRequest request;
+    memset(&request, 0, sizeof(request));
+    request.direction = direction;
+    request.move = 0;
+    request.origin = command->pane;
+    request.destination = destination;
+    request.source_count = 1;
+    request.sources = sources;
+    request.types = types;
+    request.sizes = sizes;
+    request.size_known = size_known;
+    (void)worker_folder_begin(worker, &request);
+}
+
 static void enqueue_transfer(Worker *worker, const UiCommand *command)
 {
     XferItem item;
     memset(&item, 0, sizeof(item));
 
-    /* R22/R23 are deliberately deferred (D65): a folder is never sent as one
-     * RETR/STOR. Refuse it here as the last line of defence. */
+    /* R22/R23: a folder is never sent as one RETR/STOR. It becomes one heap
+     * job whose scan, prompts, copy, verify, and delete own the lane (KTD1). */
     if (command->source_type == UI_ROW_DIR) {
-        emit_error(worker, command->pane, "FOLDER TRANSFER NOT SUPPORTED",
-                   OP_CAUSE_APP, OP_STAGE_PLAN);
+        enqueue_folder_transfer(worker, command);
         return;
     }
 
@@ -3542,9 +5525,9 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
         if (worker->ports.fs->stat(worker->ports.fs->ctx, source.text,
                                    &entry) == FS_OK) {
             if (entry.type == FS_ENTRY_DIR) {
-                emit_error(worker, issuing,
-                           "FOLDER TRANSFER NOT SUPPORTED", OP_CAUSE_APP,
-                           OP_STAGE_PLAN);
+                /* A pane that lost its mark's type still gets the recursive
+                 * path instead of a misleading one-file STOR. */
+                enqueue_folder_transfer(worker, command);
                 return;
             }
             item.total = entry.size;
@@ -3817,6 +5800,14 @@ static void client_event(void *ctx, const FtpClientEvent *event)
             emit_session(worker, 0,
                          event->detail != NULL ? event->detail
                                                : "CONTROL CONNECTION LOST");
+            if (worker->folder_job != NULL) {
+                XferPhase phase =
+                    folder_phase_for_stage(worker->folder_job->stage);
+                folder_job_end(worker, 0, 0,
+                               event->detail != NULL ? event->detail
+                                                     : "CONNECTION LOST",
+                               event->cause, event->stage, phase);
+            }
             if (worker->transfer_active) {
                 XferItem item;
                 memset(&item, 0, sizeof(item));
@@ -3851,6 +5842,10 @@ static void client_event(void *ctx, const FtpClientEvent *event)
         }
         break;
     case FTP_CLIENT_EVENT_LISTING_BEGIN:
+        /* U3: the job's own destination scan and verification run first; its
+         * rows never take a pane slot (KTD3). */
+        if (folder_job_listing_begin(worker, event))
+            break;
         /* U2: the walk's private collector runs first, so its rows never take
          * a pane slot (KTD3). */
         if (walk_listing_begin(worker, event))
@@ -3858,16 +5853,38 @@ static void client_event(void *ctx, const FtpClientEvent *event)
         remote_listing_begin(worker, worker->listing_pane, event->path);
         break;
     case FTP_CLIENT_EVENT_LISTING_ROW:
+        if (folder_job_listing_row(worker, event))
+            break;
         if (walk_listing_row(worker, event))
             break;
         remote_listing_row(worker, event->row);
         break;
     case FTP_CLIENT_EVENT_LISTING_END:
+        if (folder_job_listing_end(worker, event))
+            break;
         if (walk_listing_end(worker, event))
             break;
         client_listing_end(worker, event);
         break;
     case FTP_CLIENT_EVENT_PROGRESS: {
+        if (worker->folder_job != NULL) {
+            FolderJob *job = worker->folder_job;
+            /* A STOR that has actually written bytes leaves a remote partial
+             * if it then fails; a refused STOR wrote nothing (R8). */
+            if (job->awaiting &&
+                job->awaiting_op == FTP_CLIENT_OP_UPLOAD &&
+                event->bytes > 0)
+                job->store_started = 1;
+            if (job->copy_started) {
+                folder_job_emit_progress(
+                    worker, XFER_PHASE_COPY,
+                    job->done_bytes + event->bytes,
+                    job->plan->total_bytes, job->plan->bytes_known,
+                    job->entries_done + 1,
+                    job->entry_total > 0 ? job->entry_total : 1);
+            }
+            break;
+        }
         if (!worker->transfer_active)
             break;
         uint64_t elapsed = now_ms(worker) - worker->transfer_start_ms;
@@ -3888,6 +5905,8 @@ static void client_event(void *ctx, const FtpClientEvent *event)
         break;
     }
     case FTP_CLIENT_EVENT_OPERATION_DONE:
+        if (folder_job_client_done(worker, event))
+            break;
         client_operation_done(worker, event);
         break;
     default:
@@ -4041,6 +6060,13 @@ static void cancel_local_lane(Worker *worker)
 
 static void cancel_network_transfer(Worker *worker)
 {
+    /* A folder job owns the network lane; its cancel stops the scan, the copy
+     * or the verification on that phase's own terms (R3, R14). A delete stops
+     * between commands. */
+    if (worker->folder_job != NULL) {
+        folder_job_cancel(worker);
+        return;
+    }
     /* The probe and its refresh are two commands but one preflight; a cancel
      * between them would leave the item undecided, so both latches refuse. */
     if (worker->upload_stat_active || worker->upload_stat_refresh_active) {
@@ -4087,6 +6113,10 @@ static void handle_command(Worker *worker, const UiCommand *command)
     case UI_CMD_OPEN_PATH:
         if (ui_pane_is_local(command->pane)) {
             worker_list_local(worker, (UiPane)command->pane, command->path);
+        } else if (worker->folder_job != NULL) {
+            /* R3: a remote folder open is dim while the job owns the lane. */
+            emit_error(worker, ui_pane_remote_view(), "TRANSFER IN PROGRESS",
+                       OP_CAUSE_APP, OP_STAGE_COMMAND);
         } else if (!worker->connected) {
             emit_error(worker, ui_pane_remote_view(), "NOT CONNECTED",
                        OP_CAUSE_APP, OP_STAGE_COMMAND);
@@ -4115,6 +6145,9 @@ static void handle_command(Worker *worker, const UiCommand *command)
                 else
                     worker_list_local(worker, pane, path);
             }
+        } else if (worker->folder_job != NULL) {
+            emit_error(worker, ui_pane_remote_view(), "TRANSFER IN PROGRESS",
+                       OP_CAUSE_APP, OP_STAGE_COMMAND);
         } else if (!worker->connected) {
             emit_error(worker, ui_pane_remote_view(), "NOT CONNECTED",
                        OP_CAUSE_APP, OP_STAGE_COMMAND);
@@ -4146,7 +6179,7 @@ static void handle_command(Worker *worker, const UiCommand *command)
             worker->remote_perm_pending = 1;
             if (worker->transfer_active || xfer_busy(&worker->queue) ||
                 ftp_server_busy(worker->server) ||
-                worker_walk_active(worker))
+                worker->folder_job != NULL || worker_walk_active(worker))
                 /* Latch it; worker_step re-issues once the lanes are idle. */
                 worker->refresh_remote = 1;
             else if (remote_list(worker, ui_pane_remote_view()) !=
@@ -4214,6 +6247,64 @@ static void handle_command(Worker *worker, const UiCommand *command)
             PendingWork pending = worker->pending;
             worker->pending.valid = 0;
             switch (pending.kind) {
+            case PENDING_FOLDER_CONFLICT: {
+                FolderJob *job = worker->folder_job;
+                if (command->choice == UI_CHOICE_CANCEL || job == NULL) {
+                    if (job != NULL)
+                        folder_job_end(worker, 0, 1, "CANCELLED",
+                                       OP_CAUSE_APP, OP_STAGE_TRANSFER,
+                                       XFER_PHASE_SCAN);
+                } else {
+                    if (command->choice == UI_CHOICE_SKIP) {
+                        /* R4: SKIP EXISTING applies per file and a skipped
+                         * source is never deleted by a move. */
+                        job->conflict_skip = 1;
+                        for (int i = 0; i < job->plan->entry_count; ++i) {
+                            if (job->plan->entries[i].type != XFER_ENTRY_FILE ||
+                                !job->plan->entries[i].dest_existed ||
+                                job->plan->entries[i].status ==
+                                    XFER_STATUS_SKIPPED)
+                                continue;
+                            (void)xfer_plan_skip_entry(job->plan, i,
+                                                       XFER_SKIP_EXISTING);
+                        }
+                        (void)xfer_plan_finalize(job->plan);
+                        job->entry_total =
+                            job->plan->file_count + job->plan->dir_count;
+                        job->skips = job->plan->skipped_count;
+                    }
+                    folder_job_after_conflict(worker);
+                }
+                break;
+            }
+            case PENDING_FOLDER_MOVE:
+                if (command->choice == UI_CHOICE_MOVE &&
+                    worker->folder_job != NULL) {
+                    if (worker->folder_job->move_asked)
+                        folder_job_copy_begin(worker);
+                } else if (worker->folder_job != NULL) {
+                    folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                                   OP_STAGE_TRANSFER, XFER_PHASE_SCAN);
+                }
+                break;
+            case PENDING_FOLDER_BUSY: {
+                FolderJob *job = worker->folder_job;
+                if (job == NULL)
+                    break;
+                job->busy_prompt = 0;
+                if (command->choice == UI_CHOICE_WAIT) {
+                    job->busy_wait = 1;
+                } else if (command->choice == UI_CHOICE_SKIP) {
+                    (void)xfer_plan_skip_entry(job->plan, job->busy_root,
+                                               XFER_SKIP_PATH_BUSY);
+                    job->reserve_index = job->busy_root + 1;
+                    job->busy_wait = 0;
+                } else {
+                    folder_job_end(worker, 0, 1, "CANCELLED", OP_CAUSE_APP,
+                                   OP_STAGE_PLAN, XFER_PHASE_SCAN);
+                }
+                break;
+            }
             case PENDING_TRANSFER:
                 if (command->choice == UI_CHOICE_CANCEL) {
                     /* CANCEL ends the batch, not just the item in the prompt. */
@@ -4422,6 +6513,9 @@ static void handle_command(Worker *worker, const UiCommand *command)
         log_detail(worker, LOGEV_APP_STOP, "quit");
         __atomic_store_n(&worker->done, 1, __ATOMIC_RELEASE);
         ftp_server_stop(worker->server);
+        if (worker->folder_job != NULL)
+            folder_job_end(worker, 0, 1, "QUIT", OP_CAUSE_APP,
+                           OP_STAGE_TRANSFER, XFER_PHASE_NONE);
         if (worker->transfer_active)
             (void)ftp_client_cancel(worker->client);
         (void)ftp_client_quit(worker->client);
@@ -4507,6 +6601,11 @@ void worker_destroy(Worker *worker)
         free(worker->local_plan);
         worker->local_run = NULL;
         worker->local_plan = NULL;
+        if (worker->folder_job != NULL) {
+            xfer_plan_free(worker->folder_job->plan);
+            free(worker->folder_job);
+            worker->folder_job = NULL;
+        }
     }
     if (worker == NULL)
         return;
@@ -4640,8 +6739,12 @@ void worker_step(Worker *worker)
     /* U2: a running walk owns the listing stream; a latched pane refresh waits
      * for its terminal instead of publishing rows over it. */
     worker_walk_pump(worker);
+    /* U3: the job pump runs before the command pumps; while it exists both
+     * return, so nothing else claims the lane. */
+    folder_job_pump(worker);
     if (worker->refresh_remote && worker->connected &&
-        !worker_walk_active(worker) && !worker->transfer_active &&
+        !worker_walk_active(worker) && worker->folder_job == NULL &&
+        !worker->transfer_active &&
         !xfer_busy(&worker->queue) && !ftp_server_busy(worker->server) &&
         !ftp_client_busy(worker->client)) {
         worker->refresh_remote = 0;
