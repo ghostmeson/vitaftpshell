@@ -24,6 +24,11 @@
  * to the denied name, the denial must reject the spelling before the call.
  * Confirm on hardware before relying on either behavior.
  */
+/* [C] app0: resolves to the installed app's tree, ux0:app/VFTPSHELL, on
+ * 3.65 Enso. M24 confirms the alias; until then path comparisons fail closed
+ * when composition does not supply this value. */
+#define PSP2_FS_INSTALL_ALIAS "ux0:app/VFTPSHELL"
+
 #define PSP2_FS_HANDLES 16
 #define PSP2_FS_FILE_MODE 0666
 #define PSP2_FS_DIR_MODE 0777
@@ -487,4 +492,9 @@ FsPort *psp2_fs_port(void)
     s_port.free_space = fs_free_space;
     s_port.rename_replaces = fs_rename_replaces;
     return &s_port;
+}
+
+const char *psp2_fs_install_alias(void)
+{
+    return PSP2_FS_INSTALL_ALIAS;
 }

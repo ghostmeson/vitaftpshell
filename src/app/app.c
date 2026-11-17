@@ -523,6 +523,10 @@ App *app_create(const AppPorts *ports, int worker_thread)
         ports->log == NULL)
         return NULL;
 
+    /* One writer, before the worker starts: the adapter supplies the only
+     * unverified install-tree fact, and policy never names it (D99). */
+    path_set_install_alias(ports->install_alias);
+
     App *app = calloc(1, sizeof(*app));
     if (app == NULL)
         return NULL;

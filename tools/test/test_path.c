@@ -223,10 +223,18 @@ static void test_shared_helpers(void)
     CHECK(path_is_ancestor("app0:folder", "ux0:app/VFTPSHELL/folder/file.txt"));
     CHECK(!path_is_ancestor("app0:folder",
                             "ux0:app/VFTPSHELL/other/file.txt"));
+    /* Before composition supplies the adapter value, the alias fails closed
+     * rather than comparing against a policy-owned guess. */
+    path_set_install_alias(NULL);
+    CHECK(!path_ci_equal("app0:A.TXT", "ux0:app/VFTPSHELL/A.TXT"));
+    path_set_install_alias("ux0:app/VFTPSHELL");
 }
 
 int main(void)
 {
+    /* The adapter supplies this on hardware; the host suite pins the value
+     * the fake platform uses (D99). */
+    path_set_install_alias("ux0:app/VFTPSHELL");
     test_canonical();
     test_parent_join();
     test_volume();

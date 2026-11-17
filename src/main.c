@@ -23,6 +23,7 @@ int main(void)
     ports.ime = psp2_ime_port();
     ports.clock = psp2_clock_port();
     ports.log = psp2_log_port();
+    ports.install_alias = psp2_fs_install_alias();
 
     if (!draw_init())
         return 1;

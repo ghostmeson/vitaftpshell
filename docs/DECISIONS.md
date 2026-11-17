@@ -2278,7 +2278,7 @@ the context line, the item list is the sources, `SAVE DUPLICATES KEEPS THE
 ORIGINAL.` is the warning, CANCEL is focused first, and SAVE DUPLICATES is the
 yellow slab.
 
-A same-folder MOVE stays refused with `ALREADY IN THIS FOLDER` before a plan
+A same-folder MOVE stays refused with `ALREADY HERE` before a plan
 exists. Any other paste with at least one existing destination asks the existing
 OVERWRITE ALL, SKIP EXISTING, and CANCEL prompt once. That prompt counts only
 the destinations that would be replaced; an already-here item is named in the
@@ -2323,6 +2323,8 @@ folder, so a copy duplicates instead of replacing and a move is refused.
 **Consequences:** The alias prevents a self-copy or self-move that spelling
 alone would hide, and a reservation on one spelling blocks the other. The
 equality is `[C]`: `app0:` is assumed to resolve to `ux0:app/VFTPSHELL` on 3.65
-Enso. Matrix M24 confirms the mount and its read-only refusal; if the console
-reports a different target, the alias constant moves and the decision is
-superseded.
+Enso. The target value is owned by the filesystem adapter (`psp2_fs.c`) and
+supplied once by the composition root, so the unverified claim stays out of
+policy (AGENTS.md); until it is supplied, the alias comparison fails closed.
+Matrix M24 confirms the mount and its read-only refusal; if the console reports
+a different target, the adapter value moves and the decision is superseded.

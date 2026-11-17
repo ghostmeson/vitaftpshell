@@ -34,6 +34,9 @@ typedef struct {
     TextInputPort *ime;
     ClockPort *clock;
     LogPort *log;
+    /* The adapter-owned install-tree path for the local `app0:` token; NULL
+     * clears the alias for this app instance. */
+    const char *install_alias;
 } AppPorts;
 
 typedef struct App App;

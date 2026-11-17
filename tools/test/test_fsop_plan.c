@@ -589,6 +589,9 @@ static void test_rename_and_mkdir(void)
 
 int main(void)
 {
+    /* The adapter supplies this on hardware; the host suite pins the value
+     * the fake platform uses (D99). */
+    path_set_install_alias("ux0:app/VFTPSHELL");
     test_folder_copy();
     test_copy_into_self();
     test_cross_volume_move();

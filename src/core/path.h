@@ -79,6 +79,13 @@ int path_is_high_risk(const char *path);
  * separator, and equal paths do not. */
 int path_ci_equal(const char *a, const char *b);
 int path_is_ancestor(const char *a, const char *b);
+/*
+ * The install-tree path `app0:` denotes. The platform adapter owns the value
+ * because it is an unverified Vita fact; composition sets it once before any
+ * thread starts. Until it is set, `app0:` keeps its own spelling and no alias
+ * comparison succeeds (fail closed).
+ */
+void path_set_install_alias(const char *target);
 
 /* The transfer temp and aside names. One owner: every writer builds them
  * here, and every listing can recognise them here. */

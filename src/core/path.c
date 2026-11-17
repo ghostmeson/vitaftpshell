@@ -37,18 +37,32 @@ static int ci_prefix(const char *text, const char *prefix)
 
 /* app0: is the installed app's tree. The alias is comparison-only: display
  * and canonical paths keep the spelling the user typed, while a same-path,
- * ancestry, or reservation test sees one location. [C] app0: resolves to
- * ux0:app/VFTPSHELL on 3.65 Enso. */
-#define PATH_APP0_ALIAS "ux0:app/VFTPSHELL"
+ * ancestry, or reservation test sees one location. The platform adapter owns
+ * the target value (psp2_fs.c) and composition sets it once before threads
+ * start, so the unverified Vita fact stays out of policy (D99). */
+#define PATH_APP0_TOKEN "app0:"
+#define PATH_APP0_TOKEN_LEN (sizeof(PATH_APP0_TOKEN) - 1)
+
+static char s_install_alias[PATH_MAX_LEN];
+
+void path_set_install_alias(const char *target)
+{
+    if (target == NULL || target[0] == '\0') {
+        s_install_alias[0] = '\0';
+        return;
+    }
+    snprintf(s_install_alias, sizeof(s_install_alias), "%s", target);
+}
 
 static const char *location_key(const char *path, char *buf, size_t cap)
 {
-    if (path == NULL || cap == 0 || !ci_prefix(path, "app0:"))
+    if (path == NULL || cap == 0 || s_install_alias[0] == '\0' ||
+        !ci_prefix(path, PATH_APP0_TOKEN))
         return path;
-    const char *rest = path + 5;
+    const char *rest = path + PATH_APP0_TOKEN_LEN;
     int n = rest[0] == '\0'
-                ? snprintf(buf, cap, "%s", PATH_APP0_ALIAS)
-                : snprintf(buf, cap, "%s/%s", PATH_APP0_ALIAS, rest);
+                ? snprintf(buf, cap, "%s", s_install_alias)
+                : snprintf(buf, cap, "%s/%s", s_install_alias, rest);
     if (n <= 0 || (size_t)n >= cap)
         return path;
     return buf;
@@ -185,11 +199,6 @@ int path_volume_is_read_only(Volume volume)
     return (volume_flags(volume) & VOLUME_FLAG_READ_ONLY) != 0;
 }
 
-static int volume_from_token(const char *token, size_t len, Volume *out)
-{
-    return path_volume_from_token(token, len, out);
-}
-
 const char *path_volume_name(Volume volume)
 {
     if ((unsigned)volume >= (unsigned)VOLUME_COUNT)
@@ -217,7 +226,7 @@ PathResult path_canonicalize(const char *input, Path *out)
         return PATH_INVALID;
 
     Volume volume;
-    if (!volume_from_token(p, (size_t)(colon - p), &volume))
+    if (!path_volume_from_token(p, (size_t)(colon - p), &volume))
         return PATH_INVALID;
 
     const char *prefix = path_volume_name(volume);
