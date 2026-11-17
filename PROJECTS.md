@@ -56,8 +56,8 @@ target console with evidence. Host tests alone cannot promote it.
   another machine.
 - **v1 scope:** client, manager, and server; multi-select and local recursive
   folder operations; an anonymous server accepting up to four clients with one
-  data transfer at a time; remote recursive transfer is a v1 requirement that is
-  planned, not built (R22/R23, D65); saved sites with remembered passwords;
+  data transfer at a time; remote recursive transfer is built on the host, with its
+  console rows PENDING (R22/R23, D100); saved sites with remembered passwords;
   plain passive FTP.
 - **Not in v1:** SFTP, FTPS, HTTP, WebDAV, resume, sync, background transfers,
   more than one network transfer or more than one local job at a time, a

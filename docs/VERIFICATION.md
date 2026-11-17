@@ -1,16 +1,18 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b77.vpk (packaged 2026-11-17)
-**SHA-256:** a173b76b7b1afedf6ef2666017a50462a8b73d5a0e2dd672715acf262480bc91
-**ELF:** build/vitaftpshell, 543,144 bytes
+**Build:** vitaftpshell-v01.00-b82.vpk (packaged 2026-11-17)
+**SHA-256:** dde3c491f35ad8929caec227ac105a22b2d6f2ab7e0f2e7c553601ad8673038b
+**ELF:** build/vitaftpshell, 586,964 bytes
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
 **Date:** 2026-11-17
-**Status:** b77 is the current artifact and ran on a PCH-1000 on 2026-11-17. The
-operator report confirms both local panes' file operations, the ACTIONS menu,
-the local/remote switch with its state preserved, the SITES connect return, and
-the remote client and server. M25, M26, and M27 are PART; M5, M10, M13, and M14
-remain PART from earlier builds; every other row is PENDING until the v1
-code-freeze pass (D95). `imc0:` stays BLOCKED on this console.
+**Status:** b82 is the current host-tested artifact; b77 is the latest
+hardware-observed build and ran on a PCH-1000 on 2026-11-17. The operator report
+confirms both local panes' file operations, the ACTIONS menu, the local/remote
+switch with its state preserved, the SITES connect return, and the remote client
+and server. The b82 feature rows M28-M32 are PENDING. M25, M26, and M27 are
+PART; M5, M10, M13, and M14 remain PART from earlier builds; every other row is
+PENDING until the v1 code-freeze pass (D95). `imc0:` stays BLOCKED on this
+console.
 
 This file is the U14 evidence record and the one home for the matrix. A row is
 added or amended when the behavior it proves lands, and it names what the user
@@ -421,8 +423,10 @@ evidence are recorded here. The project therefore stays `building`.
 
 Rows are added with the behavior they prove and executed once at v1 code
 freeze (D95). M17-M27 cover the surfaces the first sixteen rows did not
-exercise, and the remote-recursion rows land with R22/R23. A row's title names
-the behavior; the build it was observed on lives in its evidence. M24's
+exercise; M28-M32 cover the cross-pane folder transfer, the verified move, the
+report, the read-only folder state, and the eight-row ledger, and they are
+PENDING. A row's title names the behavior; the build it was observed on lives
+in its evidence. M24's
 `imc0:` leg is BLOCKED on the PCH-1000: the test console cannot mount that
 volume, so it stays host-only evidence and is never PASS.
 

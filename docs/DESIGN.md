@@ -159,6 +159,15 @@ allowed outside the hazard band.
   continuous bar; transferred and total bytes, percentage, and rate. A download
   total comes from the listing row and is visible before the first byte. When
   the total is unknown, the total and percentage render `--`.
+- **Folder phases:** `SCANNING`, `VERIFYING`, and `DELETING` in yellow; the
+  folder or source name; a count (`n FOLDERS` or `n SOURCES`); no byte bar. The
+  cancel confirm follows the phase: the scan says nothing has been transferred
+  or deleted, the verify says the copies stay and no source is deleted, and the
+  delete says the deleted sources cannot be restored and the remaining sources
+  stay. A copy that reaches its terminal is `UPLOADED` or `DOWNLOADED`; a move
+  is `MOVED`; a partial keeps the verb in yellow and names the reason. When the
+  report was not saved, `REPORT NOT SAVED` is appended to that reason on the
+  same line.
 - **Done:** the past-tense operation word — `COPIED`, `MOVED`, `DELETED`,
   `RENAMED`, `FOLDER CREATED`, `UPLOADED`, `DOWNLOADED` — green; filename; a
   full yellow bar; size and elapsed time; average rate. A batch names its item

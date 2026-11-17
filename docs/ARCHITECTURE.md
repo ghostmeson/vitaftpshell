@@ -138,6 +138,11 @@ arena.
   per batch, and a latched terminal outcome. It never touches a file or a peer.
   A local job runs beside it when canonical paths do not overlap; `reserve.c`
   owns the cross-lane exclusion (D72).
+- `src/core/xfer_plan.c` is the recursive transfer plan: a 4,096-entry table, a
+  512 KiB path arena, an iterative directory worklist, the per-entry moved
+  bytes, and the streaming verification and report rows. It never calls a port.
+  `src/core/report.c` writes `skipped.txt` through `FsPort` with the
+  temp/sync/rename discipline (D100, D101).
 - `src/core/fsop_plan.c` is pure planning. It takes the action, the sources, the
   destination, and the directory facts, and returns ordered steps, a rollback
   list, the conflict gate, and per-step risk. It never calls `FsPort`; a
@@ -162,7 +167,9 @@ arena.
   opens because navigation builds no local path (D67); a folder source opens one heap job instead: a 4,096-entry
   plan with an iterative walk, one conflict question, one copy, and, for a
   move, a verification pass before a bottom-up delete, all on the network lane
-  (D100, D101). One
+  (D100, D101). The walk's listings use a private collector keyed by the job, so
+  the pane's rows, path, and generation never move; verification re-lists each
+  destination folder and compares exact names with the moved bytes. One
   `reset_remote_session` owns every teardown (DISCONNECT, CONNECT, and
   LOST/FAILED/STALLED): it drops the queue, the batch counters, the conflict
   answer, the remote actions, and the upload preflight together (D66).
