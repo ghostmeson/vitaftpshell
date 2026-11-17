@@ -455,9 +455,16 @@ static void set_transfer_dock(UiDock *dock, const UiStateEvent *event,
 
 /* The worker reports the batch position (item_index of item_total). The items
  * after the active one are the queue the dock can still cancel, so the dock
- * reads the depth from the event instead of keeping a second counter (KTD5). */
-static void set_lane_queue(UiDock *lane, const UiStateEvent *event)
+ * reads the depth from the event instead of keeping a second counter (KTD5).
+ * A terminal that arrives after the session died must not re-arm the dock
+ * from the dropped queue's last position (session-lost clears it). */
+static void set_lane_queue(UiState *state, UiDock *lane,
+                           const UiStateEvent *event)
 {
+    if (lane == &state->dock && !state->panes[ui_pane_remote_view()].connected) {
+        lane->queued = 0;
+        return;
+    }
     int queued = event->item_total - event->item_index;
     lane->queued = queued > 0 ? queued : 0;
 }
@@ -2355,8 +2362,13 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
                      event->site);
         }
         /* The connection exists, so the remote view is the one to show
-         * (R13). */
+         * (R13). List focus follows the drawn view: a reconnect can finish
+         * while the right pane shows the local view, and leaving
+         * active_pane on the replaced view would point every list key at a
+         * pane the user cannot see (KTD1). */
         state->right_view = ui_pane_remote_view();
+        if (state->active_pane == UI_PANE_LOCAL_RIGHT)
+            state->active_pane = ui_pane_remote_view();
         if (from_sites && state->screen == UI_SCREEN_SITES) {
             /* SITES was the connect surface: it closes and the workspace
              * returns with the remote view active and its listing requested
@@ -2420,7 +2432,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->done = 0;
         lane->item_index = event->item_index;
         lane->item_total = event->item_total;
-        set_lane_queue(lane, event);
+        set_lane_queue(state, lane, event);
         lane->elapsed_ms = 0;
         lane->elapsed_known = 0;
         lane->rate_known = 0;
@@ -2457,7 +2469,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
         lane->rate_known = event->rate_known;
         lane->elapsed_ms = event->elapsed_ms;
         lane->elapsed_known = event->elapsed_known;
-        set_lane_queue(lane, event);
+        set_lane_queue(state, lane, event);
         lane_terminal(state, lane);
         break;
     }
@@ -2466,6 +2478,9 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
                                               : &state->dock;
         lane->active = 0;
         lane->waiting = 0;
+        /* The queue died with the cancel; a stale depth would keep the dock
+         * entry alive for work that no longer exists (R24). */
+        lane->queued = 0;
         lane->state = UI_DOCK_IDLE;
         lane->message[0] = '\0';
         if (lane == &state->dock && lane->focused)
@@ -2486,7 +2501,7 @@ int ui_state_handle(UiState *state, const UiStateEvent *event, UiCommand *out,
             lane->item_index = event->item_index;
         if (event->item_total > 0)
             lane->item_total = event->item_total;
-        set_lane_queue(lane, event);
+        set_lane_queue(state, lane, event);
         lane_terminal(state, lane);
         break;
     }

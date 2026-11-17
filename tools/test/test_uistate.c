@@ -305,6 +305,59 @@ static void test_dock_entry(void)
     CHECK(s_state.dock.active == 0);
     CHECK(s_state.dock.queued == 0);
 
+    /* A cancel kills the queue with the item, so the dock stops taking the
+     * Down entry (R24). */
+    reset();
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_TRANSFER_STARTED;
+    event.direction = XFER_DIR_DOWNLOAD;
+    event.direction_known = 1;
+    event.item_index = 1;
+    event.item_total = 3;
+    snprintf(event.text, sizeof(event.text), "ONE.BIN");
+    send_event(&event);
+    CHECK(s_state.dock.queued == 2);
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_TRANSFER_CANCELLED;
+    event.direction = XFER_DIR_DOWNLOAD;
+    event.direction_known = 1;
+    send_event(&event);
+    CHECK(s_state.dock.active == 0);
+    CHECK(s_state.dock.queued == 0);
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.focus == UI_FOCUS_LIST);
+
+    /* A terminal that arrives after the session died must not re-arm the
+     * dock from the dropped queue's last position. */
+    reset();
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_TRANSFER_STARTED;
+    event.direction = XFER_DIR_DOWNLOAD;
+    event.direction_known = 1;
+    event.item_index = 1;
+    event.item_total = 3;
+    snprintf(event.text, sizeof(event.text), "ONE.BIN");
+    send_event(&event);
+    CHECK(s_state.dock.queued == 2);
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_SESSION_LOST;
+    event.pane = UI_PANE_REMOTE;
+    snprintf(event.text, sizeof(event.text), "CONNECTION LOST");
+    send_event(&event);
+    CHECK(s_state.dock.queued == 0);
+    memset(&event, 0, sizeof(event));
+    event.kind = UI_EVT_TRANSFER_FAILED;
+    event.item_index = 1;
+    event.item_total = 3;
+    snprintf(event.text, sizeof(event.text), "CONNECTION LOST");
+    send_event(&event);
+    CHECK(s_state.dock.active == 0);
+    CHECK(s_state.dock.queued == 0);
+    s_state.panes[UI_PANE_LOCAL].selected = 2;
+    send_key(UI_KEY_DOWN);
+    CHECK(s_state.focus == UI_FOCUS_LIST);
+
     /* A finished local item with another behind it is queued, not active:
      * the dock still takes the Down entry. */
     reset();
@@ -2072,6 +2125,21 @@ static void test_connect_success_after_leaving_sites(void)
     CHECK(s_state.screen == UI_SCREEN_WORKSPACE);
     CHECK(s_state.active_pane == UI_PANE_LOCAL);
     CHECK(s_state.focus == UI_FOCUS_LIST);
+
+    /* A user browsing the local-right view keeps the keyboard on the view
+     * that is now shown. Leaving active_pane on the replaced view would aim
+     * every list key at a pane the user cannot see (KTD1). */
+    reset();
+    s_state.sites.count = 2;
+    send_key(UI_KEY_SELECT);
+    send_key(UI_KEY_CROSS);
+    send_key(UI_KEY_CIRCLE);
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    event = connect_ok_event();
+    send_event(&event);
+    CHECK(s_state.right_view == UI_PANE_REMOTE);
+    CHECK(s_state.active_pane == UI_PANE_REMOTE);
 
     /* A user who moved on to SERVER stays there. */
     reset();
