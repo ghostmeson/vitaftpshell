@@ -101,9 +101,11 @@ invent a second alert colour, a new type size, or a decorative icon.
 | 2026-11-08 | [Text entry open](2026-11-08-text-entry-open.png) | System keyboard contract |
 | 2026-11-08 | [Text entry cancelled](2026-11-08-text-entry-cancelled.png) | Field unchanged |
 | 2026-11-08 | [Text entry unavailable](2026-11-08-text-entry-unavailable.png) | Inline fallback |
-| 2026-11-15 | [Launcher icon](2026-11-15-launcher-icon.md) | Settled: two-arrow mark, mask-safe (D84) |
+| 2026-11-15 | [Launcher icon](2026-11-15-launcher-icon.md) | Superseded by D103; two-arrow mark record |
 | 2026-11-15 | [Launcher icon render](2026-11-15-launcher-icon.png) | 4× record, true black field |
 | 2026-11-15 | [Launcher icon with bubble mask](2026-11-15-launcher-icon-bubble.png) | 4× record, 26 px corner cut |
+| 2026-11-17 | [Launcher and LiveArea art](2026-11-17-launcher-art.md) | Settled: file stack, workspace banner, boot frame (D103, D104) |
+| 2026-11-17 | [Launcher art record](2026-11-17-launcher-art.html) | The four shipped assets at true size |
 | 2026-11-17 | [Local workspace states](2026-11-17-local-workspace-states.html) | Both-local workspace, seven-mount ALL DRIVES, seven-row ACTIONS |
 
 The HTML sheets draw at 1:1 with the real 5×7 face; open them in a browser. The

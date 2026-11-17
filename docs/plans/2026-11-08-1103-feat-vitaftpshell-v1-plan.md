@@ -821,7 +821,9 @@ amendment.
 - The longest single `FsPort` write or directory read on the target card; a step budget bounds work between calls, not inside one adapter call.
 - The IME initialization order and whether the dialog needs a frame between init and status.
 - The mksfoex flags this SDK build needs for `VERSION` and `CONTENT_ID`.
-- Icon, pic0, and LiveArea art.
+- Icon, pic0, and LiveArea art. Landed in b83 as D103 (the file-stack mark) and
+  D104 (the workspace LiveArea and boot frame); `tools/art/build_launcher_art.py`
+  generates all four PNGs. The console rows are PENDING.
 - `FsEntry.mtime` is treated as Unix seconds by the server's MDTM/MLSD formatter; the adapter must convert or report unknown if the platform does not supply that unit.
 - `FsPort` has no directory sync, so the templed write's durability holds against process kill; power-loss durability needs a port extension or a confirmed platform guarantee.
 - The per-slice byte and time budget for the stepped executor, measured against the network tick wait.

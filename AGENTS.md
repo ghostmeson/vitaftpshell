@@ -297,8 +297,7 @@ judgment call:
   reports unknown and the UI renders `--` (D48);
 - directory sync after a rename: `FsPort` has no call for it, so power-loss
   durability needs a port extension or a confirmed platform guarantee;
-- the mksfoex flags this SDK build needs;
-- the LiveArea art (the launcher icon is settled, D84).
+- the mksfoex flags this SDK build needs.
 
 ## Directory map
 
@@ -323,8 +322,9 @@ vitaFTPShell/
     ui/                the seven screens, dock, legends, shared parts, render
     app/               app frame loop and the one worker
     platform/          port headers and the six psp2_* adapters
-  sce_sys/             launcher icon and placeholder LiveArea art (U14 replaces the LiveArea art)
+  sce_sys/             launcher icon, LiveArea art, and boot frame (D103, D104)
   tools/
+    art/               launcher and LiveArea art generator (indexed PNG out)
     check_worker_stack.py  linked-ELF worker stack budget check (build gate)
     test/run.sh        layering guard and host test runner
     fake/              NetPort, FsPort, input, IME, clock, log, and FTP peers

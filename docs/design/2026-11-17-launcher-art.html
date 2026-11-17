@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Launcher and LiveArea art — shipped record (b83)</title>
+<style>
+  :root {
+    --field: #000000;
+    --hair: #1C1D24;
+    --dim: #6E707E;
+    --white: #EDEDF0;
+    --yellow: #FCEE0A;
+    --cyan: #2AD8E8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--field); color: var(--white); }
+  body {
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 40px 32px 72px; max-width: 1080px; margin: 0 auto;
+  }
+  header { border-bottom: 1px solid var(--hair); padding-bottom: 20px; margin-bottom: 32px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+  .sub { color: var(--dim); max-width: 74ch; margin: 0; }
+  section { border-top: 1px solid var(--hair); padding-top: 18px; margin-bottom: 40px; }
+  h2 { font-size: 14px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 4px; }
+  .meta { font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); margin: 0 0 16px; }
+  .row { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; }
+  figure { margin: 0; }
+  figure img { display: block; border: 1px solid var(--hair); }
+  figcaption { font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); margin-top: 6px; }
+  .bubble { width: 256px; height: 256px; border-radius: 52px; overflow: hidden; border: 1px solid var(--hair); background: #0A0B0E; }
+  .bubble img { width: 256px; height: 256px; display: block; border: 0; }
+  .note { color: var(--dim); max-width: 74ch; margin: 14px 0 0; }
+  .wide img { max-width: 100%; height: auto; }
+</style>
+
+<header>
+  <h1>Launcher and LiveArea art — shipped record</h1>
+  <p class="sub">Build b83. The images below are the files in <code>sce_sys/</code>, at true
+  size wherever the page allows it. Decisions D103 and D104; geometry in
+  <a href="2026-11-17-launcher-art.md" style="color:#2AD8E8">2026-11-17-launcher-art.md</a>.
+  Regenerate with <code>tools/art/build_launcher_art.py</code>.</p>
+</header>
+
+<section>
+  <h2>Launcher icon</h2>
+  <p class="meta">sce_sys/icon0.png — 128×128, indexed 8-bit, 24 colours</p>
+  <div class="row">
+    <figure><img src="../../sce_sys/icon0.png" width="128" height="128" alt="Launcher icon at 128 px"><figcaption>128 px, 1:1</figcaption></figure>
+    <figure><img src="../../sce_sys/icon0.png" width="32" height="32" alt="Launcher icon at 32 px"><figcaption>32 px, launcher row</figcaption></figure>
+    <figure><div class="bubble"><img src="../../sce_sys/icon0.png" alt="Icon inside the 26 px bubble mask"></div><figcaption>bubble mask, 26 px cut</figcaption></figure>
+  </div>
+  <div class="row" style="margin-top:20px">
+    <figure><img src="../../sce_sys/icon0.png" width="512" height="512" alt="Launcher icon at 4x" style="image-rendering:pixelated"><figcaption>4×, for detail</figcaption></figure>
+  </div>
+  <p class="note">Three sheets: dim back, yellow middle, cyan front document. <b>VTPS</b>
+  runs vertically down the front sheet in the app's 5×7 face; four ruled lines sit on the
+  right. The 83×83 mark is centred, so no corner cut reaches it.</p>
+</section>
+
+<section>
+  <h2>LiveArea background</h2>
+  <p class="meta">sce_sys/livearea/contents/bg.png — 840×500, indexed 8-bit, 36 colours</p>
+  <figure class="wide"><img src="../../sce_sys/livearea/contents/bg.png" width="840" height="500" alt="LiveArea background"><figcaption>840×500, 1:1. The gate bar covers the bottom of the page; the lowest element ends at y 382.</figcaption></figure>
+</section>
+
+<section>
+  <h2>Gate thumbnail</h2>
+  <p class="meta">sce_sys/livearea/contents/startup.png — 280×158, indexed 8-bit, 28 colours</p>
+  <figure><img src="../../sce_sys/livearea/contents/startup.png" width="280" height="158" alt="Gate thumbnail"><figcaption>280×158, 1:1. Sits beside START.</figcaption></figure>
+</section>
+
+<section>
+  <h2>Boot frame</h2>
+  <p class="meta">sce_sys/pic0.png — 960×544, indexed 8-bit, 23 colours</p>
+  <figure class="wide"><img src="../../sce_sys/pic0.png" width="960" height="544" alt="Boot frame"><figcaption>960×544, 1:1. Reports nothing: no progress, no version.</figcaption></figure>
+</section>

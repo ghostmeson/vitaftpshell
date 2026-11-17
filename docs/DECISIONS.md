@@ -1866,7 +1866,7 @@ dialogs emit id 0.
 ## D84. The launcher icon is a centred two-arrow mark
 
 **Date:** 2026-11-15
-**Status:** accepted; b56.
+**Status:** accepted; b56. Superseded by D103.
 
 **Context:** `sce_sys/icon0.png` was a placeholder. The Vita bubble launcher
 masks icon art with a rounded square, so a border or an edge-to-edge panel is
@@ -2435,3 +2435,65 @@ today; the platform reports unknown for the other volumes.
 **Consequences:** Only `ux0:` reports free space today; the code-freeze pass
 measures whether `uma0:` and `ur0:` can. An unknown folder stays enabled, so a
 server that reports nothing is never dimmed by a guess.
+
+## D103. The launcher mark is a stack of files
+
+**Date:** 2026-11-17
+**Status:** accepted. The console rows are PENDING.
+
+**Context:** D84's two-arrow mark reads as a transfer glyph — the symbol any
+FTP or sync app uses — and says nothing about files. The launcher is where a
+person decides whether the app is a file tool, so the mark has to show files.
+Six directions were drawn and reviewed: a two-lane sync loop, two plain
+chamfered panes, a split exchange bar, a split folder, a ledger window, and a
+folder carrying a file window. The user chose the file stack.
+
+**Decision:** `sce_sys/icon0.png` is a 128×128 true-black tile carrying a stack
+of three sheets. The back sheet is `C_DIM`, the middle `C_YELLOW`, the front
+`C_CYAN`, each 60×60 with a 12 px top-right chamfer and a 3 px field keyline,
+offset 10 px diagonally. The front sheet is the document: `VTPS` set vertically
+down its left margin in the app's 5×7 face, knocked out in `C_FIELD`, with four
+ruled lines on the right. The mark is 83×83, centred on (64, 64), inside the
+bubble's corner cut. It is drawn at 3× and box-filtered, then written as an
+indexed 8-bit PNG by `tools/art/build_launcher_art.py`. Geometry and the mask
+check are in `docs/design/2026-11-17-launcher-art.md`.
+
+**Consequences:** The icon reads as files at launcher size and survives the
+32 px row, while `VTPS` stays a signature detail that only resolves from about
+96 px up. D84's geometry note is superseded but kept. Red and green stay out of
+the icon. The art is reproducible: the script reads the palette from
+`src/gfx/theme.h` by hand and the glyphs from `src/gfx/font.c`, and
+`tools/check_assets.sh` now guards `pic0.png` too.
+
+## D104. The LiveArea shows the workspace, and pic0 is the boot frame
+
+**Date:** 2026-11-17
+**Status:** accepted. The console rows are PENDING.
+
+**Context:** `bg.png` and `startup.png` were two dark rectangles with a yellow
+rule, and `pic0.png` did not exist. A LiveArea is the only place a person sees
+the app before it draws: the page behind the gate, the gate thumbnail, and the
+loading frame all ship empty-handed today.
+
+**Decision:**
+
+1. **The LiveArea background is the workspace, composition A.** 840×500: the
+   wordmark at 48, 30 at px 7 with the settled halo and chroma; the descriptor
+   `FTP CLIENT / FILE MANAGER / ANONYMOUS SERVER` at px 2.5; two 360×212
+   chamfered panes at 48 and 432; the local pane's third row a cyan cursor slab;
+   `UX0:  UR0:  UMA0:` and `READ-WRITE` at y 370. The lowest element ends at
+   y 382, because the shell covers the bottom of the page with its gate.
+2. **The gate thumbnail is the mark, the wordmark, and one line.** 280×158, no
+   data and no state.
+3. **`pic0.png` is the boot frame.** 960×544: the mark at 200 px, the wordmark
+   centred at px 6, the descriptor at px 2.5. It reports no progress and no
+   version, because the platform reports neither during load.
+4. **`template.xml` stays `style="a1"`.** No `psmobile` frames, no extra
+   LiveArea pages, until a decision earns them.
+5. All three are indexed 8-bit, from `tools/art/build_launcher_art.py`, and
+   `pic0.png` joins the VPK and the asset guard.
+
+**Consequences:** The page shows the product instead of a brand abstraction and
+still reads at a glance. The bottom fifth is deliberately empty. The rejected
+poster and ledger-field compositions are recorded in the design sheet and can
+return as additional LiveArea pages if the gate ever gets a second page.

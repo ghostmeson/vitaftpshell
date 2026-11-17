@@ -71,6 +71,11 @@ python3 "$ROOT/tools/check_worker_stack.py" --self-test
 # sce_sys PNG must be indexed 8-bit (color type 3, bit depth 8).
 "$ROOT/tools/check_assets.sh"
 
+# The art is generated, so a PNG must match the generator that claims to have
+# produced it. This catches a hand-edited asset and a script edit without the
+# rebuild in the same gate.
+python3 "$ROOT/tools/art/build_launcher_art.py" --check
+
 # --- Docs guard -------------------------------------------------------------
 # The docs gate owns what the layering and asset guards cannot see: broken
 # links, unindexed plans and designs, dead R/U/KTD/D references, build tokens in

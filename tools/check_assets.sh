@@ -36,6 +36,7 @@ check_png() {
 }
 
 check_png "$ROOT/sce_sys/icon0.png"
+check_png "$ROOT/sce_sys/pic0.png"
 check_png "$ROOT/sce_sys/livearea/contents/bg.png"
 check_png "$ROOT/sce_sys/livearea/contents/startup.png"
 
