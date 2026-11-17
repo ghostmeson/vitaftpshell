@@ -18,11 +18,10 @@ card to a PC, without making the PC the workspace.
 client, a local file manager over every mounted user volume, and an anonymous
 read-write FTP server on `ux0:`, `ur0:`, and `uma0:`. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
-suites pass. The local workspace — a second local pane, the seven user mounts,
-the connect return, and list navigation — is host-complete. R22 and R23, remote
-recursive download and upload, remain the unbuilt v1 requirements; the console
-matrix runs once at v1 code freeze (D95), so the project is `building`, not
-`verified`.
+suites pass. The local workspace and the cross-pane folder transfer — recursive
+download and upload, the verified move, the report, and the per-folder
+read-only state — are host-complete. The console matrix runs once at v1 code
+freeze (D95), so the project is `building`, not `verified`.
 
 The live state and the single next action are on [the board](../PROJECTS.md); the
 hardware evidence is in [the evidence record](VERIFICATION.md).
@@ -40,7 +39,7 @@ hardware evidence is in [the evidence record](VERIFICATION.md).
 
 | Capability | In v1 |
 |---|---|
-| FTP client | Saved sites, anonymous and login, passive FTP, browse, download, upload, create, rename, delete; remote recursive transfer is planned, not built (R22/R23, D65) |
+| FTP client | Saved sites, anonymous and login, passive FTP, browse, download, upload, create, rename, delete; the folder transfer and verified move are built on the host (R22/R23, D100) |
 | Local manager | Browse every mounted user volume (`ux0:`, `ur0:`, `uma0:`, `imc0:`, `gro0:`, `grw0:`, `app0:`), with `app0:` and `gro0:` read-only and save data excluded; two local panes over one session; multi-select, create, rename, copy, move, delete, local recursive folder operations, free space |
 | FTP server | Anonymous read-write, mounted `ux0:`/`ur0:`/`uma0:`, OFF at launch, up to four clients with one data transfer at a time, visible ON state |
 | Transfers | One network transfer and one local job may run together, each with its own queued batch, progress, cancel, and overwrite/skip/cancel conflict prompt |
@@ -84,7 +83,7 @@ rows that prove them on hardware.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: v1 completion and verification | The local workspace is host-complete: a second local pane, the seven user mounts, the connect return, and list navigation. R22 and R23 are the remaining requirements; the full matrix runs once on the code-freeze build (D95), and the row-level evidence is the open work |
+| Phase 6: v1 completion and verification | The local workspace is host-complete: a second local pane, the seven user mounts, the connect return, and list navigation. R22 and R23 are host-complete; the new matrix rows are the open work, and the full matrix runs once on the code-freeze build (D95) |
 
 ## Failure policy
 

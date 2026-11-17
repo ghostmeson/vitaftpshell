@@ -27,8 +27,8 @@ passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b77.vpk`, 269,901 bytes,
-  SHA-256 `a173b76b7b1afedf6ef2666017a50462a8b73d5a0e2dd672715acf262480bc91`.
+- **Current artifact:** `vitaftpshell-v01.00-b82.vpk`, 296,331 bytes,
+  SHA-256 `dde3c491f35ad8929caec227ac105a22b2d6f2ab7e0f2e7c553601ad8673038b`.
 - **Latest hardware-observed build:** b77 (operator report, 2026-11-17,
   PCH-1000): copy, paste, new folder, rename, and delete work across both local
   panes; the remote client and the server work; the ACTIONS menu works; the
@@ -54,10 +54,24 @@ passes.
   FileZilla's browse and transfer connections both connect, and its upload and
   download pass. b77 ran on a PCH-1000 on 2026-11-17 and moves M25, M26, and M27
   to PART; its report does not exercise M24's mount and read-only surface, and
-  M27's site-book wrap, dock entry, and clamping remain unobserved. M5 remains
+  M27's site-book wrap, dock entry, and clamping remain unobserved. The b82
+  feature rows M28-M32 are PENDING. M5 remains
   PART only for a FileZilla rename/delete and the full three-volume browse;
   M10, M13, M14, M25, M26, and M27 are partly observed; every other row awaits
   the code-freeze pass (D95).
+
+## Cross-pane folder transfer (b82, host)
+
+The v1 plan's R22/R23 and the cross-pane copy and move model. The artifact is
+`vitaftpshell-v01.00-b82.vpk` (296,331 bytes, SHA-256 `dde3c491…`). The new
+matrix rows M28-M32 are PENDING; no console observation yet.
+
+| Build | Symptom | Cause and fix | Evidence | Status |
+|---|---|---|---|---|
+| b82 | **A folder could not cross the FTP boundary, and a move could not verify a copy.** | R22/R23 were unbuilt and the folder actions were refused. One heap job now scans a folder tree, asks one conflict question, copies, verifies by re-listing, and deletes a move's sources bottom-up (D100, D101); `skipped.txt` records every missing entry (D101). | `test_integration`, `test_xfer_plan`, `test_report`, `test_uistate`; host run | `HOST b82` |
+| b82 | **A file-only MOVE paste took the plain upload queue and never deleted the source.** | The batch bridge routed only a folder-containing set or a remote MOVE to the job. A local MOVE clipboard with files now takes the same verify-then-delete job (R11, K4). | `test_integration`; host run | `HOST b82` |
+| b82 | **A first listing whose data connection failed left the client `READY`.** | The CSTEP_PASV connect failure went through `client_command_fail` even for the session's first listing, so the worker could declare a session connected after its first listing never opened. The first listing now enters the terminal (R8). | `test_client`; host run | `HOST b82` |
+| b82 | **A destination folder with extra files could never verify a move.** | The verification collector treated unmatched destination rows as truncation and kept every source. Rows now stream-match the planned names and extra rows are ignored; only a genuinely unreadable or overflowed listing falls back to MLST/SIZE (R13, D101). | `test_xfer_plan`, `test_integration`; host run | `HOST b82` |
 
 ## Local workspace (b76, host)
 
@@ -453,9 +467,10 @@ here so they do not live only in a review report.
 - **External passive data port:** if `connect_fail ... stage=data ... value=2`
   appears at the correct IP, the network is blocking the passive port; test a
   LAN FTP server before changing the client.
-- **R22/R23 recursive transfers:** deferred by the user's choice. A folder is
-  now refused with `FOLDER NOT SUPPORTED` instead of sent as one RETR/STOR.
-  This remains a plan gap.
+- **R22/R23 recursive transfers** are built on the host; the console rows
+  M28-M32 are PENDING. A server that reports no file sizes cannot verify a
+  move, so it stays a copy; a server that reports no `perm` facts is never
+  greyed out, and only `ux0:` reports free space today.
 - **Upload conflict detection falls back to SIZE.** A server that does not
   advertise MLST is probed with SIZE (D91); a server that offers neither is not
   probed and keeps the prior overwrite behavior. A destination outside the

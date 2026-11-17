@@ -11,11 +11,10 @@ anything.
 client, a local file manager over every mounted user volume, and an anonymous
 read-write FTP server on `ux0:`, `ur0:`, and `uma0:`. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
-suites pass. The local workspace — a second local pane, the seven user mounts,
-the connect return, and list navigation — is host-complete. R22 and R23, remote
-recursive download and upload, remain the unbuilt v1 requirements; the console
-matrix runs once at v1 code freeze (D95), so the project is `building`, not
-`verified`.
+suites pass. The local workspace and the cross-pane folder transfer — recursive
+download and upload, the verified move, the report, and the per-folder
+read-only state — are host-complete. The console matrix runs once at v1 code
+freeze (D95), so the project is `building`, not `verified`.
 
 The live state and the single next action are on [the board](PROJECTS.md); the
 hardware evidence is in [the evidence record](docs/VERIFICATION.md).
@@ -60,7 +59,7 @@ shape; the transfer dock is where work is visible.
   listings.
 - Passwords are always remembered and stored unencrypted; they are never logged.
 - Multi-select and local recursive folder operations are v1; remote recursive
-  transfer is a v1 requirement that is planned, not built (R22/R23, D65).
+  transfer is built on the host; its console rows are PENDING (R22/R23, D100).
 - One network transfer and one local job may run together when their canonical
   paths do not overlap; each lane queues its own items, a collision asks
   WAIT/SKIP/CANCEL, and a server-side transfer uses the network lane and

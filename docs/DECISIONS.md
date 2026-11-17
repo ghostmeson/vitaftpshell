@@ -1396,9 +1396,9 @@ unbound to an action.
 ## D65. Remote refresh, unsafe names, upload preflight, and the folder-transfer limit
 
 **Date:** 2026-11-13
-**Status:** accepted; remote recursive transfer is a v1 requirement that is
-planned, not built, and R22/R23 stay active. The current build still refuses a
-folder source as described in item 3.
+**Status:** accepted; items 2, 4, 5, and 6 stand. **Superseded 2026-11-17 by
+D100 for item 1's six-row maximum and item 3's folder refusal:** the folder
+transfer is built on the host and its console rows are PENDING.
 
 **Context:** The b32 remote pane fixed navigation, disconnect, and remote
 mutations. Four gaps remained: R21 had a `UI_CMD_REFRESH` with no action, R44
@@ -2328,3 +2328,110 @@ supplied once by the composition root, so the unverified claim stays out of
 policy (AGENTS.md); until it is supplied, the alias comparison fails closed.
 Matrix M24 confirms the mount and its read-only refusal; if the console reports
 a different target, the adapter value moves and the decision is superseded.
+
+## D100. A folder transfer is one job, and the remote ledger grows to eight rows
+
+**Date:** 2026-11-17
+**Status:** accepted; supersedes D65's six-row maximum and its folder refusal.
+The console rows are PENDING.
+
+**Context:** The v1 plan's R22 and R23 were the last unbuilt requirements. The
+remote ledger was six action rows plus the switch (D65 item 1), and a folder
+source was refused with `FOLDER NOT SUPPORTED`. A tree cannot be one queue
+item per file: the queue holds 64 descriptors, and a second transfer would
+interleave between a walk's listings while the client is briefly `READY`. The
+copy and move model from the local panes did not reach the network boundary.
+
+**Decision:**
+
+1. **One heap job owns the transfer.** A `FolderJob` holds a 4,096-entry plan
+   with a 512 KiB path arena and an iterative directory worklist. Its scan,
+   conflict question, move confirmation, copy, verification, and delete run on
+   the network lane; `pump_queue` and `pump_remote_actions` return while it
+   exists, and every exit reaches one terminal.
+2. **The remote ledger has eight rows.** DOWNLOAD, MOVE, NEW FOLDER, RENAME,
+   DELETE, REFRESH, DISCONNECT, SWITCH. PASTE takes DOWNLOAD's slot while a
+   local clipboard is armed. The panel keeps its 44 px rows and scrolls in
+   whole rows with an indicator.
+3. **Folder sources are valid.** A folder DOWNLOAD or UPLOAD, and a marked set
+   that mixes files and folders, become one plan. The conflict question names
+   up to 16 destinations and counts the rest; an existing destination folder
+   merges, and a folder planned over a file is skipped with
+   `DESTINATION IS A FILE`.
+4. **D65's six-row maximum and its folder refusal are superseded.** The rest of
+   D65 (REFRESH, unsafe names, the upload preflight, download totals, the
+   batch CANCEL) stands.
+
+**Consequences:** The ledger scrolls; `docs/DESIGN.md` and the matrix row that
+says "seven-row ACTIONS" move to eight. The job is one lane owner, so a second
+folder transfer is refused or dimmed while it runs, and a file transfer queues.
+A tree beyond the plan capacity is refused before the first byte.
+
+## D101. A cross-pane move verifies, keeps the copy, and leaves a report
+
+**Date:** 2026-11-17
+**Status:** accepted; supersedes R42's cross-volume rollback clause for
+cross-pane moves. The console rows are PENDING.
+
+**Context:** R42 says a cross-volume move is all-or-nothing: if the source
+delete fails, the destination is removed so the volumes never disagree. A
+cross-pane move is not a rename. Its copy is a network transfer, and removing a
+verified copy after a failed delete discards the only copy the user has while
+the source may already be gone. The plan also needed a durable record of what a
+partial transfer did not move.
+
+**Decision:**
+
+1. **The copy verifies before any delete.** Each destination folder is
+   re-listed and every planned entry must match by exact name and by the bytes
+   the transfer completed for it. An unknown size, a case-only name, a short
+   file, or a failed listing leaves the source in place.
+2. **The delete is bottom-up and all-or-nothing per phase.** `path_check_delete`
+   runs on every source root before the first remove. The delete stops at the
+   first failure or a cancel between commands; that entry's verified copy
+   stays, the undeleted sources are named, and the job ends `MOVED` partial.
+3. **A failed delete never removes a verified copy.** This supersedes R42's
+   cross-volume rollback clause for cross-pane moves; R42's temporary-write and
+   partial rules still govern the copy itself.
+4. **`skipped.txt` records the transfer.** One report goes in the folder above
+   the transferred root: a header naming the direction and both roots, every
+   entry the transfer did not complete, and the reason. It is replaced on every
+   transfer that reaches its copy phase; a cancel before the first byte writes
+   none. A directory is never replaced, and a file the transfer itself wrote
+   under that name takes the free name. A failed report write changes nothing
+   about the transfer and is named in the dock.
+
+**Consequences:** A partial move deliberately leaves duplicates; the report and
+the dock name them. A move on a server that reports no sizes stays a copy. The
+report is a record, not an import; retrying means selecting the entries by
+hand.
+
+## D102. Read-only is per folder, and free space is a preflight
+
+**Date:** 2026-11-17
+**Status:** accepted. The console rows are PENDING.
+
+**Context:** A server can be writable in one folder and not another, and FTP
+answers `550` for a missing path as readily as a denied one. A session-wide
+read-only latch would dim every write after one refused file, and the app's own
+server answers `550` for protected paths. Free space is only proven on `ux0:`
+today; the platform reports unknown for the other volumes.
+
+**Decision:**
+
+1. **Write capability belongs to the current remote folder.** It is read from
+   the folder's own `perm` facts, in a listing's cdir/pdir row or an MLST after
+   connect and after each navigation. A folder that grants no write, create,
+   delete, or mkdir is read-only; UPLOAD, PASTE, MOVE, NEW FOLDER, RENAME, and
+   DELETE dim with `READ ONLY`. A refusal fails only its entry and never marks
+   the folder, and a server that reports no `perm` stays enabled.
+2. **A read-only destination subtree is skipped at the walk.** It is recorded
+   with its reason, so the conflict question and the report stay truthful.
+3. **Every download sums its known bytes before the first byte.** A known
+   shortfall refuses with `NOT ENOUGH SPACE`; an unknown free space skips the
+   check and renders `--`; an unknown size is a lower bound. The per-volume
+   cache is invalidated when a transfer writes to that volume.
+
+**Consequences:** Only `ux0:` reports free space today; the code-freeze pass
+measures whether `uma0:` and `ur0:` can. An unknown folder stays enabled, so a
+server that reports nothing is never dimmed by a guess.

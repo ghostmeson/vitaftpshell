@@ -31,3 +31,4 @@ Link the result here; do not copy the whole plan.
 | Date | Document | State |
 |---|---|---|
 | 2026-11-17 | [Local workspace](2026-11-17-local-workspace.md) | v1 behavior; host-complete, matrix M24-M27 pending (`imc0:` BLOCKED on the PCH-1000) |
+| 2026-11-17 | [Cross-pane folder transfer](2026-11-17-cross-pane-folder-transfer.md) | v1 behavior; host-complete, matrix M28-M32 PENDING |
