@@ -547,11 +547,15 @@ static void test_both_local_hint(void)
 
     static const UiRow volume_rows[] = {
         {.name = "ux0:", .type = UI_ROW_VOLUME},
+        {.name = "app0:", .type = UI_ROW_VOLUME, .readonly = 1},
     };
-    ui_state_set_rows(&s_state, UI_PANE_LOCAL_RIGHT, volume_rows, 1, 0);
+    ui_state_set_rows(&s_state, UI_PANE_LOCAL_RIGHT, volume_rows, 2, 0);
     right->selected = 0;
     render();
     CHECK(trace_text_at("X TO OPEN", 32.0f, 483.0f));
+    /* The read-only mount says so in the value column (R2). */
+    CHECK(trace_has_text("DRIVE RO"));
+    CHECK(trace_has_text("DRIVE"));
 }
 
 int main(void)

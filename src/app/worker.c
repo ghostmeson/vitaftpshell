@@ -253,6 +253,7 @@ static void pump_remote_actions(Worker *worker);
 static void worker_list_local(Worker *worker, UiPane pane, const char *path);
 static void worker_list_root(Worker *worker, UiPane pane);
 static UiPane local_view(const UiCommand *command);
+static int source_in_folder(const char *source, const char *folder);
 static const char *last_name(const char *path);
 static int source_in_folder(const char *source, const char *folder);
 static void queue_pending_action(Worker *worker, const UiCommand *command);
@@ -314,6 +315,31 @@ static UiPane local_view(const UiCommand *command)
     if (command == NULL)
         return UI_PANE_LOCAL;
     return ui_pane_is_local(command->pane) ? command->pane : UI_PANE_LOCAL;
+}
+
+/* Iterate the local views by role instead of repeating the filter-and-skip
+ * rule at every call site (KTD1). */
+static int local_view_count(void)
+{
+    int count = 0;
+    for (int i = 0; i < UI_PANE_COUNT; ++i) {
+        if (ui_pane_is_local((UiPane)i))
+            count++;
+    }
+    return count;
+}
+
+static UiPane local_view_at(int index)
+{
+    int seen = 0;
+    for (int i = 0; i < UI_PANE_COUNT; ++i) {
+        if (!ui_pane_is_local((UiPane)i))
+            continue;
+        if (seen == index)
+            return (UiPane)i;
+        seen++;
+    }
+    return UI_PANE_LOCAL;
 }
 
 static int local_index(UiPane pane)
@@ -489,14 +515,13 @@ static void changed_dir_add_parent(Worker *worker, const char *path)
 /* Reload every local view whose current folder is exactly this folder. */
 static void reload_views_showing(Worker *worker, const char *folder)
 {
-    for (int i = 0; i < UI_PANE_COUNT; ++i) {
-        if (!ui_pane_is_local((UiPane)i))
-            continue;
-        const char *path = worker->local_path[i];
+    for (int n = 0; n < local_view_count(); ++n) {
+        UiPane view = local_view_at(n);
+        const char *path = worker->local_path[view];
         if (strcmp(path, "*") == 0)
             continue;
         if (path_ci_equal(path, folder))
-            worker_list_local(worker, (UiPane)i, path);
+            worker_list_local(worker, view, path);
     }
 }
 
@@ -508,15 +533,14 @@ static void local_batch_complete(Worker *worker)
     if (!worker->local_batch.active)
         return;
     local_batch_emit_done(worker);
-    for (int i = 0; i < UI_PANE_COUNT; ++i) {
-        if (!ui_pane_is_local((UiPane)i))
-            continue;
-        const char *path = worker->local_path[i];
+    for (int n = 0; n < local_view_count(); ++n) {
+        UiPane view = local_view_at(n);
+        const char *path = worker->local_path[view];
         if (strcmp(path, "*") == 0)
             continue;
         for (int c = 0; c < worker->changed_dir_count; ++c) {
             if (path_ci_equal(path, worker->changed_dirs[c].text)) {
-                worker_list_local(worker, (UiPane)i, path);
+                worker_list_local(worker, view, path);
                 break;
             }
         }
@@ -630,17 +654,6 @@ static int preflight_dest(const UiCommand *command, Path *dest)
     return path_join(command->path2, name, dest) == PATH_OK;
 }
 
-/* True when the pasted item already lives in the destination folder: the
- * preflight joins the folder with the source's own name, so a same-folder item
- * resolves to its own canonical path (R16, R20). */
-static int preflight_is_here(const UiCommand *command, const char *dest)
-{
-    Path source;
-    if (path_canonicalize(command->path, &source) != PATH_OK)
-        return 0;
-    return path_ci_equal(dest, source.text);
-}
-
 static void prompt_item_add(Worker *worker, const char *path, uint64_t size,
                             int size_known, int stays)
 {
@@ -743,7 +756,7 @@ static void local_batch_preflight(Worker *worker)
         Path dest;
         if (!preflight_dest(pre, &dest))
             continue;
-        if (preflight_is_here(pre, dest.text))
+        if (source_in_folder(pre->path, pre->path2))
             continue;
         FsEntry entry;
         memset(&entry, 0, sizeof(entry));
@@ -774,7 +787,7 @@ static void local_batch_preflight(Worker *worker)
             Path dest;
             if (!preflight_dest(pre, &dest))
                 continue;
-            if (!preflight_is_here(pre, dest.text))
+            if (!source_in_folder(pre->path, pre->path2))
                 continue;
             FsEntry entry;
             memset(&entry, 0, sizeof(entry));
@@ -806,7 +819,7 @@ static void local_batch_preflight(Worker *worker)
         Path dest;
         if (!preflight_dest(pre, &dest))
             continue;
-        if (!preflight_is_here(pre, dest.text))
+        if (!source_in_folder(pre->path, pre->path2))
             continue;
         prompt_item_add(worker, dest.text, 0, 0, 1);
     }
@@ -1571,7 +1584,7 @@ static void request_local_conflict(Worker *worker, const UiCommand *command,
                                    const FsOpPlan *plan)
 {
     worker->prompt_count = 0;
-    int named = plan->existing_named;
+    int named = plan->existing.named;
     if (named > WORKER_CONFIRM_ITEMS)
         named = WORKER_CONFIRM_ITEMS;
     for (int i = 0; i < named; ++i)
@@ -1812,9 +1825,8 @@ static void request_path_busy(Worker *worker, const UiCommand *command,
     fmt_copy(request.context, sizeof(request.context), "PATH IN USE");
     request.item_count = 1;
     fmt_copy(request.items[0].name, sizeof(request.items[0].name), blocker);
-    confirm_request(worker, &request);
-
     request.pane = local_view(command);
+    confirm_request(worker, &request);
     worker->busy_command = *command;
     worker->busy_plan = plan;
     fmt_copy(worker->busy_blocker, sizeof(worker->busy_blocker), blocker);
@@ -2298,7 +2310,7 @@ static void execute_action(Worker *worker, const UiCommand *command,
         /* The same-folder copy: no step exists until SAVE DUPLICATES answers
          * (R16, KTD6). The item list names what the prompt can show. */
         worker->prompt_count = 0;
-        int named = plan->duplicate_named;
+        int named = plan->duplicate.named;
         if (named > WORKER_CONFIRM_ITEMS)
             named = WORKER_CONFIRM_ITEMS;
         for (int i = 0; i < named; ++i)
@@ -3120,6 +3132,22 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
         if (path_join(destination_dir, name, &dest) != PATH_OK) {
             emit_error(worker, UI_PANE_REMOTE, "LOCAL PATH TOO LONG",
                        OP_CAUSE_APP, OP_STAGE_PLAN);
+            return;
+        }
+        /* Every download entry point shares this refusal: the ACTIONS row
+         * dims earlier, but Cross and a marked set reach the queue directly
+         * (R2). A read-only destination must fail before an item exists. */
+        PathResult writable = path_check_write(dest.text, 0, NULL);
+        if (writable != PATH_OK) {
+            const char *reason = "INVALID PATH";
+            if (writable == PATH_READ_ONLY)
+                reason = "READ-ONLY MOUNT";
+            else if (writable == PATH_PROTECTED)
+                reason = "PROTECTED PATH";
+            else if (writable == PATH_DENIED)
+                reason = "DENIED PATH";
+            emit_error(worker, UI_PANE_REMOTE, reason, OP_CAUSE_APP,
+                       OP_STAGE_PLAN);
             return;
         }
         fmt_copy(item.destination.text, sizeof(item.destination.text),
@@ -4076,10 +4104,10 @@ void worker_start(Worker *worker)
     pick_local_path(worker);
     /* Both local views open at ALL DRIVES. The right local view is listed at
      * start too, so its first switch already has rows (KTD1). */
-    for (int pane = 0; pane < UI_PANE_COUNT; ++pane) {
-        if (ui_pane_is_local((UiPane)pane))
-            fmt_copy(worker->local_path[pane], sizeof(worker->local_path[pane]),
-                     "*");
+    for (int n = 0; n < local_view_count(); ++n) {
+        UiPane view = local_view_at(n);
+        fmt_copy(worker->local_path[view], sizeof(worker->local_path[view]),
+                 "*");
     }
     snprintf(worker->settings.last_local,
              sizeof(worker->settings.last_local), "%s",
@@ -4122,10 +4150,9 @@ void worker_step(Worker *worker)
 
     if (worker->initial_list) {
         worker->initial_list = 0;
-        for (int pane = 0; pane < UI_PANE_COUNT; ++pane) {
-            if (ui_pane_is_local((UiPane)pane))
-                worker_list_local(worker, (UiPane)pane,
-                                  worker->local_path[pane]);
+        for (int n = 0; n < local_view_count(); ++n) {
+            UiPane view = local_view_at(n);
+            worker_list_local(worker, view, worker->local_path[view]);
         }
     }
 

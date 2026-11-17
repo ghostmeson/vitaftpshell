@@ -89,7 +89,7 @@ stateDiagram-v2
 
 - R16. A paste whose items (files or folders) all already live in the destination folder asks SAVE DUPLICATES or CANCEL; CANCEL changes nothing.
 - R17. SAVE DUPLICATES names each item with the existing copy rule (`A copy.TXT`, then `A copy 2.TXT`) and creates no overwrite; a folder duplicates recursively.
-- R18. A same-folder MOVE stays refused with `ALREADY IN THIS FOLDER`.
+- R18. A same-folder MOVE stays refused with `ALREADY HERE`.
 - R19. Any other paste with at least one existing destination asks the existing OVERWRITE ALL, SKIP EXISTING, and CANCEL prompt once; the prompt counts only the destinations that would be replaced, already-here items are named as staying and count as skipped, that batch offers no duplicate choice, and an already-here item in a mixed MOVE stays in place instead of failing the batch.
 - R20. The same-folder question is decided by the destination path, so it fires in either pane, including when the paste is in the other local pane at the folder the items came from.
 

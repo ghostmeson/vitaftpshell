@@ -241,28 +241,26 @@ static void plan_file_copy(FsOpPlan *plan, const char *source,
 static void plan_tree(FsOpPlan *plan, const char *source, const char *dest,
                       const FsOpFacts *facts, FsOpConflict conflict, int move);
 
-static void record_existing(FsOpPlan *plan, const char *dest)
+static void record_named(FsOpNamedPaths *set, const char *path)
 {
-    plan->existing_count++;
-    if (plan->existing_named < FSOP_CONFLICT_NAMES) {
-        snprintf(plan->existing_dest[plan->existing_named].text,
-                 sizeof(plan->existing_dest[plan->existing_named].text),
-                 "%s", dest);
-        plan->existing_named++;
+    set->count++;
+    if (set->named < FSOP_CONFLICT_NAMES) {
+        snprintf(set->items[set->named].text, sizeof(set->items[set->named].text),
+                 "%s", path);
+        set->named++;
     }
 }
 
 /* The duplicate prompt names the item that is already here; a mixed batch
  * converts these records to skipped items instead (R19). */
+static void record_existing(FsOpPlan *plan, const char *dest)
+{
+    record_named(&plan->existing, dest);
+}
+
 static void record_duplicate(FsOpPlan *plan, const char *source)
 {
-    plan->duplicate_count++;
-    if (plan->duplicate_named < FSOP_CONFLICT_NAMES) {
-        snprintf(plan->duplicate_source[plan->duplicate_named].text,
-                 sizeof(plan->duplicate_source[plan->duplicate_named].text),
-                 "%s", source);
-        plan->duplicate_named++;
-    }
+    record_named(&plan->duplicate, source);
 }
 
 static void plan_file_move(FsOpPlan *plan, const char *source, const char *dest,
@@ -578,9 +576,9 @@ static void plan_copy_or_move(FsOpPlan *plan, const FsOpRequest *request)
         } else {
             /* Not every item is here, so the conflict prompt owns the batch;
              * the already-here items stay put and count as skipped (R19). */
-            plan->skipped_count += plan->duplicate_count;
-            plan->duplicate_count = 0;
-            plan->duplicate_named = 0;
+            plan->skipped_count += plan->duplicate.count;
+            plan->duplicate.count = 0;
+            plan->duplicate.named = 0;
         }
     }
 }
@@ -808,16 +806,16 @@ const char *fsop_plan_step_dest(const FsOpPlan *plan, int step)
 
 const char *fsop_plan_existing_dest(const FsOpPlan *plan, int index)
 {
-    if (plan == NULL || index < 0 || index >= plan->existing_named)
+    if (plan == NULL || index < 0 || index >= plan->existing.named)
         return "";
-    return plan->existing_dest[index].text;
+    return plan->existing.items[index].text;
 }
 
 const char *fsop_plan_duplicate_source(const FsOpPlan *plan, int index)
 {
-    if (plan == NULL || index < 0 || index >= plan->duplicate_named)
+    if (plan == NULL || index < 0 || index >= plan->duplicate.named)
         return "";
-    return plan->duplicate_source[index].text;
+    return plan->duplicate.items[index].text;
 }
 
 const char *fsop_plan_rollback_from(const FsOpPlan *plan, int rollback)

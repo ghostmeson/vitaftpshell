@@ -166,7 +166,7 @@ static void test_same_folder(void)
     CHECK(s_plan.ok == 1);
     CHECK(s_plan.needs_duplicate == 1);
     CHECK(s_plan.needs_conflict == 0);
-    CHECK(s_plan.duplicate_count == 1);
+    CHECK(s_plan.duplicate.count == 1);
     CHECK(strcmp(fsop_plan_duplicate_source(&s_plan, 0),
                  "ux0:data/A.TXT") == 0);
     CHECK(s_plan.step_count == 0);
@@ -388,7 +388,7 @@ static void test_batch_conflict(void)
     CHECK(fsop_plan_build(&s_plan, &ask) == 1);
     CHECK(s_plan.ok == 1);
     CHECK(s_plan.needs_conflict == 1);
-    CHECK(s_plan.existing_count == 2);
+    CHECK(s_plan.existing.count == 2);
     CHECK(s_plan.step_count == 0);
 
     FsOpRequest overwrite = {FSOP_COPY, sources, 5, "ur0:data", &f,
@@ -560,7 +560,7 @@ static void test_rename_and_mkdir(void)
                        FSOP_CONFLICT_ASK};
     CHECK(fsop_plan_build(&s_plan, &ask) == 1);
     CHECK(s_plan.needs_conflict == 1);
-    CHECK(s_plan.existing_count == 1);
+    CHECK(s_plan.existing.count == 1);
     CHECK(strcmp(fsop_plan_existing_dest(&s_plan, 0), "ur0:tai/b.txt") == 0);
     FsOpRequest skip = ask;
     skip.conflict = FSOP_CONFLICT_SKIP;

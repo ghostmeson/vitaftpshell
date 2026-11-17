@@ -87,6 +87,14 @@ typedef struct {
     uint32_t to_off;
 } FsOpRollback;
 
+/* One recorded set of named paths: the replacement list for the conflict
+ * prompt, or the already-here list for the duplicate prompt. */
+typedef struct {
+    int count;
+    int named;
+    Path items[FSOP_CONFLICT_NAMES];
+} FsOpNamedPaths;
+
 typedef struct {
     FsOpKind kind;
     FsOpStep steps[FSOP_STEP_MAX];
@@ -99,18 +107,14 @@ typedef struct {
 
 
     int needs_conflict;
-    int existing_count;
     int skipped_count;
-    Path existing_dest[FSOP_CONFLICT_NAMES];
-    int existing_named;
+    FsOpNamedPaths existing;
 
     /* A same-folder COPY under ASK: every item already lives in the
      * destination, so the caller asks SAVE DUPLICATES or CANCEL and no step
      * exists until the answer arrives (R16, KTD6). */
     int needs_duplicate;
-    int duplicate_count;
-    Path duplicate_source[FSOP_CONFLICT_NAMES];
-    int duplicate_named;
+    FsOpNamedPaths duplicate;
 
     int item_count;
     int file_count;

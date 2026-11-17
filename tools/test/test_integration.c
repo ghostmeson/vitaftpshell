@@ -37,6 +37,44 @@ static FakePeer *peer_new(void)
     return peer;
 }
 
+static App *start_app(void)
+{
+    AppPorts ports;
+    ports.net = fake_net_port();
+    ports.fs = fake_fs_port();
+    ports.input = fake_input_port();
+    ports.ime = fake_ime_port();
+    ports.clock = fake_clock_port();
+    ports.log = fake_log_port();
+    /* The host stand-in for the adapter-owned install-tree value (D99). */
+    ports.install_alias = "ux0:app/VFTPSHELL";
+
+    App *app = app_create(&ports, 0);
+    CHECK(app != NULL);
+    if (app != NULL)
+        CHECK(app_start(app) == 1);
+    return app;
+}
+
+/* Every user-visible mount, so the ALL DRIVES listing and its read-only
+ * flags can be asserted (R1, R2). */
+static App *make_app_all_mounts(void)
+{
+    fake_net_reset();
+    fake_fs_reset();
+    fake_clock_reset();
+    fake_input_reset();
+    fake_ime_reset();
+    fake_log_reset();
+
+    static const char *const mounts[] = {"ux0:",  "ur0:",  "uma0:", "imc0:",
+                                         "gro0:", "grw0:", "app0:"};
+    for (int i = 0; i < 7; ++i)
+        fake_fs_add_dir(mounts[i]);
+    fake_fs_add_dir("ux0:data");
+    return start_app();
+}
+
 static App *make_app_ex(const char *seed_path, const char *seed_text,
                         const char *seed_dir, const char *seed_path2,
                         const char *seed_text2)
@@ -59,19 +97,7 @@ static App *make_app_ex(const char *seed_path, const char *seed_text,
     if (seed_dir != NULL)
         fake_fs_add_dir(seed_dir);
 
-    AppPorts ports;
-    ports.net = fake_net_port();
-    ports.fs = fake_fs_port();
-    ports.input = fake_input_port();
-    ports.ime = fake_ime_port();
-    ports.clock = fake_clock_port();
-    ports.log = fake_log_port();
-
-    App *app = app_create(&ports, 0);
-    CHECK(app != NULL);
-    if (app != NULL)
-        CHECK(app_start(app) == 1);
-    return app;
+    return start_app();
 }
 
 static App *make_app(void)
@@ -2227,6 +2253,40 @@ static void test_upload_preflight_refresh_once_per_item(void)
     app_destroy(app);
 }
 
+/* A download that lands on a read-only mount is refused before an item
+ * exists, with the mount reason rather than a generic transfer failure (R2). */
+static void test_download_read_only_destination(void)
+{
+    App *app = make_app_ex(NULL, NULL, "app0:", NULL, NULL);
+    if (app == NULL)
+        return;
+
+    pump(app, NULL, 10);
+    /* app0: is a volume root, so it has no parent row; one file gives the
+     * listing a row and leaves BIG.BIN free to name the refused destination. */
+    fake_fs_seed_file("app0:PLACE.TXT", "P", 1);
+    open_view_path(app, UI_PANE_LOCAL, "app0:");
+
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+    select_remote(app);
+
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_SQUARE));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    pump(app, peer, 30);
+
+    CHECK(app_state(app)->dock.active == 0);
+    CHECK(app_state(app)->dock.state == UI_DOCK_IDLE);
+    CHECK(strstr(app_state(app)->status, "READ-ONLY MOUNT") != NULL);
+    CHECK(!fake_fs_exists("app0:BIG.BIN"));
+    CHECK(!fake_fs_exists("app0:BIG.BIN.vftp.part"));
+
+    fake_peer_destroy(peer);
+    app_destroy(app);
+}
+
 static void test_download_conflict(void)
 {
     App *app = make_app_ex("ux0:data/TEST.BIN", "OLD!!", NULL, NULL, NULL);
@@ -3132,7 +3192,7 @@ static void test_local_rename_conflict(void)
  * first switch has rows without a reducer command. */
 static void test_third_local_view_at_start(void)
 {
-    App *app = make_app();
+    App *app = make_app_all_mounts();
     if (app == NULL)
         return;
 
@@ -3141,8 +3201,18 @@ static void test_third_local_view_at_start(void)
         (void)app_tick(app);
 
     CHECK(strcmp(right->path, "*") == 0);
-    CHECK(right->row_count > 0);
-    CHECK(app_state(app)->panes[UI_PANE_LOCAL].row_count > 0);
+    /* ALL DRIVES is the volume table in order, with the read-only mounts
+     * marked on the row (R1, R2). */
+    static const char *const names[] = {"ux0:",  "ur0:",  "uma0:", "imc0:",
+                                        "gro0:", "grw0:", "app0:"};
+    CHECK(right->row_count == 7);
+    for (int i = 0; i < 7 && i < right->row_count; ++i) {
+        CHECK(strcmp(right->rows[i].name, names[i]) == 0);
+        int ro = strcmp(names[i], "app0:") == 0 ||
+                 strcmp(names[i], "gro0:") == 0;
+        CHECK(right->rows[i].readonly == ro);
+    }
+    CHECK(app_state(app)->panes[UI_PANE_LOCAL].row_count == 7);
     CHECK(right->rows != app_state(app)->panes[UI_PANE_LOCAL].rows);
     CHECK(right->connected == 1);
 
@@ -3634,6 +3704,7 @@ static void test_hidden_local_view_falls_back_when_shown(void)
 int main(void)
 {
     test_download_destination_failure();
+    test_download_read_only_destination();
     test_two_lanes_progress();
     test_two_cancel_presses();
     test_wait_resume_rechecks();

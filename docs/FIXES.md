@@ -27,8 +27,8 @@ passes.
 
 ## Current state
 
-- **Current artifact:** `vitaftpshell-v01.00-b74.vpk`, 265,736 bytes,
-  SHA-256 `b25a5af7650ea1b1adbca512caeb70bc66827fecde3ab0032ba38d5a0d3e4046`.
+- **Current artifact:** `vitaftpshell-v01.00-b77.vpk`, 269,901 bytes,
+  SHA-256 `a173b76b7b1afedf6ef2666017a50462a8b73d5a0e2dd672715acf262480bc91`.
 - **Latest hardware-observed build:** b60 (operator report, 2026-11-15):
   FileZilla upload and download work with two sessions; the app-local client
   transfers on all three volumes. The session log is `logs/session-b60.log`.
@@ -45,7 +45,7 @@ passes.
 - **Matrix:** the b58 self-connection upload and download pass on hardware.
   b60 accepts up to four clients with one data transfer at a time (D86);
   FileZilla's browse and transfer connections both connect, and its upload and
-  download pass. b61-b74 are the current line, and none of them has run on
+  download pass. b61-b77 are the current line, and none of them has run on
   hardware since b60. M5 remains PART only for a FileZilla rename/delete and
   the full three-volume browse; M10 and M13 are partly observed; every other
   row awaits the code-freeze pass (D95).
@@ -63,6 +63,24 @@ below are defects this pass fixed.
 | b76 | **The stick scrolled the view while the cursor stayed behind.** | The input layer reduced the stick to a sign and the reducer moved only the scroll, so the next D-pad press jumped the view back to the cursor. The input now carries a signed 1-5 step computed from the deflection, the reducer moves the selection and scrolls to keep it visible, and the workspace and the site book wrap at both ends (D97). | `test_input`, `test_uistate`, `test_integration`; host run | `HOST b76` |
 | b76 | **A same-folder paste never reached the duplicate question, and the copy-name rule lived in two places.** | The preflight compared the source's parent with the destination by `strcmp`, so a same-folder item was treated as a non-replacement and skipped before the prompt; the planner also built `A copy.TXT` from a private rule that could disagree with the worker's candidate list. The preflight now uses the canonical same-path identity, one exported copy-name function serves the prompt, the preflight, and the plan, and a self-copy step is never planned (D98). | `test_fsop_plan`, `test_integration`, `test_uistate`; host run | `HOST b76` |
 | b76 | **A lost remote view swallowed the keys that reach the switch.** | The session-lost interception ran before the screen keys, so ACTIONS, Select, and Start were consumed and the right pane's `SWITCH TO LOCAL` row could not be reached from a lost session. The screen keys now run first (D97). | `test_uistate`, `test_integration`; host run | `HOST b76` |
+
+## Code review (b77, host)
+
+The seven-reviewer pass over `8233329..4c92b0c` and its confirmed findings. The
+artifact is `vitaftpshell-v01.00-b77.vpk` (269,901 bytes, SHA-256 `a173b76b…`).
+The review rejected three findings as a pre-existing discard, an unreachable
+alias move, and a refactoring preference; the rows below are the confirmed or
+actionable fixes.
+
+| Build | Symptom | Cause and fix | Evidence | Status |
+|---|---|---|---|---|
+| b77 | **A completed reconnect left the keyboard and ACTIONS on the hidden local view.** | `UI_EVT_SESSION_OK` switched `right_view` to remote but re-homed `active_pane` only when SITES was in front, so a reconnect that finished while the right pane showed the local view left every list key editing an invisible pane. The reducer now moves `active_pane` off `UI_PANE_LOCAL_RIGHT` whenever the remote view replaces it (KTD1). | `test_uistate`; host run | `HOST b77` |
+| b77 | **The diff's only new `[C]` claim lived in core policy.** | `PATH_APP0_ALIAS` was compiled into `src/core/path.c`, against the rule that unverified Vita facts stay in an adapter. The value now lives in `psp2_fs.c` and reaches policy through `path_set_install_alias` from the composition root; with no value supplied, the alias fails closed (D99). | `test_path`, `test_fsop_plan`; host run | `HOST b77` |
+| b77 | **A download to a read-only mount queued first and reported `TRANSFER REFUSED`.** | Only the ACTIONS DOWNLOAD row checked the destination; Cross and a marked set reached the queue directly. `enqueue_transfer` now checks the joined destination and refuses with `READ-ONLY MOUNT` before an item exists (R2). | `test_integration`; host run | `HOST b77` |
+| b77 | **A cancel or a lost session left `dock.queued` stale, so Down entered a dead dock.** | The cancel terminal cleared `active` but not `queued`, and a terminal after SESSION_LOST recomputed the depth from the dropped queue. The cancel now clears the depth, and a terminal on a disconnected session keeps it at zero (R24). | `test_uistate`; host run | `HOST b77` |
+| b77 | **The PATH BUSY prompt always carried the left pane.** | `request_path_busy` pushed the confirm by value before assigning `request.pane`, so the routing line was a dead store. The pane is assigned before the push. | `test_uistate`, `test_integration`; host run | `HOST b77` |
+| b77 | **The seven-mount listing and `DRIVE RO` had no assertion.** | The only ALL DRIVES check was `row_count > 0`. The integration suite now seeds all seven mounts and asserts their table order and read-only flags; the render suite asserts `DRIVE RO`. | `test_integration`, `test_render_workspace`; host run | `HOST b77` |
+| b77 | **Review cleanups: duplicated local-view loops, two same-folder predicates, two named-path records, a pass-through wrapper, a magic token length.** | One `FsOpNamedPaths` record serves both prompt kinds; `local_view_count`/`local_view_at` own the view iteration; the preflight uses `source_in_folder`; the dead wrapper is deleted and the `app0:` token length is named. | `test_fsop_plan`, `test_integration`, `test_uistate`; host run | `HOST b77` |
 
 ## Network closure (b73-b74, host)
 
