@@ -240,6 +240,40 @@ static void test_dock_states(void)
     CHECK(trace_has_text("50 B OF --"));
     CHECK(trace_has_text_color("--", C_WHITE));
 
+    /* KTD5/R24: the folder job's phase word comes first and hides the bar. */
+    memset(&s_state.dock, 0, sizeof(s_state.dock));
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    s_state.dock.active = 1;
+    s_state.dock.direction = XFER_DIR_DOWNLOAD;
+    snprintf(s_state.dock.name, sizeof(s_state.dock.name), "SRC");
+    s_state.dock.item_total = 3;
+    s_state.dock.phase = XFER_PHASE_SCAN;
+    s_state.dock.phase_known = 1;
+    render();
+    CHECK(trace_text_at_color("SCANNING", 32.0f, 450.0f, C_YELLOW));
+
+    s_state.dock.phase = XFER_PHASE_VERIFY;
+    render();
+    CHECK(trace_text_at_color("VERIFYING", 32.0f, 450.0f, C_YELLOW));
+
+    s_state.dock.phase = XFER_PHASE_DELETE;
+    s_state.dock.item_total = 5;
+    render();
+    CHECK(trace_text_at_color("DELETING", 32.0f, 450.0f, C_YELLOW));
+
+    /* A verified move's terminal is MOVED. */
+    memset(&s_state.dock, 0, sizeof(s_state.dock));
+    s_state.dock.state = UI_DOCK_DONE;
+    s_state.dock.direction = XFER_DIR_DOWNLOAD;
+    s_state.dock.move = 1;
+    s_state.dock.phase = XFER_PHASE_DELETE;
+    s_state.dock.phase_known = 1;
+    snprintf(s_state.dock.name, sizeof(s_state.dock.name), "SRC");
+    s_state.dock.item_index = 1;
+    s_state.dock.item_total = 1;
+    render();
+    CHECK(trace_text_at_color("MOVED", 32.0f, 450.0f, C_GREEN));
+
     memset(&s_state.dock, 0, sizeof(s_state.dock));
     s_state.dock.state = UI_DOCK_DONE;
     s_state.dock.direction = XFER_DIR_DOWNLOAD;

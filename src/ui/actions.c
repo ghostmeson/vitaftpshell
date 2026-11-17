@@ -46,13 +46,13 @@ static const char *action_label(UiAction action)
     }
 }
 
-static const char *action_desc(UiAction action, UiClipMode clip)
+static const char *action_desc(UiAction action, UiClipMode clip, int local)
 {
     switch (action) {
     case UI_ACTION_COPY:
         return "TO CLIPBOARD";
     case UI_ACTION_MOVE:
-        return "TO CLIPBOARD";
+        return local ? "TO CLIPBOARD" : "TO LOCAL PANE";
     case UI_ACTION_PASTE:
         return clip == UI_CLIP_MOVE ? "MOVE HERE" : "COPY HERE";
     case UI_ACTION_CLEAR_CLIPBOARD:
@@ -79,13 +79,15 @@ static const char *action_desc(UiAction action, UiClipMode clip)
     }
 }
 
-static const char *action_consequence(UiAction action, UiClipMode clip)
+static const char *action_consequence(UiAction action, UiClipMode clip,
+                                      int local)
 {
     switch (action) {
     case UI_ACTION_COPY:
         return "MARKS OR THIS ITEM TO CLIPBOARD. THEN PASTE.";
     case UI_ACTION_MOVE:
-        return "MARKS OR THIS ITEM TO CLIPBOARD. THEN PASTE.";
+        return local ? "MARKS OR THIS ITEM TO CLIPBOARD. THEN PASTE."
+                     : "DELETES THE SOURCE AFTER THE COPY VERIFIES.";
     case UI_ACTION_PASTE:
         return clip == UI_CLIP_MOVE
                    ? "MOVES THE CLIPBOARD INTO THIS FOLDER."
@@ -128,13 +130,13 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
 {
     const UiActions *actions = &state->actions;
     UiPane pane = (UiPane)actions->pane;
+    int local = ui_pane_is_local(pane);
 
     Rect panel = {(float)r->x, (float)r->y, (float)r->w, (float)r->h};
     ui_panel_frame(panel, 0, C_CYAN);
 
-    font_text_tracked(ui_pane_is_local(pane) ? "LOCAL ACTIONS"
-                                             : "REMOTE ACTIONS",
-                      32.0f, 84.0f, PX_LABEL, C_DIM, 2.0f);
+    font_text_tracked(local ? "LOCAL ACTIONS" : "REMOTE ACTIONS", 32.0f, 84.0f,
+                      PX_LABEL, C_DIM, 2.0f);
     font_text(actions->path, 32.0f, 102.0f, PX_MICRO, C_CYAN);
 
     char band[40];
@@ -174,10 +176,27 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
         count = UI_ACTION_COUNT;
     }
 
-    for (int i = 0; i < count; ++i) {
+    /* KTD6: clip whole rows to the panel bottom. Seven 44 px rows fit; the
+     * remote ledger's eighth is reachable by scrolling. */
+    const float row_top = 124.0f;
+    const float row_pitch = 44.0f;
+    int fit = (int)(((float)(r->y + r->h) - row_top) / row_pitch);
+    if (fit < 1)
+        fit = 1;
+    int first = actions->first;
+    if (first < 0)
+        first = 0;
+    if (first >= count)
+        first = count > 0 ? count - 1 : 0;
+    int shown = count - first;
+    if (shown > fit)
+        shown = fit;
+
+    for (int row = 0; row < shown; ++row) {
+        int i = first + row;
         UiAction action =
             (UiAction)(actions->visible_count > 0 ? actions->visible[i] : i);
-        float y = 124.0f + (float)i * 44.0f;
+        float y = row_top + (float)row * row_pitch;
         int selected = action == (UiAction)actions->selected;
         int enabled = actions->enabled[action];
 
@@ -188,7 +207,7 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
                   selected ? C_FIELD : (enabled ? C_WHITE : C_DIM));
 
         const char *desc =
-            enabled ? action_desc(action, state->clip_mode)
+            enabled ? action_desc(action, state->clip_mode, local)
                     : actions->reason[action];
         uint32_t desc_color =
             selected ? C_FIELD
@@ -197,8 +216,22 @@ static void ledger_draw(const UiState *state, const LayoutRect *r)
                             : C_DIM);
         font_text(desc != NULL && desc[0] != '\0'
                       ? desc
-                      : action_desc(action, state->clip_mode),
+                      : action_desc(action, state->clip_mode, local),
                   50.0f, y + 23.0f, PX_MICRO, desc_color);
+    }
+
+    if (count > fit) {
+        float track_y = row_top;
+        float track_h = (float)fit * row_pitch;
+        float thumb = track_h * (float)fit / (float)count;
+        if (thumb < 24.0f)
+            thumb = 24.0f;
+        float max_first = (float)(count - fit);
+        float pos = (track_h - thumb) * (float)first /
+                    (max_first > 0.0f ? max_first : 1.0f);
+        float x = (float)(r->x + r->w) - 6.0f;
+        draw_rect(x, track_y, 2.0f, track_h, C_HAIR);
+        draw_rect(x, track_y + pos, 2.0f, thumb, C_DIM);
     }
 }
 
@@ -227,9 +260,12 @@ static void target_draw(const UiState *state, const LayoutRect *r)
 {
     const UiActions *actions = &state->actions;
     UiPane pane = (UiPane)actions->pane;
+    int local = ui_pane_is_local(pane);
     UiAction selected = (UiAction)actions->selected;
     int switches = selected == UI_ACTION_SWITCH_LOCAL ||
                    selected == UI_ACTION_SWITCH_REMOTE;
+    int clipboard_row = selected == UI_ACTION_COPY ||
+                        (selected == UI_ACTION_MOVE && local);
 
     Rect panel = {(float)r->x, (float)r->y, (float)r->w, (float)r->h};
     ui_panel_frame(panel, 0, C_CYAN);
@@ -289,19 +325,31 @@ static void target_draw(const UiState *state, const LayoutRect *r)
     ui_hair(596.0f, 210.0f, 332.0f);
 
     font_text("DESTINATION", 596.0f, 224.0f, PX_MICRO, C_DIM);
+    int targets_other =
+        selected == UI_ACTION_UPLOAD ||
+        (!local && (selected == UI_ACTION_DOWNLOAD ||
+                    selected == UI_ACTION_MOVE));
     const char *destination =
         selected == UI_ACTION_DISCONNECT || switches
             ? "--"
-            : ((selected == UI_ACTION_COPY || selected == UI_ACTION_MOVE)
-                   ? "CLIPBOARD"
-                   : (ui_pane_is_local(pane) ? actions->dest : actions->other));
+            : (clipboard_row ? "CLIPBOARD"
+                             : (targets_other ? actions->other
+                                              : actions->dest));
     font_text_right(destination, 928.0f, 224.0f, PX_MICRO, C_CYAN);
 
     font_text(action_label(selected), 596.0f, 300.0f, PX_LABEL, C_WHITE);
     char consequence[128];
-    font_fit(action_consequence(selected, state->clip_mode), PX_MICRO,
-             344.0f, consequence, sizeof(consequence));
-    font_text(consequence, 596.0f, 320.0f, PX_MICRO, C_DIM);
+    if (selected == UI_ACTION_MOVE && !local) {
+        /* R10 names this consequence in full; it is wider than the panel's
+         * one-line fit, so it wraps as two micro lines. */
+        font_text("DELETES THE SOURCE AFTER", 596.0f, 320.0f, PX_MICRO,
+                  C_DIM);
+        font_text("THE COPY VERIFIES.", 596.0f, 332.0f, PX_MICRO, C_DIM);
+    } else {
+        font_fit(action_consequence(selected, state->clip_mode, local),
+                 PX_MICRO, 344.0f, consequence, sizeof(consequence));
+        font_text(consequence, 596.0f, 320.0f, PX_MICRO, C_DIM);
+    }
 
     if (actions->marked > 1)
         font_text("MARKS STAY AFTER THE OPERATION", 596.0f, 400.0f, PX_MICRO,

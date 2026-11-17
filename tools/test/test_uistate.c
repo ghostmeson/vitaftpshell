@@ -398,10 +398,16 @@ static void test_marks(void)
     CHECK(s_state.panes[UI_PANE_LOCAL].marked_bytes == 10);
     CHECK(s_state.panes[UI_PANE_LOCAL].marked_bytes_known == 1);
 
-    /* A folder is refused, never queued as one RETR/STOR (D65). */
+    /* A marked set with a folder is a valid transfer: one command per mark,
+     * stamped as one batch so the worker can build one plan (R1, U5). */
     send_key(UI_KEY_CROSS);
-    CHECK(s_command_count == 0);
-    CHECK(strcmp(s_state.status, "FOLDER TRANSFER NOT SUPPORTED") == 0);
+    CHECK(s_command_count == 2);
+    CHECK(s_commands[0].type == UI_CMD_TRANSFER);
+    CHECK(strcmp(s_commands[0].path, "ux0:data/folder") == 0);
+    CHECK(s_commands[0].source_type == UI_ROW_DIR);
+    CHECK(s_commands[0].batch_total == 2 && s_commands[0].batch_last == 0);
+    CHECK(s_commands[1].batch_total == 2 && s_commands[1].batch_last == 1);
+    CHECK(strcmp(s_state.status, "FOLDER TRANSFER NOT SUPPORTED") != 0);
 
     /* Drop the folder mark and transfer the file alone. */
     send_key(UI_KEY_UP);
@@ -1983,8 +1989,9 @@ static void test_action_switch(void)
     send_key(UI_KEY_L1);
     send_key(UI_KEY_TRIANGLE);
     CHECK(s_state.actions.pane == UI_PANE_REMOTE);
-    CHECK(s_state.actions.visible_count == 7);
-    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.visible_count == 8);
+    CHECK(s_state.actions.visible[6] == UI_ACTION_DISCONNECT);
+    CHECK(s_state.actions.visible[7] == UI_ACTION_SWITCH_LOCAL);
     CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
 
     /* The switch is reducer-only: no command, the new view is active, and
@@ -2017,8 +2024,8 @@ static void test_action_switch(void)
     s_state.panes[UI_PANE_REMOTE].connected = 0;
     send_key(UI_KEY_TRIANGLE);
     CHECK(s_state.screen == UI_SCREEN_ACTIONS);
-    CHECK(s_state.actions.visible_count == 7);
-    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.visible_count == 8);
+    CHECK(s_state.actions.visible[7] == UI_ACTION_SWITCH_LOCAL);
     CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
 
     /* A lost remote view keeps the prepared switch row reachable. */
@@ -2029,8 +2036,8 @@ static void test_action_switch(void)
     s_state.panes[UI_PANE_REMOTE].session_lost = 1;
     ui_actions_prepare(&s_state);
     CHECK(s_state.screen == UI_SCREEN_ACTIONS);
-    CHECK(s_state.actions.visible_count == 7);
-    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.visible_count == 8);
+    CHECK(s_state.actions.visible[7] == UI_ACTION_SWITCH_LOCAL);
     CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
     s_state.actions.selected = UI_ACTION_SWITCH_LOCAL;
     send_key(UI_KEY_CROSS);
@@ -2381,10 +2388,9 @@ static void test_screen_keys_on_lost_view(void)
     CHECK(s_state.panes[UI_PANE_REMOTE].session_lost == 1);
 
     send_key(UI_KEY_TRIANGLE);
-    CHECK(s_state.screen == UI_SCREEN_ACTIONS);
     CHECK(s_state.actions.pane == UI_PANE_REMOTE);
-    CHECK(s_state.actions.visible_count == 7);
-    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.visible_count == 8);
+    CHECK(s_state.actions.visible[7] == UI_ACTION_SWITCH_LOCAL);
     CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
     s_state.actions.selected = UI_ACTION_SWITCH_LOCAL;
     send_key(UI_KEY_CROSS);
@@ -2604,7 +2610,8 @@ static void test_remote_unsafe_and_folder(void)
     send_key(UI_KEY_UP);
     CHECK(s_state.panes[UI_PANE_REMOTE].error[0] == '\0');
 
-    /* A folder is refused, never sent as one RETR. */
+    /* A folder is a valid source now: recursion replaces D65's refusal
+     * (R1, R22/R23). */
     reset();
     UiRow folder[] = {
         {.name = "..", .type = UI_ROW_UP},
@@ -2614,16 +2621,18 @@ static void test_remote_unsafe_and_folder(void)
     send_key(UI_KEY_L1);
     s_state.panes[UI_PANE_REMOTE].selected = 1;
     send_key(UI_KEY_TRIANGLE);
-    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 1);
     CHECK(strcmp(s_state.actions.reason[UI_ACTION_DOWNLOAD],
-                 "FOLDER NOT SUPPORTED") == 0);
+                 "FOLDER NOT SUPPORTED") != 0);
+    send_key(UI_KEY_CIRCLE);
 
     reset();
     s_state.panes[UI_PANE_LOCAL].selected = 1; /* folder */
     send_key(UI_KEY_TRIANGLE);
-    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_UPLOAD] == 1);
     CHECK(strcmp(s_state.actions.reason[UI_ACTION_UPLOAD],
-                 "FOLDER NOT SUPPORTED") == 0);
+                 "FOLDER NOT SUPPORTED") != 0);
 }
 
 static void test_cursor_copy_folder(void)
@@ -2910,13 +2919,16 @@ static void test_folder_move_prompt_and_dock(void)
     s_confirm_items[0].name = "SRC";
     s_confirm_items[0].size = 0;
     s_confirm_items[0].size_known = 0;
+    s_confirm_items[1].name = "OTHER";
+    s_confirm_items[1].size = 0;
+    s_confirm_items[1].size_known = 0;
     UiStateEvent event;
     memset(&event, 0, sizeof(event));
     event.kind = UI_EVT_CONFIRM_REQUEST;
     event.confirm = UI_CONFIRM_MOVE;
     event.pane = UI_PANE_REMOTE;
     event.items = s_confirm_items;
-    event.item_count = 1;
+    event.item_count = 2;
     snprintf(event.text, sizeof(event.text), "4 ENTRIES");
     send_event(&event);
 
@@ -2924,6 +2936,9 @@ static void test_folder_move_prompt_and_dock(void)
     CHECK(s_state.confirm.kind == UI_CONFIRM_MOVE);
     CHECK(strcmp(s_state.confirm.title, "MOVE") == 0);
     CHECK(strcmp(s_state.confirm.context, "4 ENTRIES") == 0);
+    CHECK(s_state.confirm.item_count == 2);
+    CHECK(strcmp(s_state.confirm.items[0].name, "SRC") == 0);
+    CHECK(strcmp(s_state.confirm.items[1].name, "OTHER") == 0);
     CHECK(strstr(s_state.confirm.warning, "NO SOURCE IS DELETED") != NULL);
     CHECK(s_state.confirm.choices[0] == UI_CHOICE_CANCEL);
     CHECK(s_state.confirm.choices[1] == UI_CHOICE_MOVE);
@@ -2967,6 +2982,297 @@ static void test_folder_move_prompt_and_dock(void)
     CHECK(s_state.dock.phase == XFER_PHASE_DELETE);
 }
 
+/* KTD6/R10: the remote ledger has eight rows in an explicit order and scrolls
+ * one whole row at a time; the local ledger keeps its seven. */
+static void test_remote_ledger_order_and_scroll(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    send_key(UI_KEY_TRIANGLE);
+    static const UiAction order[] = {
+        UI_ACTION_DOWNLOAD,   UI_ACTION_MOVE,       UI_ACTION_NEW_FOLDER,
+        UI_ACTION_RENAME,     UI_ACTION_DELETE,     UI_ACTION_REFRESH,
+        UI_ACTION_DISCONNECT, UI_ACTION_SWITCH_LOCAL,
+    };
+    CHECK(s_state.actions.visible_count == 8);
+    for (int i = 0; i < 8; ++i)
+        CHECK(s_state.actions.visible[i] == (int)order[i]);
+    CHECK(s_state.actions.first == 0);
+
+    for (int i = 0; i < 7; ++i)
+        send_key(UI_KEY_DOWN);
+    CHECK(s_state.actions.selected == UI_ACTION_SWITCH_LOCAL);
+    CHECK(s_state.actions.first == 1);
+
+    send_key(UI_KEY_UP);
+    CHECK(s_state.actions.selected == UI_ACTION_DISCONNECT);
+    CHECK(s_state.actions.first == 1);
+    for (int i = 0; i < 6; ++i)
+        send_key(UI_KEY_UP);
+    CHECK(s_state.actions.selected == UI_ACTION_DOWNLOAD);
+    CHECK(s_state.actions.first == 0);
+
+    /* The left local ledger is unchanged: six rows, no switch. */
+    reset();
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.visible_count == 6);
+    CHECK(s_state.actions.visible[0] == UI_ACTION_COPY);
+    CHECK(s_state.actions.visible[1] == UI_ACTION_MOVE);
+    CHECK(s_state.actions.visible[2] == UI_ACTION_UPLOAD);
+    CHECK(s_state.actions.visible[5] == UI_ACTION_DELETE);
+    CHECK(!visible_has(UI_ACTION_SWITCH_LOCAL));
+    CHECK(s_state.actions.first == 0);
+
+    /* The right local view keeps its seven rows and its switch. */
+    reset();
+    s_state.right_view = UI_PANE_LOCAL_RIGHT;
+    s_state.active_pane = UI_PANE_LOCAL_RIGHT;
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.visible_count == 7);
+    CHECK(s_state.actions.visible[6] == UI_ACTION_SWITCH_REMOTE);
+}
+
+/* R10/R12: the remote MOVE row is live for a file and a folder, reaches the
+ * left local view, and dims with the two read-only reasons. */
+static void test_remote_move_actions(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 2; /* B.BIN */
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.visible[1] == UI_ACTION_MOVE);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 1);
+
+    s_state.actions.selected = UI_ACTION_MOVE;
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_RUN_ACTION) != NULL);
+    CHECK(command(UI_CMD_RUN_ACTION)->action == UI_ACTION_DOWNLOAD);
+    CHECK(command(UI_CMD_RUN_ACTION)->move == 1);
+    CHECK(strcmp(command(UI_CMD_RUN_ACTION)->path, "/B.BIN") == 0);
+    CHECK(strcmp(command(UI_CMD_RUN_ACTION)->path2, "ux0:data") == 0);
+
+    /* A folder is a source too. */
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 1; /* REMOTE, a folder */
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 1);
+
+    /* R12: the left local volume is read-only, so a move has nowhere to land. */
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    snprintf(s_state.panes[UI_PANE_LOCAL].path,
+             sizeof(s_state.panes[UI_PANE_LOCAL].path), "app0:data");
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_MOVE],
+                 "READ-ONLY MOUNT") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DOWNLOAD],
+                 "READ-ONLY MOUNT") == 0);
+
+    /* R18: the source folder grants no write. */
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    s_state.panes[UI_PANE_REMOTE].perm_known = 1;
+    s_state.panes[UI_PANE_REMOTE].perm_mask = 0;
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_MOVE], "READ ONLY") == 0);
+}
+
+/* R10/R19: PASTE takes DOWNLOAD's row while a local clipboard is armed, reads
+ * READ ONLY in a read-only folder, and CLEAR restores DOWNLOAD. */
+static void test_remote_paste_slot(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.clip_mode = UI_CLIP_COPY;
+    s_state.clip_count = 1;
+    snprintf(s_state.clip_paths[0].text, sizeof(s_state.clip_paths[0].text),
+             "ux0:data/A.TXT");
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.visible_count == 8);
+    CHECK(s_state.actions.visible[0] == UI_ACTION_PASTE);
+    CHECK(!visible_has(UI_ACTION_DOWNLOAD));
+    CHECK(s_state.actions.selected == UI_ACTION_PASTE);
+
+    s_state.panes[UI_PANE_REMOTE].perm_known = 1;
+    s_state.panes[UI_PANE_REMOTE].perm_mask = 0;
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.visible[0] == UI_ACTION_PASTE);
+    CHECK(s_state.actions.enabled[UI_ACTION_PASTE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_PASTE], "READ ONLY") == 0);
+
+    /* CLEAR lives in the local ledger; once it runs, DOWNLOAD is back. */
+    reset();
+    s_state.clip_mode = UI_CLIP_COPY;
+    s_state.clip_count = 1;
+    snprintf(s_state.clip_paths[0].text, sizeof(s_state.clip_paths[0].text),
+             "ux0:data/A.TXT");
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(visible_has(UI_ACTION_CLEAR_CLIPBOARD));
+    s_state.actions.selected = UI_ACTION_CLEAR_CLIPBOARD;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.clip_mode == UI_CLIP_NONE);
+    send_key(UI_KEY_L1);
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.visible[0] == UI_ACTION_DOWNLOAD);
+    CHECK(visible_has(UI_ACTION_DOWNLOAD));
+}
+
+/* R11: a remote paste emits one command per clipboard path into the current
+ * remote folder, with the clipboard's intent, then disarms. */
+static void test_remote_paste_emits(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.clip_mode = UI_CLIP_MOVE;
+    s_state.clip_count = 2;
+    snprintf(s_state.clip_paths[0].text, sizeof(s_state.clip_paths[0].text),
+             "ux0:data/A.TXT");
+    snprintf(s_state.clip_paths[1].text, sizeof(s_state.clip_paths[1].text),
+             "ux0:data/folder");
+    send_key(UI_KEY_TRIANGLE);
+    CHECK(s_state.actions.visible[0] == UI_ACTION_PASTE);
+    s_state.actions.selected = UI_ACTION_PASTE;
+    send_key(UI_KEY_CROSS);
+
+    CHECK(s_command_count == 2);
+    for (int i = 0; i < 2; ++i) {
+        CHECK(s_commands[i].type == UI_CMD_RUN_ACTION);
+        CHECK(s_commands[i].action == UI_ACTION_MOVE);
+        CHECK(s_commands[i].pane == UI_PANE_REMOTE);
+        CHECK(strcmp(s_commands[i].path2, "/") == 0);
+        CHECK(s_commands[i].batch_total == 2);
+    }
+    CHECK(strcmp(s_commands[0].path, "ux0:data/A.TXT") == 0);
+    CHECK(strcmp(s_commands[1].path, "ux0:data/folder") == 0);
+    CHECK(s_state.clip_mode == UI_CLIP_NONE);
+    CHECK(s_state.clip_count == 0);
+}
+
+/* R3: while a folder job runs, the remote write rows, MOVE, a folder open, a
+ * folder download, and PASTE dim with TRANSFER IN PROGRESS; the cursor, the
+ * marks, the view switch, and a file download stay live. */
+static void test_folder_job_busy_dims(void)
+{
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 2; /* B.BIN, a file */
+    s_state.dock.active = 1;
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    s_state.dock.direction = XFER_DIR_DOWNLOAD;
+    s_state.dock.phase = XFER_PHASE_SCAN;
+    s_state.dock.phase_known = 1;
+    send_key(UI_KEY_TRIANGLE);
+
+    CHECK(s_state.actions.enabled[UI_ACTION_MOVE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_MOVE],
+                 "TRANSFER IN PROGRESS") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_NEW_FOLDER] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_RENAME] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_DELETE] == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_REFRESH] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_REFRESH],
+                 "TRANSFER IN PROGRESS") == 0);
+    CHECK(s_state.actions.enabled[UI_ACTION_SWITCH_LOCAL] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 1);
+    CHECK(s_state.actions.enabled[UI_ACTION_PASTE] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_PASTE],
+                 "TRANSFER IN PROGRESS") == 0);
+
+    /* A folder download would be the second folder transfer. */
+    s_state.panes[UI_PANE_REMOTE].selected = 1; /* REMOTE, a folder */
+    ui_actions_prepare(&s_state);
+    CHECK(s_state.actions.enabled[UI_ACTION_DOWNLOAD] == 0);
+    CHECK(strcmp(s_state.actions.reason[UI_ACTION_DOWNLOAD],
+                 "TRANSFER IN PROGRESS") == 0);
+
+    /* The file download still queues. */
+    s_state.panes[UI_PANE_REMOTE].selected = 2;
+    ui_actions_prepare(&s_state);
+    s_state.actions.selected = UI_ACTION_DOWNLOAD;
+    send_key(UI_KEY_CROSS);
+    CHECK(command(UI_CMD_RUN_ACTION) != NULL);
+    CHECK(command(UI_CMD_RUN_ACTION)->action == UI_ACTION_DOWNLOAD);
+
+    /* A remote folder open is refused without starting a listing. */
+    reset();
+    send_key(UI_KEY_L1);
+    s_state.panes[UI_PANE_REMOTE].selected = 1;
+    s_state.dock.active = 1;
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    s_state.dock.direction = XFER_DIR_DOWNLOAD;
+    s_state.dock.phase = XFER_PHASE_COPY;
+    s_state.dock.phase_known = 1;
+    send_key(UI_KEY_CROSS);
+    CHECK(s_command_count == 0);
+    CHECK(strcmp(s_state.status, "TRANSFER IN PROGRESS") == 0);
+    CHECK(s_state.panes[UI_PANE_REMOTE].loading == 0);
+
+    /* Marks stay live during the job. */
+    send_key(UI_KEY_SQUARE);
+    CHECK(mark_count(UI_PANE_REMOTE) == 1);
+}
+
+/* R3/R24: the cancel panel names what the running phase will cost. */
+static void test_cancel_phase_copy(void)
+{
+    static const struct {
+        int phase;
+        const char *text;
+    } cases[] = {
+        {XFER_PHASE_SCAN, "NOTHING HAS BEEN TRANSFERRED OR DELETED."},
+        {XFER_PHASE_VERIFY, "THE COPIES STAY. NO SOURCE IS DELETED."},
+        {XFER_PHASE_DELETE,
+         "DELETED SOURCES CANNOT BE RESTORED. THE REMAINING SOURCES STAY."},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        reset();
+        s_state.dock.active = 1;
+        s_state.dock.state = UI_DOCK_ACTIVE;
+        s_state.dock.direction = XFER_DIR_DOWNLOAD;
+        s_state.dock.phase = cases[i].phase;
+        s_state.dock.phase_known = 1;
+        set_focus_for_test(&s_state, UI_FOCUS_DOCK);
+        send_key(UI_KEY_CROSS);
+        CHECK(s_state.screen == UI_SCREEN_CONFIRM);
+        CHECK(s_state.confirm.kind == UI_CONFIRM_CANCEL_XFER);
+        CHECK(strcmp(s_state.confirm.warning, cases[i].text) == 0);
+    }
+
+    /* The copy phase keeps the removed-partial wording. */
+    reset();
+    s_state.dock.active = 1;
+    s_state.dock.state = UI_DOCK_ACTIVE;
+    s_state.dock.direction = XFER_DIR_DOWNLOAD;
+    s_state.dock.phase = XFER_PHASE_COPY;
+    s_state.dock.phase_known = 1;
+    set_focus_for_test(&s_state, UI_FOCUS_DOCK);
+    send_key(UI_KEY_CROSS);
+    CHECK(strcmp(s_state.confirm.warning,
+                 "THE TRANSFERRED FILE IS REMOVED.") == 0);
+
+    /* A local-only cancel is not a folder phase, even if the network lane
+     * keeps the last job's phase for its own word. */
+    reset();
+    s_state.dock.phase = XFER_PHASE_DELETE;
+    s_state.dock.phase_known = 1;
+    s_state.local_dock.active = 1;
+    s_state.local_dock.state = UI_DOCK_ACTIVE;
+    s_state.local_dock.direction = XFER_DIR_LOCAL_COPY;
+    set_focus_for_test(&s_state, UI_FOCUS_DOCK);
+    send_key(UI_KEY_CROSS);
+    CHECK(s_state.confirm.kind == UI_CONFIRM_CANCEL_XFER);
+    CHECK(strcmp(s_state.confirm.warning,
+                 "THE TRANSFERRED FILE IS REMOVED.") == 0);
+}
+
 int main(void)
 {
     test_workspace_nav();
@@ -3002,6 +3308,12 @@ int main(void)
     test_path_busy_prompt();
     test_duplicate_prompt();
     test_folder_move_prompt_and_dock();
+    test_remote_ledger_order_and_scroll();
+    test_remote_move_actions();
+    test_remote_paste_slot();
+    test_remote_paste_emits();
+    test_folder_job_busy_dims();
+    test_cancel_phase_copy();
     test_two_lane_dock();
     test_waiting_lane_cancel();
     test_paste_guards();

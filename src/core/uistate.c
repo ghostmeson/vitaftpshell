@@ -128,6 +128,33 @@ static void set_action_error(UiState *state, UiPaneState *pane,
         fmt_copy(pane->error, sizeof(pane->error), text);
 }
 
+/* R3/R24: the cancel copy names what the phase will actually cost. The
+ * folder job is the one network transfer with a phase; a local job keeps the
+ * removed-partial wording. */
+static void apply_phase_cancel_copy(UiState *state)
+{
+    if (state == NULL || !state->dock.phase_known)
+        return;
+    const char *text = NULL;
+    switch ((XferPhase)state->dock.phase) {
+    case XFER_PHASE_SCAN:
+        text = "NOTHING HAS BEEN TRANSFERRED OR DELETED.";
+        break;
+    case XFER_PHASE_VERIFY:
+        text = "THE COPIES STAY. NO SOURCE IS DELETED.";
+        break;
+    case XFER_PHASE_DELETE:
+        text = "DELETED SOURCES CANNOT BE RESTORED. THE REMAINING SOURCES STAY.";
+        break;
+    case XFER_PHASE_COPY:
+    case XFER_PHASE_NONE:
+    default:
+        return;
+    }
+    snprintf(state->confirm.warning, sizeof(state->confirm.warning), "%s",
+             text);
+}
+
 /* Clear an action failure on the next key. A failed listing (no rows) and a
  * lost session keep their detail because their centered state reads it. */
 static void open_dock_cancel(UiState *state)
@@ -155,6 +182,7 @@ static void open_dock_cancel(UiState *state)
             return;
         }
         open_confirm(state, UI_CONFIRM_CANCEL_XFER);
+        apply_phase_cancel_copy(state);
     }
 }
 
@@ -594,6 +622,21 @@ static void close_confirm(UiState *state, int return_to_editor)
         set_focus(state, UI_FOCUS_LIST);
 }
 
+/* KTD6: the ledger order is explicit, never the enum order. The remote pane's
+ * eight rows supersede D65's six-row maximum; PASTE takes DOWNLOAD's slot
+ * while a local clipboard is armed (R10). The local order is unchanged. */
+static const UiAction LOCAL_ORDER[] = {
+    UI_ACTION_COPY,      UI_ACTION_MOVE,   UI_ACTION_PASTE,
+    UI_ACTION_CLEAR_CLIPBOARD, UI_ACTION_UPLOAD, UI_ACTION_NEW_FOLDER,
+    UI_ACTION_RENAME,    UI_ACTION_DELETE, UI_ACTION_SWITCH_REMOTE,
+};
+
+static const UiAction REMOTE_ORDER[] = {
+    UI_ACTION_DOWNLOAD, UI_ACTION_MOVE,     UI_ACTION_NEW_FOLDER,
+    UI_ACTION_RENAME,   UI_ACTION_DELETE,   UI_ACTION_REFRESH,
+    UI_ACTION_DISCONNECT, UI_ACTION_SWITCH_LOCAL,
+};
+
 static int action_for_pane(UiPane pane, UiAction action, UiClipMode clip)
 {
     /* The switch belongs to the right slot only: the left pane never shows
@@ -613,7 +656,13 @@ static int action_for_pane(UiPane pane, UiAction action, UiClipMode clip)
                    action != UI_ACTION_CLEAR_CLIPBOARD;
         return action != UI_ACTION_COPY && action != UI_ACTION_MOVE;
     }
-    return action == UI_ACTION_DOWNLOAD || action == UI_ACTION_NEW_FOLDER ||
+    /* PASTE exists only while a local clipboard is armed; it takes DOWNLOAD's
+     * slot, so the two never appear together (R10, R19). */
+    if (action == UI_ACTION_PASTE)
+        return clip != UI_CLIP_NONE;
+    if (action == UI_ACTION_DOWNLOAD)
+        return clip == UI_CLIP_NONE;
+    return action == UI_ACTION_MOVE || action == UI_ACTION_NEW_FOLDER ||
            action == UI_ACTION_RENAME || action == UI_ACTION_DELETE ||
            action == UI_ACTION_REFRESH || action == UI_ACTION_DISCONNECT;
 }
@@ -622,9 +671,23 @@ static void prepare_visible(UiActions *actions, UiPane pane, UiClipMode clip)
 {
     actions->pane = (int)pane;
     actions->visible_count = 0;
-    for (int i = 0; i < UI_ACTION_COUNT; ++i) {
-        if (action_for_pane(pane, (UiAction)i, clip))
-            actions->visible[actions->visible_count++] = i;
+    actions->first = 0;
+    if (ui_pane_is_local(pane)) {
+        for (size_t i = 0; i < sizeof(LOCAL_ORDER) / sizeof(LOCAL_ORDER[0]);
+             ++i) {
+            UiAction action = LOCAL_ORDER[i];
+            if (action_for_pane(pane, action, clip))
+                actions->visible[actions->visible_count++] = (int)action;
+        }
+    } else {
+        for (size_t i = 0; i < sizeof(REMOTE_ORDER) / sizeof(REMOTE_ORDER[0]);
+             ++i) {
+            UiAction action = REMOTE_ORDER[i];
+            if (action == UI_ACTION_DOWNLOAD && clip != UI_CLIP_NONE)
+                action = UI_ACTION_PASTE;
+            if (action_for_pane(pane, action, clip))
+                actions->visible[actions->visible_count++] = (int)action;
+        }
     }
     if (actions->visible_count == 0)
         return;
@@ -659,6 +722,15 @@ static int pane_read_only(const UiPaneState *pane)
            (pane->perm_mask & LISTING_PERM_WRITES) == 0;
 }
 
+/* R3: a folder job owns the network lane from its scan to its terminal. The
+ * dock carries the phase; a terminal keeps it for its own word, so `active`
+ * is what separates a running job from a finished one. */
+static int folder_job_busy(const UiState *state)
+{
+    return state->dock.active && state->dock.phase_known &&
+           state->dock.phase != XFER_PHASE_NONE;
+}
+
 void ui_actions_prepare(UiState *state)
 {
     if (state == NULL)
@@ -676,6 +748,7 @@ void ui_actions_prepare(UiState *state)
         pane_read_only(&state->panes[remote_view]);
     /* Never read the row arena while a listing is being written. */
     const UiRow *row = pane->loading ? NULL : selected_row(state, pane_index);
+    int job_busy = folder_job_busy(state);
 
     for (int i = 0; i < UI_ACTION_COUNT; ++i) {
         actions->enabled[i] = 1;
@@ -769,8 +842,6 @@ void ui_actions_prepare(UiState *state)
             disable(actions, UI_ACTION_RENAME, why);
             disable(actions, UI_ACTION_DELETE, why);
         }
-        if (has_selection && source_is_dir)
-            disable(actions, UI_ACTION_UPLOAD, "FOLDER NOT SUPPORTED");
         if (has_selection && read_only_source) {
             disable(actions, UI_ACTION_MOVE, "READ-ONLY MOUNT");
             disable(actions, UI_ACTION_RENAME, "READ-ONLY MOUNT");
@@ -800,6 +871,8 @@ void ui_actions_prepare(UiState *state)
     } else {
         if (!pane->connected) {
             disable(actions, UI_ACTION_DOWNLOAD, "NOT CONNECTED");
+            disable(actions, UI_ACTION_MOVE, "NOT CONNECTED");
+            disable(actions, UI_ACTION_PASTE, "NOT CONNECTED");
             disable(actions, UI_ACTION_NEW_FOLDER, "NOT CONNECTED");
             disable(actions, UI_ACTION_RENAME, "NOT CONNECTED");
             disable(actions, UI_ACTION_DELETE, "NOT CONNECTED");
@@ -809,21 +882,23 @@ void ui_actions_prepare(UiState *state)
             /* The rows on screen belong to the previous folder until the
              * listing ends. Only DISCONNECT is safe to run while READING. */
             disable(actions, UI_ACTION_DOWNLOAD, "READING");
+            disable(actions, UI_ACTION_MOVE, "READING");
+            disable(actions, UI_ACTION_PASTE, "READING");
             disable(actions, UI_ACTION_NEW_FOLDER, "READING");
             disable(actions, UI_ACTION_RENAME, "READING");
             disable(actions, UI_ACTION_DELETE, "READING");
             disable(actions, UI_ACTION_REFRESH, "READING");
         } else if (!has_selection) {
             disable(actions, UI_ACTION_DOWNLOAD, "NO SELECTION");
+            disable(actions, UI_ACTION_MOVE, "NO SELECTION");
             disable(actions, UI_ACTION_RENAME, "NO SELECTION");
             disable(actions, UI_ACTION_DELETE, "NO SELECTION");
-            /* NEW FOLDER is the one action that uses the folder itself. */
+            /* NEW FOLDER and PASTE are the actions that use the folder. */
         } else if (unsafe_source) {
             disable(actions, UI_ACTION_DOWNLOAD, "UNSAFE NAME");
+            disable(actions, UI_ACTION_MOVE, "UNSAFE NAME");
             disable(actions, UI_ACTION_RENAME, "UNSAFE NAME");
             disable(actions, UI_ACTION_DELETE, "UNSAFE NAME");
-        } else if (source_is_dir) {
-            disable(actions, UI_ACTION_DOWNLOAD, "FOLDER NOT SUPPORTED");
         } else if (source_is_root) {
             disable(actions, UI_ACTION_RENAME, "REMOTE ROOT");
             disable(actions, UI_ACTION_DELETE, "REMOTE ROOT");
@@ -832,8 +907,11 @@ void ui_actions_prepare(UiState *state)
             disable(actions, UI_ACTION_RENAME, "ONE ITEM ONLY");
         Volume download_volume;
         if (path_volume(actions->other, &download_volume) &&
-            path_volume_is_read_only(download_volume))
+            path_volume_is_read_only(download_volume)) {
+            /* R12: both remote-to-local rows land on that volume. */
             disable(actions, UI_ACTION_DOWNLOAD, "READ-ONLY MOUNT");
+            disable(actions, UI_ACTION_MOVE, "READ-ONLY MOUNT");
+        }
         if (state->dock.active &&
             (state->dock.direction == XFER_DIR_DOWNLOAD ||
              state->dock.direction == XFER_DIR_UPLOAD))
@@ -849,6 +927,19 @@ void ui_actions_prepare(UiState *state)
             disable(actions, UI_ACTION_RENAME, "READ ONLY");
             disable(actions, UI_ACTION_DELETE, "READ ONLY");
         }
+        /* R3: a folder job owns the network lane. The cursor, the marks, and
+         * the view switch stay live; a folder download and a second folder
+         * transfer do not. A file download queues behind the job. */
+        if (job_busy) {
+            if (source_is_dir)
+                disable(actions, UI_ACTION_DOWNLOAD, "TRANSFER IN PROGRESS");
+            disable(actions, UI_ACTION_MOVE, "TRANSFER IN PROGRESS");
+            disable(actions, UI_ACTION_PASTE, "TRANSFER IN PROGRESS");
+            disable(actions, UI_ACTION_NEW_FOLDER, "TRANSFER IN PROGRESS");
+            disable(actions, UI_ACTION_RENAME, "TRANSFER IN PROGRESS");
+            disable(actions, UI_ACTION_DELETE, "TRANSFER IN PROGRESS");
+            disable(actions, UI_ACTION_REFRESH, "TRANSFER IN PROGRESS");
+        }
     }
 
     if (local_pane) {
@@ -863,6 +954,10 @@ void ui_actions_prepare(UiState *state)
             disable(actions, UI_ACTION_UPLOAD, "NOT CONNECTED");
         else if (has_selection && state->panes[remote_view].loading)
             disable(actions, UI_ACTION_UPLOAD, "REMOTE READING");
+        else if (job_busy && has_selection && source_is_dir)
+            /* R3: a folder upload is the second folder transfer; a file
+             * upload queues behind the running job. */
+            disable(actions, UI_ACTION_UPLOAD, "TRANSFER IN PROGRESS");
     }
 }
 
@@ -990,6 +1085,12 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
                 set_status(state, "READING");
                 return;
             }
+            /* R3: a remote folder open is dim while a folder job owns the
+             * lane; the row stays drawn and the reason takes the pane line. */
+            if (!local_pane && folder_job_busy(state)) {
+                set_action_error(state, pane, "TRANSFER IN PROGRESS");
+                return;
+            }
             fmt_copy(pane->pending_path, sizeof(pane->pending_path), full);
             pane->loading = 1;
             UiCommand *c = emit(out, max, count, UI_CMD_OPEN_PATH);
@@ -1019,17 +1120,12 @@ static void handle_workspace_key(UiState *state, const UiStateEvent *event,
         UiPane target_view = local_pane ? remote_view : UI_PANE_LOCAL;
 
         if (pane->mark_count > 0) {
-            for (int i = 0; i < pane->mark_count; ++i) {
-                if (pane->marks[i].type == UI_ROW_DIR) {
-                    set_action_error(state, pane,
-                                     "FOLDER TRANSFER NOT SUPPORTED");
-                    return;
-                }
-            }
+            state->batch_seq++;
             for (int i = 0; i < pane->mark_count; ++i) {
                 UiCommand *c = emit(out, max, count, UI_CMD_TRANSFER);
                 if (c == NULL)
                     break;
+                stamp_batch(state, c, i, pane->mark_count);
                 c->pane = state->active_pane;
                 c->source_type = pane->marks[i].type;
                 c->total = pane->marks[i].size;
@@ -1486,6 +1582,31 @@ static const char *last_segment(const char *path)
     return name;
 }
 
+/* KTD6: the window follows the selection in whole rows. */
+static void actions_reveal(UiActions *actions)
+{
+    int index = -1;
+    for (int i = 0; i < actions->visible_count; ++i) {
+        if (actions->visible[i] == actions->selected) {
+            index = i;
+            break;
+        }
+    }
+    if (index < 0)
+        return;
+    if (index < actions->first)
+        actions->first = index;
+    if (index >= actions->first + UI_ACTIONS_VISIBLE)
+        actions->first = index - UI_ACTIONS_VISIBLE + 1;
+    int max_first = actions->visible_count - UI_ACTIONS_VISIBLE;
+    if (max_first < 0)
+        max_first = 0;
+    if (actions->first < 0)
+        actions->first = 0;
+    if (actions->first > max_first)
+        actions->first = max_first;
+}
+
 static void handle_actions_key(UiState *state, const UiStateEvent *event,
                                UiCommand *out, int max, int *count)
 {
@@ -1495,6 +1616,7 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             if (state->actions.visible[i] == state->actions.selected) {
                 if (i > 0)
                     state->actions.selected = state->actions.visible[i - 1];
+                actions_reveal(&state->actions);
                 return;
             }
         }
@@ -1505,6 +1627,7 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             if (state->actions.visible[i] == state->actions.selected) {
                 if (i + 1 < state->actions.visible_count)
                     state->actions.selected = state->actions.visible[i + 1];
+                actions_reveal(&state->actions);
                 return;
             }
         }
@@ -1518,8 +1641,12 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
         }
 
         const UiPaneState *pane = &state->panes[state->active_pane];
+        int local_pane = ui_pane_is_local(state->active_pane);
+        /* A remote MOVE is the cross-pane move: its target is the left local
+         * view, not a clipboard (R12). */
         const char *destination =
-            (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD)
+            (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD ||
+             action == UI_ACTION_MOVE)
                 ? state->actions.other
                 : state->actions.dest;
 
@@ -1541,10 +1668,13 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             return;
         }
 
-        /* COPY and MOVE arm the clipboard. Nothing is touched until PASTE,
-         * after the user has navigated to the destination folder. The marked
-         * set wins; with no marks the row under the cursor is the source. */
-        if (action == UI_ACTION_COPY || action == UI_ACTION_MOVE) {
+        /* COPY and MOVE on a local pane arm the clipboard. Nothing is touched
+         * until PASTE, after the user has navigated to the destination folder.
+         * The marked set wins; with no marks the row under the cursor is the
+         * source. MOVE on the remote pane is not here: it is the cross-pane
+         * move, emitted below as a verified download (R12). */
+        if ((action == UI_ACTION_COPY || action == UI_ACTION_MOVE) &&
+            local_pane) {
             int count = pane->mark_count;
             if (count <= 0) {
                 if (!state->actions.has_selection ||
@@ -1626,19 +1756,26 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             for (int i = 0; i < state->clip_count; ++i) {
                 if (!keep[i])
                     continue;
-                Path target;
-                if (path_join(destination,
-                              last_segment(state->clip_paths[i].text),
-                              &target) != PATH_OK) {
-                    set_status(state, "PATH TOO LONG");
-                    return;
-                }
                 if (first < 0)
                     first = i;
-                PathResult result = path_check_write(target.text, 0, NULL);
-                if (result != PATH_OK) {
-                    set_status(state, protection_reason(result, target.text));
-                    return;
+                /* A local destination is checked against the protection
+                 * table before anything is emitted. A remote destination is
+                 * not a Vita path: the worker normalizes it, and R19 already
+                 * dimmed PASTE when the folder is read-only. */
+                if (local_pane) {
+                    Path target;
+                    if (path_join(destination,
+                                  last_segment(state->clip_paths[i].text),
+                                  &target) != PATH_OK) {
+                        set_status(state, "PATH TOO LONG");
+                        return;
+                    }
+                    PathResult result = path_check_write(target.text, 0, NULL);
+                    if (result != PATH_OK) {
+                        set_status(state,
+                                   protection_reason(result, target.text));
+                        return;
+                    }
                 }
             }
 
@@ -1706,10 +1843,11 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
         uint64_t source_sizes[UI_CONFIRM_MAX];
         int source_known[UI_CONFIRM_MAX];
         int source_count = 0;
+        int remote_move = action == UI_ACTION_MOVE && !local_pane;
         int use_marks = pane->mark_count > 0 &&
                         (action == UI_ACTION_DELETE ||
                          action == UI_ACTION_DOWNLOAD ||
-                         action == UI_ACTION_UPLOAD);
+                         action == UI_ACTION_UPLOAD || remote_move);
         if (use_marks) {
             for (int i = 0; i < pane->mark_count && i < UI_CONFIRM_MAX; ++i) {
                 sources[source_count] = pane->marks[i].path.text;
@@ -1747,8 +1885,8 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                     return;
                 }
             }
-        } else if (action == UI_ACTION_DOWNLOAD && destination[0] != '\0' &&
-                   strcmp(destination, "*") != 0) {
+        } else if ((action == UI_ACTION_DOWNLOAD || remote_move) &&
+                   destination[0] != '\0' && strcmp(destination, "*") != 0) {
             for (int i = 0; i < source_count; ++i) {
                 Path target;
                 if (path_join(destination, last_segment(sources[i]),
@@ -1825,7 +1963,8 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
             return;
         }
 
-        if (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD) {
+        if (action == UI_ACTION_UPLOAD || action == UI_ACTION_DOWNLOAD ||
+            remote_move) {
             state->batch_seq++;
             for (int i = 0; i < source_count; ++i) {
                 UiCommand *c = emit(out, max, count, UI_CMD_RUN_ACTION);
@@ -1834,7 +1973,10 @@ static void handle_actions_key(UiState *state, const UiStateEvent *event,
                     break;
                 }
                 stamp_batch(state, c, i, source_count);
-                c->action = action;
+                /* A remote MOVE is a DOWNLOAD with the verified-delete flag:
+                 * one worker path, two ledger rows (R12). */
+                c->action = remote_move ? UI_ACTION_DOWNLOAD : action;
+                c->move = remote_move;
                 c->pane = state->active_pane;
                 c->source_type = source_types[i];
                 c->total = source_sizes[i];

@@ -1574,7 +1574,8 @@ static void test_remote_write_refusal_never_marks(void)
      * path. */
     fake_ime_queue_text("NEWDIR");
     press(app, INPUT_BIT(INPUT_TRIANGLE));
-    press(app, INPUT_BIT(INPUT_DOWN));
+    press(app, INPUT_BIT(INPUT_DOWN)); /* DOWNLOAD -> MOVE */
+    press(app, INPUT_BIT(INPUT_DOWN)); /* -> NEW FOLDER */
     CHECK(app_state(app)->actions.selected == UI_ACTION_NEW_FOLDER);
     press(app, INPUT_BIT(INPUT_CROSS));
     pump(app, peer, 100);
@@ -1604,7 +1605,8 @@ static void test_remote_mutations(void)
     /* NEW FOLDER: cursor on ".." is no selection; the folder is the target. */
     fake_ime_queue_text("NEWDIR");
     press(app, INPUT_BIT(INPUT_TRIANGLE));
-    press(app, INPUT_BIT(INPUT_DOWN)); /* DOWNLOAD -> NEW FOLDER */
+    press(app, INPUT_BIT(INPUT_DOWN)); /* DOWNLOAD -> MOVE */
+    press(app, INPUT_BIT(INPUT_DOWN)); /* -> NEW FOLDER */
     CHECK(app_state(app)->actions.selected == UI_ACTION_NEW_FOLDER);
     press(app, INPUT_BIT(INPUT_CROSS));
     pump(app, peer, 80);
@@ -1616,7 +1618,8 @@ static void test_remote_mutations(void)
     press(app, INPUT_BIT(INPUT_UP));
     fake_ime_queue_text("RENAMED");
     press(app, INPUT_BIT(INPUT_TRIANGLE));
-    press(app, INPUT_BIT(INPUT_DOWN)); /* DOWNLOAD -> NEW FOLDER */
+    press(app, INPUT_BIT(INPUT_DOWN)); /* DOWNLOAD -> MOVE */
+    press(app, INPUT_BIT(INPUT_DOWN)); /* -> NEW FOLDER */
     press(app, INPUT_BIT(INPUT_DOWN)); /* -> RENAME */
     CHECK(app_state(app)->actions.selected == UI_ACTION_RENAME);
     press(app, INPUT_BIT(INPUT_CROSS));
@@ -1628,7 +1631,7 @@ static void test_remote_mutations(void)
     press(app, INPUT_BIT(INPUT_UP));
     press(app, INPUT_BIT(INPUT_UP));
     press(app, INPUT_BIT(INPUT_TRIANGLE));
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
         press(app, INPUT_BIT(INPUT_DOWN)); /* -> DELETE */
     CHECK(app_state(app)->actions.selected == UI_ACTION_DELETE);
     press(app, INPUT_BIT(INPUT_CROSS));
@@ -1653,9 +1656,9 @@ static void test_remote_disconnect_and_reconnect(void)
     connect_site(app, peer);
     select_remote(app);
 
-    /* DISCONNECT is the sixth remote action. */
+    /* DISCONNECT is the seventh remote action. */
     press(app, INPUT_BIT(INPUT_TRIANGLE));
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 6; ++i)
         press(app, INPUT_BIT(INPUT_DOWN));
     CHECK(app_state(app)->actions.selected == UI_ACTION_DISCONNECT);
     press(app, INPUT_BIT(INPUT_CROSS));
@@ -1795,7 +1798,7 @@ static void test_remote_refresh(void)
     fake_peer_set_listing(peer, fresh);
 
     press(app, INPUT_BIT(INPUT_TRIANGLE));
-    for (int i = 0; i < 4; ++i) /* DOWNLOAD -> REFRESH */
+    for (int i = 0; i < 5; ++i) /* DOWNLOAD -> MOVE -> ... -> REFRESH */
         press(app, INPUT_BIT(INPUT_DOWN));
     CHECK(app_state(app)->actions.selected == UI_ACTION_REFRESH);
     press(app, INPUT_BIT(INPUT_CROSS));
@@ -4565,6 +4568,230 @@ static void folder_expect_idle(App *app)
           app_state(app)->dock.state == UI_DOCK_FAILED);
 }
 
+/* U5: push one command of a marked transfer set, exactly as the reducer emits
+ * it: one command per mark, stamped with one batch. */
+static void push_transfer_command(App *app, UiAction action, UiPane pane,
+                                  int type, const char *source,
+                                  const char *destination, unsigned id,
+                                  int index, int total, int move)
+{
+    UiCommand command;
+    memset(&command, 0, sizeof(command));
+    command.type = UI_CMD_RUN_ACTION;
+    command.action = action;
+    command.pane = pane;
+    command.source_type = type;
+    command.move = move;
+    command.batch_id = id;
+    command.batch_index = index;
+    command.batch_total = total;
+    command.batch_last = index + 1 >= total;
+    snprintf(command.path, sizeof(command.path), "%s", source);
+    snprintf(command.path2, sizeof(command.path2), "%s", destination);
+    CHECK(handoff_command_push(app_handoff(app), &command) == 1);
+}
+
+/* U5: a MOVE clipboard pasted on the remote pane starts the job with move on,
+ * verifies the upload, and then deletes the local source (R11). */
+static void test_paste_move_folder_bridge(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *dest =
+        "type=file;size=5;modify=20240101000000; F.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/SRC", dest);
+
+    push_transfer_command(app, UI_ACTION_MOVE, UI_PANE_REMOTE, UI_ROW_DIR,
+                          "ux0:data/SRC", "/", 11, 0, 1, 0);
+    for (int i = 0; i < 40 && !worker_folder_active(app_worker(app)); ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(worker_folder_active(app_worker(app)) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.move == 1);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(!fake_fs_exists("ux0:data/SRC/F.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* U5: a MOVE clipboard of only files also verifies the upload and deletes the
+ * local source; it never falls back to the plain upload queue (R11, K4). */
+static void test_paste_move_file_bridge(void)
+{
+    App *app = make_app_ex("ux0:data/G.TXT", "HELLO", NULL, NULL, NULL);
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *dest =
+        "type=file;size=5;modify=20240101000000; G.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/", dest);
+
+    push_transfer_command(app, UI_ACTION_MOVE, UI_PANE_REMOTE, UI_ROW_FILE,
+                          "ux0:data/G.TXT", "/", 5, 0, 1, 1);
+    for (int i = 0; i < 40 && !worker_folder_active(app_worker(app)); ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(worker_folder_active(app_worker(app)) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_CONFLICT, 200) == 1);
+    /* The real confirm: CANCEL -> SKIP -> OVERWRITE (Left/Right focus). */
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    /* CANCEL -> MOVE. */
+    press(app, INPUT_BIT(INPUT_RIGHT));
+    press(app, INPUT_BIT(INPUT_CROSS));
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(app_state(app)->dock.move == 1);
+    CHECK(fake_peer_stor_count(peer) == 1);
+    CHECK(!fake_fs_exists("ux0:data/G.TXT"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* U5: a pure file paste keeps the existing one-item-per-file queue instead of
+ * starting a folder job. */
+static void test_paste_file_set_queues(void)
+{
+    App *app = make_app_ex("ux0:data/G.TXT", "HELLO", NULL, "ux0:data/H.TXT",
+                           "HELLO");
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    push_transfer_command(app, UI_ACTION_COPY, UI_PANE_REMOTE, UI_ROW_FILE,
+                          "ux0:data/G.TXT", "/", 9, 0, 2, 0);
+    push_transfer_command(app, UI_ACTION_COPY, UI_PANE_REMOTE, UI_ROW_FILE,
+                          "ux0:data/H.TXT", "/", 9, 1, 2, 0);
+    for (int i = 0; i < 160 && fake_peer_stor_count(peer) < 2; ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(worker_folder_active(app_worker(app)) == 0);
+    CHECK(fake_peer_stor_count(peer) == 2);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* U5: the MOVE row's command is a DOWNLOAD with the verified-delete flag, and
+ * the worker's bridge carries that flag into the one job even for a file. */
+static void test_remote_move_file_bridge(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    push_transfer_command(app, UI_ACTION_DOWNLOAD, UI_PANE_REMOTE, UI_ROW_FILE,
+                          "/TEST.BIN", "ux0:data", 10, 0, 1, 1);
+    for (int i = 0; i < 40 && !worker_folder_active(app_worker(app)); ++i) {
+        (void)app_tick(app);
+        fake_peer_serve(peer);
+    }
+    CHECK(worker_folder_active(app_worker(app)) == 1);
+    CHECK(folder_prompt(app, peer, UI_CONFIRM_MOVE, 200) == 1);
+    folder_answer(app, UI_CHOICE_MOVE);
+    folder_run(app, peer);
+
+    folder_expect_idle(app);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(app_state(app)->dock.move == 1);
+    CHECK(content_is("ux0:data/TEST.BIN", "HELLO"));
+    CHECK(fake_peer_dele_count(peer) == 1);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* U5: two marked folders are one job with both roots, never a first job plus a
+ * refused second (R1, R3). */
+static void test_folder_marked_set_one_job(void)
+{
+    App *app = make_app();
+    if (app == NULL)
+        return;
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    static const char *a =
+        "type=file;size=5;modify=20240101000000; A.TXT\r\n";
+    static const char *b =
+        "type=file;size=5;modify=20240101000000; B.TXT\r\n";
+    fake_peer_set_path_listing(peer, "/A", a);
+    fake_peer_set_path_listing(peer, "/B", b);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    push_transfer_command(app, UI_ACTION_DOWNLOAD, UI_PANE_REMOTE, UI_ROW_DIR,
+                          "/A", "ux0:data", 7, 0, 2, 0);
+    push_transfer_command(app, UI_ACTION_DOWNLOAD, UI_PANE_REMOTE, UI_ROW_DIR,
+                          "/B", "ux0:data", 7, 1, 2, 0);
+    for (int i = 0; i < 40 && !worker_folder_active(app_worker(app)); ++i)
+        (void)app_tick(app);
+    CHECK(worker_folder_active(app_worker(app)) == 1);
+
+    folder_run(app, peer);
+    folder_expect_idle(app);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(content_is("ux0:data/A/A.TXT", "HELLO"));
+    CHECK(content_is("ux0:data/B/B.TXT", "HELLO"));
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
+/* U5: a clipboard paste with a folder is one upload job; a plain file set
+ * keeps the existing one-item-per-file queue. */
+static void test_paste_batch_one_folder_job(void)
+{
+    App *app = make_app_ex(NULL, NULL, "ux0:data/SRC", NULL, NULL);
+    if (app == NULL)
+        return;
+    fake_fs_seed_file("ux0:data/SRC/F.TXT", "HELLO", 5);
+    fake_fs_seed_file("ux0:data/G.TXT", "HELLO", 5);
+    FakePeer *peer = peer_new();
+    connect_site(app, peer);
+
+    unsigned before = worker_folder_terminal_count(app_worker(app));
+    push_transfer_command(app, UI_ACTION_COPY, UI_PANE_REMOTE, UI_ROW_DIR,
+                          "ux0:data/SRC", "/", 8, 0, 2, 0);
+    push_transfer_command(app, UI_ACTION_COPY, UI_PANE_REMOTE, UI_ROW_FILE,
+                          "ux0:data/G.TXT", "/", 8, 1, 2, 0);
+    for (int i = 0; i < 40 && !worker_folder_active(app_worker(app)); ++i)
+        (void)app_tick(app);
+    CHECK(worker_folder_active(app_worker(app)) == 1);
+
+    folder_run(app, peer);
+    folder_expect_idle(app);
+    CHECK(worker_folder_terminal_count(app_worker(app)) == before + 1);
+    CHECK(fake_peer_mkd_count(peer) == 1);
+    CHECK(fake_peer_stor_count(peer) == 2);
+
+    app_destroy(app);
+    fake_peer_destroy(peer);
+}
+
 /* A folder download scans, copies, and ends DOWNLOADED (U3 scenario 1). */
 static void test_folder_download_copy(void)
 {
@@ -5563,6 +5790,12 @@ int main(void)
     test_walk_begin_guards();
     test_folder_download_copy();
     test_folder_upload_copy();
+    test_folder_marked_set_one_job();
+    test_paste_batch_one_folder_job();
+    test_paste_move_folder_bridge();
+    test_paste_move_file_bridge();
+    test_paste_file_set_queues();
+    test_remote_move_file_bridge();
     test_folder_conflict_skip();
     test_folder_move_confirm_cancel();
     test_folder_download_move();

@@ -130,8 +130,10 @@ actions, marks, free space, protection, and one shared clipboard. UPLOAD is dim
 on both with `NO REMOTE VIEW`, and that reason wins over `NO SELECTION`. The
 mode is session state; every launch starts left local plus right remote, and
 neither the mode nor the right local folder is persisted (D97). The seven
-mounts, the right local view, and the seven-row ACTIONS are drawn in
+mounts, the right local view, and the local seven-row ACTIONS are drawn in
 [`design/2026-11-17-local-workspace-states.html`](design/2026-11-17-local-workspace-states.html).
+The remote ledger gains MOVE and becomes eight rows, scrolling in place
+(R10, KTD6).
 
 ### Header
 
@@ -200,11 +202,15 @@ allowed outside the hazard band.
   badge is drawn over every screen that draws the dock. A focused dock with both lanes asks `KEEP`, `CANCEL NETWORK`,
   `CANCEL LOCAL` (KEEP focused first); a single lane keeps the two-choice
   cancel. The single-lane cancel says the transferred file is removed and that
-  KEEP leaves it running; the two-lane cancel says cancelled transfers remove
-  their files. An explicit cancel discards a download even when every byte
-  arrived, so the confirm never calls the file partial (D89). A server-mode
-  transfer is not cancelled here; it ends through the server-stop confirm, so
-  a server transfer plus a local job offers only KEEP and CANCEL LOCAL.
+  KEEP leaves it running; a folder job's cancel names its phase instead: SCAN
+  says nothing has been transferred or deleted, VERIFY says the copies stay and
+  no source is deleted, and DELETE says the deleted sources cannot be restored
+  and the remaining sources stay (R3, R14). The two-lane cancel says cancelled
+  transfers remove their files. An explicit cancel discards a download even when
+  every byte arrived, so the confirm never calls the file partial (D89). A
+  server-mode transfer is not cancelled here; it ends through the server-stop
+  confirm, so a server transfer plus a local job offers only KEEP and CANCEL
+  LOCAL.
 - The terminal state stays until the next transfer starts (R67). The dock is
   never modal and never covers a row.
 
@@ -481,10 +487,15 @@ the both-local state and the seven-row panel are in
   32, 102 (micro, cyan); the band state right-aligned at 556: `n ITEM(S)`,
   `n MARKED`, `COPY n`, `MOVE n`, `NO SELECTION`, `VOLUME ROOT`, or
   `PROTECTED PATH`.
-- A hairline at 119; rows from 124 at 44 px, six on the left and seven on the
-  right. The right pane's last row is the switch.
+- A hairline at 119; rows from 124 at 44 px. Seven whole rows fit inside the
+  panel. The local ledgers show six rows (seven in the right local view, whose
+  switch is last); the remote ledger has eight and scrolls in place by whole
+  rows. The window starts at the top and follows the selection, and a 2 px
+  scroll indicator at the panel's right edge appears when the set overflows.
+  The 44 px pitch never changes.
 - Each row: label at 50 (px 2), description at 50 (micro, `y+23`). Disabled rows
-  are dim and carry the reason (`NO SELECTION`, `PROTECTED PATH`, `VOLUME ROOT`).
+  are dim and carry the reason (`NO SELECTION`, `PROTECTED PATH`, `VOLUME ROOT`,
+  `READ ONLY`, `READ-ONLY MOUNT`, `TRANSFER IN PROGRESS`).
   A destructive row’s description is yellow (`CANNOT BE UNDONE`). The selected
   row is a cyan slab from `x+1` to `x+w-1`; its label, description, and disabled
   reason are near-black.
@@ -504,12 +515,14 @@ the both-local state and the seven-row panel are in
   `NO SELECTION` at 178 (px 2, dim). PASTE: the clipboard count at 148 (px 5)
   and `CLIPBOARD` at 169 (micro).
 - A hairline at 210; `DESTINATION` at 224 with the value right-aligned at 928.
-  COPY and MOVE show `CLIPBOARD`; PASTE and the other actions show the current
-  folder (or the remote pane for upload). REFRESH shows `--` at 148 and `FOLDER`
+  Local COPY and MOVE show `CLIPBOARD`; PASTE and the other actions show the
+  current folder (or the remote pane for upload). A remote MOVE shows the left
+  local view's path, like DOWNLOAD. REFRESH shows `--` at 148 and `FOLDER`
   at 178; DISCONNECT shows `--` at 148 and `SESSION` at 178; the switch shows
   `--` at 148 and `PANE` at 178, with `--` as the destination.
-- The selected action at 300 and its consequence at 320 (micro); the note at
-  400 (micro).
+- The selected action at 300 and its consequence at 320 (micro); the remote
+  MOVE consequence wraps to a second micro line at 332 because it is named in
+  full by R10. The note sits at 400 (micro).
 - The target is the single source of truth for where an action goes.
 
 ### States
@@ -524,22 +537,41 @@ the both-local state and the seven-row panel are in
 - **Local multi:** copy and move put the marks on the clipboard (`TO
   CLIPBOARD`); rename is dim (`ONE ITEM ONLY`); delete is flagged; the marks
   stay after the operation (D18).
-- **Clipboard armed:** PASTE and CLEAR replace COPY and MOVE in the first two
-  rows. The target reads `n CLIPBOARD`; the destination is the current folder.
-  PASTE executes one COPY or MOVE per clipboard path into that folder. A
-  same-folder MOVE is dim (`ALREADY HERE`). A same-folder COPY is allowed and
-  asks `ITEMS ALREADY HERE` with CANCEL / SAVE DUPLICATES; SAVE DUPLICATES uses
-  the free copy name (`A copy.TXT`, then `A copy 2.TXT`) and never touches the
-  original. CLEAR discards the clipboard.
-- **Remote single:** download to the left local view; rename, delete, new folder;
-  refresh; disconnect. Row actions are dim while the pane is disconnected or
-  reading. DISCONNECT stays live while reading and closes the session; it is the
-  escape from a listing that is taking too long. While `READING` the ledger's row
-  actions read `READING`, and a disconnected pane reads `NOT CONNECTED`.
-- **Remote folder:** DOWNLOAD is dim (`FOLDER NOT SUPPORTED`). R22/R23 recursion
-  is not implemented yet; a marked set containing a folder refuses the whole
-  transfer with the same reason. The worker repeats the refusal.
-- **Unsafe remote name:** the row keeps the yellow risk diamond; DOWNLOAD,
+- **Clipboard armed:** on a local pane PASTE and CLEAR replace COPY and MOVE
+  in the first two rows. The target reads `n CLIPBOARD`; the destination is the
+  current folder. PASTE executes one COPY or MOVE per clipboard path into that
+  folder. A same-folder MOVE is dim (`ALREADY HERE`). A same-folder COPY is
+  allowed and asks `ITEMS ALREADY HERE` with CANCEL / SAVE DUPLICATES; SAVE
+  DUPLICATES uses the free copy name (`A copy.TXT`, then `A copy 2.TXT`) and
+  never touches the original. CLEAR discards the clipboard. On the remote pane
+  PASTE takes DOWNLOAD's first slot while the clipboard is armed and uploads the
+  items into the current remote folder; CLEAR, reached from the local ledger,
+  restores DOWNLOAD (R10, R11, R19).
+- **Remote single:** DOWNLOAD copies to the left local view; MOVE downloads,
+  verifies the copy, and then deletes the source (R12). RENAME, DELETE, NEW
+  FOLDER, REFRESH, and DISCONNECT follow. The MOVE row reads `TO LOCAL PANE`,
+  names the left local view as its destination (`actions->other`), and its
+  consequence is `DELETES THE SOURCE AFTER THE COPY VERIFIES.` Row actions are
+  dim while the pane is disconnected or reading. DISCONNECT stays live while
+  reading and closes the session; it is the escape from a listing that is taking
+  too long. While `READING` the ledger's row actions read `READING`, and a
+  disconnected pane reads `NOT CONNECTED`.
+- **Remote folder:** DOWNLOAD recurses the whole subtree under a folder of the
+  same name in the left local view; MOVE does the same and deletes the source
+  after verification (R1, R12). A marked set may mix files and folders and
+  becomes one plan, so one job and one conflict question cover it. The one
+  folder job owns the network lane from SCANNING to its terminal, and a second
+  folder transfer is dim (`TRANSFER IN PROGRESS`).
+- **Remote read-only folder:** when the current folder's `perm` facts grant no
+  write, UPLOAD, PASTE, MOVE, NEW FOLDER, RENAME, and DELETE are dim with
+  `READ ONLY`; DOWNLOAD and REFRESH stay live while the clipboard is empty. With
+  a local clipboard armed, PASTE holds DOWNLOAD's row and reads `READ ONLY`, and
+  CLEAR restores DOWNLOAD (R19).
+- **Folder job running:** while the dock carries a folder phase, a remote folder
+  open, NEW FOLDER, RENAME, DELETE, REFRESH, MOVE, PASTE, and a folder DOWNLOAD
+  are dim with `TRANSFER IN PROGRESS`. The cursor, the marks, the view switch,
+  and a file DOWNLOAD stay live; a file download queues behind the job (R3).
+- **Unsafe remote name:** the row keeps the yellow risk diamond; DOWNLOAD, MOVE,
   RENAME, and DELETE are dim (`UNSAFE NAME`), and Square refuses marking. Cross
   refuses an unsafe **file** without building a local path, but an unsafe
   **directory** still opens: the Vita server's own volume roots are `UX0:`,
@@ -621,8 +653,17 @@ the duplicate question is the seventh and is described below.
   focused first and SAVE DUPLICATES as the yellow slab. CANCEL changes nothing;
   SAVE DUPLICATES creates the free copy name and never overwrites the source
   (R16, R17).
+- **Move:** a cross-pane move asks once, after the walk and any conflict
+  question. The title is `MOVE`; the context is the walk's real entry count
+  (`4 ENTRIES`); the item list names the roots; the warning is `IF ANY ENTRY IS
+  SKIPPED OR UNVERIFIED, NO SOURCE IS DELETED.` CANCEL is focused first and
+  MOVE is the yellow slab. A list-less fallback says the copy is checked before
+  any source is deleted (R15).
 - **Cancel a transfer:** the item, the progress, the partial removed; KEEP
-  DOWNLOADING / CANCEL.
+  DOWNLOADING / CANCEL. A folder job's warning follows its phase instead: SCAN
+  says nothing has been transferred or deleted, VERIFY says the copies stay and
+  no source is deleted, and DELETE says the deleted sources cannot be restored
+  and the remaining sources stay (R3, R14).
 - **Stop the server during a write:** the client’s write and the partial removed;
   KEEP RUNNING / STOP SERVER.
 - **Discard editor changes:** the site, the lost changes; KEEP EDITING / DISCARD.

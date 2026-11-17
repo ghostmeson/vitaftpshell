@@ -22,6 +22,10 @@
  */
 
 #define UI_ROWS_VISIBLE 10
+/* KTD6: the action panel's whole-row fit at its 44 px pitch. The remote
+ * ledger has eight rows and scrolls; a local ledger's seven or fewer never
+ * do. */
+#define UI_ACTIONS_VISIBLE 7
 #define UI_SITES_VISIBLE 6
 #define UI_CONFIRM_VIEW 5
 #define UI_CONFIRM_MAX 64
@@ -252,6 +256,9 @@ typedef struct {
     int pane;
     int visible[UI_ACTION_COUNT];
     int visible_count;
+    /* KTD6: the first visible row. The remote ledger's eight rows scroll in
+     * whole rows; the window starts at the top and follows the selection. */
+    int first;
 } UiActions;
 
 typedef struct {

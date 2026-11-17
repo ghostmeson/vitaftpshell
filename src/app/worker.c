@@ -307,6 +307,12 @@ struct Worker {
     PendingWork pending;
     int pending_command_count;
     UiCommand pending_commands[64];
+    /* U5: one marked set's transfer commands, gathered until its last mark.
+     * A set with a folder becomes one folder job; a pure file set keeps one
+     * queue item per command. */
+    UiCommand transfer_batch[UI_CLIP_MAX];
+    int transfer_batch_count;
+    unsigned transfer_batch_id;
     int batch_conflict_decided;
     XferConflict batch_conflict;
     int batch_total;
@@ -401,6 +407,7 @@ static void log_error(Worker *worker, UiPane pane, const char *text,
                       OpCause cause, OpStage stage);
 static void log_detail(Worker *worker, LogEvent kind, const char *detail);
 static void enqueue_transfer(Worker *worker, const UiCommand *command);
+static void transfer_batch_flush(Worker *worker) __attribute__((noinline));
 static void pump_queue(Worker *worker);
 static void upload_preflight_clear(Worker *worker);
 static void start_transfer_item(Worker *worker, const XferItem *item);
@@ -4823,6 +4830,8 @@ static void reset_remote_session(Worker *worker)
     worker->remote_row_count = 0;
     remote_listing_abort(worker);
     xfer_init(&worker->queue);
+    worker->transfer_batch_count = 0;
+    worker->transfer_batch_id = 0;
     batch_reset(worker);
 }
 
@@ -4847,12 +4856,18 @@ static void handle_action(Worker *worker, const UiCommand *command)
     UiPane issuing = local_view(command);
     if (command->action == UI_ACTION_UPLOAD ||
         command->action == UI_ACTION_DOWNLOAD) {
-        UiCommand transfer = *command;
-        transfer.type = UI_CMD_TRANSFER;
-        transfer.pane = command->action == UI_ACTION_UPLOAD
-                            ? issuing
-                            : ui_pane_remote_view();
-        handle_transfer(worker, &transfer);
+        /* Keep the command's action and move flag: the transfer bridge needs
+         * them to tell a plain download from a verified move (R12, U5). */
+        handle_transfer(worker, command);
+        return;
+    }
+
+    /* A remote-pane COPY or MOVE is the local clipboard pasted into the
+     * current remote folder (R11, K8). It is an upload, never a local job. */
+    if (command->pane == ui_pane_remote_view() &&
+        (command->action == UI_ACTION_COPY ||
+         command->action == UI_ACTION_MOVE)) {
+        handle_transfer(worker, command);
         return;
     }
 
@@ -5065,7 +5080,29 @@ static void handle_transfer(Worker *worker, const UiCommand *command)
                    OP_CAUSE_APP, OP_STAGE_CONNECT);
         return;
     }
-    enqueue_transfer(worker, command);
+
+    /* U5: gather one marked set before deciding its shape. An unbatched
+     * command is a one-item set and takes the same rules. */
+    if (command->batch_id != 0) {
+        if (worker->transfer_batch_count > 0 &&
+            worker->transfer_batch_id != command->batch_id) {
+            /* The tail of a lost batch cannot be completed; its gathered
+             * commands were never started, so dropping them moves nothing. */
+            worker->transfer_batch_count = 0;
+        }
+        worker->transfer_batch_id = command->batch_id;
+        if (worker->transfer_batch_count < UI_CLIP_MAX)
+            worker->transfer_batch[worker->transfer_batch_count++] = *command;
+        if (!command->batch_last)
+            return;
+        transfer_batch_flush(worker);
+        return;
+    }
+
+    worker->transfer_batch[0] = *command;
+    worker->transfer_batch_count = 1;
+    worker->transfer_batch_id = 0;
+    transfer_batch_flush(worker);
 }
 
 static int local_destination_exists(Worker *worker, const XferItem *item)
@@ -5455,6 +5492,155 @@ static void default_local_dir(Worker *worker, char *out, size_t cap)
     fmt_copy(out, cap, "ux0:data");
 }
 
+/* U5: a transfer command's direction and its verified-delete intent. A
+ * workspace Cross is a plain transfer; the ACTIONS transfer rows carry their
+ * action; a remote-pane COPY or MOVE is a clipboard paste of local items into
+ * the current remote folder. */
+static int transfer_command_kind(const UiCommand *command,
+                                 XferPlanDirection *direction, int *move)
+{
+    if (command->type == UI_CMD_TRANSFER) {
+        *direction = ui_pane_is_local(command->pane) ? XFER_PLAN_UPLOAD
+                                                     : XFER_PLAN_DOWNLOAD;
+        *move = command->move ? 1 : 0;
+        return 1;
+    }
+    switch (command->action) {
+    case UI_ACTION_UPLOAD:
+        *direction = XFER_PLAN_UPLOAD;
+        *move = 0;
+        return 1;
+    case UI_ACTION_DOWNLOAD:
+        *direction = XFER_PLAN_DOWNLOAD;
+        *move = command->move ? 1 : 0;
+        return 1;
+    case UI_ACTION_COPY:
+    case UI_ACTION_MOVE:
+        if (command->pane == ui_pane_remote_view()) {
+            *direction = XFER_PLAN_UPLOAD;
+            *move = command->action == UI_ACTION_MOVE;
+            return 1;
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+/* A download's pane already knows the mark's type; an upload's pane may have
+ * lost it, so the local stat decides. */
+static int transfer_source_is_folder(Worker *worker, const UiCommand *command,
+                                     XferPlanDirection direction)
+{
+    if (direction == XFER_PLAN_DOWNLOAD)
+        return command->source_type == UI_ROW_DIR;
+    FsEntry entry;
+    return worker->ports.fs->stat(worker->ports.fs->ctx, command->path,
+                                  &entry) == FS_OK &&
+           entry.type == FS_ENTRY_DIR;
+}
+
+/* R1/R10: one marked set is one plan, however many roots it holds. */
+static int enqueue_folder_batch(Worker *worker, const UiCommand *batch,
+                                int count, XferPlanDirection direction,
+                                int move, const char *destination)
+{
+    const char *sources[UI_CLIP_MAX];
+    int types[UI_CLIP_MAX];
+    uint64_t sizes[UI_CLIP_MAX];
+    int size_known[UI_CLIP_MAX];
+    int source_count = 0;
+
+    if (count > UI_CLIP_MAX)
+        count = UI_CLIP_MAX;
+    for (int i = 0; i < count; ++i) {
+        if (batch[i].path[0] == '\0')
+            continue;
+        sources[source_count] = batch[i].path;
+        if (direction == XFER_PLAN_DOWNLOAD) {
+            types[source_count] = batch[i].source_type;
+            sizes[source_count] = batch[i].total;
+            size_known[source_count] = batch[i].total_known;
+        } else {
+            FsEntry entry;
+            memset(&entry, 0, sizeof(entry));
+            int found = worker->ports.fs->stat(worker->ports.fs->ctx,
+                                               batch[i].path, &entry) == FS_OK;
+            types[source_count] =
+                found && entry.type == FS_ENTRY_DIR ? UI_ROW_DIR : UI_ROW_FILE;
+            sizes[source_count] = found ? entry.size : 0;
+            size_known[source_count] = found ? entry.size_known : 0;
+        }
+        source_count++;
+    }
+    if (source_count == 0)
+        return 0;
+
+    WorkerFolderRequest request;
+    memset(&request, 0, sizeof(request));
+    request.direction = direction;
+    request.move = move;
+    request.origin = batch[0].pane;
+    request.destination = destination;
+    request.source_count = source_count;
+    request.sources = sources;
+    request.types = types;
+    request.sizes = sizes;
+    request.size_known = size_known;
+    return worker_folder_begin(worker, &request);
+}
+
+/* U5: a marked set arrives as one command per mark. A set with a folder, or a
+ * remote MOVE, runs as the one folder job; a pure file set keeps the existing
+ * one-queue-item-per-file path. */
+static void transfer_batch_flush(Worker *worker) __attribute__((noinline));
+static void transfer_batch_flush(Worker *worker)
+{
+    int count = worker->transfer_batch_count;
+    UiCommand *batch = worker->transfer_batch;
+    worker->transfer_batch_count = 0;
+    worker->transfer_batch_id = 0;
+    if (count <= 0)
+        return;
+
+    XferPlanDirection direction;
+    int move = 0;
+    if (!transfer_command_kind(&batch[0], &direction, &move)) {
+        enqueue_transfer(worker, &batch[0]);
+        return;
+    }
+
+    char fallback[PATH_MAX_LEN];
+    const char *destination = batch[0].path2;
+    if (direction == XFER_PLAN_DOWNLOAD &&
+        (destination[0] == '\0' || strcmp(destination, "*") == 0)) {
+        default_local_dir(worker, fallback, sizeof(fallback));
+        destination = fallback;
+    }
+
+    int has_folder = 0;
+    for (int i = 0; i < count && !has_folder; ++i)
+        has_folder =
+            transfer_source_is_folder(worker, &batch[i], direction);
+
+    /* A remote MOVE is a folder job even for one file: only that job verifies
+     * the copy and then deletes the source (R12, K4). A paste with a folder
+     * uses the same plan; a paste of plain files keeps the upload path. */
+    if (has_folder || move) {
+        (void)enqueue_folder_batch(worker, batch, count, direction, move,
+                                   destination);
+        return;
+    }
+
+    for (int i = 0; i < count; ++i) {
+        UiCommand item = batch[i];
+        item.type = UI_CMD_TRANSFER;
+        if (direction == XFER_PLAN_UPLOAD && !ui_pane_is_local(item.pane))
+            item.pane = UI_PANE_LOCAL;
+        enqueue_transfer(worker, &item);
+    }
+}
+
 static void enqueue_folder_transfer(Worker *worker, const UiCommand *command)
 {
     char fallback[PATH_MAX_LEN];
@@ -5469,13 +5655,14 @@ static void enqueue_folder_transfer(Worker *worker, const UiCommand *command)
     }
 
     const char *sources[1] = {command->path};
-    int types[1] = {UI_ROW_DIR};
+    int types[1] = {command->source_type == UI_ROW_DIR ? UI_ROW_DIR
+                                                       : UI_ROW_FILE};
     uint64_t sizes[1] = {command->total};
     int size_known[1] = {command->total_known};
     WorkerFolderRequest request;
     memset(&request, 0, sizeof(request));
     request.direction = direction;
-    request.move = 0;
+    request.move = command->move ? 1 : 0;
     request.origin = command->pane;
     request.destination = destination;
     request.source_count = 1;
@@ -5491,9 +5678,9 @@ static void enqueue_transfer(Worker *worker, const UiCommand *command)
     XferItem item;
     memset(&item, 0, sizeof(item));
 
-    /* R22/R23: a folder is never sent as one RETR/STOR. It becomes one heap
-     * job whose scan, prompts, copy, verify, and delete own the lane (KTD1). */
-    if (command->source_type == UI_ROW_DIR) {
+    /* R22/R23: a folder is never sent as one RETR/STOR. A move, even of one
+     * file, needs the job's verify-then-delete path (R12, K4). */
+    if (command->source_type == UI_ROW_DIR || command->move) {
         enqueue_folder_transfer(worker, command);
         return;
     }

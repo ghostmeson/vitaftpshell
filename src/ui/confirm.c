@@ -163,6 +163,15 @@ static void body_draw(const UiConfirm *confirm)
         font_text("EVERY ITEM ALREADY LIVES IN THIS FOLDER.", CONFIRM_ITEM_X, y,
                   PX_LABEL, C_WHITE);
         break;
+    case UI_CONFIRM_MOVE:
+        /* The list names the roots and the context carries the walk's entry
+         * count (R15); this fallback states the one rule that cannot be
+         * missed when the list is absent. */
+        font_text("THE COPY IS CHECKED BEFORE ANY SOURCE IS DELETED.",
+                  CONFIRM_ITEM_X, y, PX_LABEL, C_WHITE);
+        font_text("A SKIP OR AN UNVERIFIED ENTRY KEEPS EVERY SOURCE.",
+                  CONFIRM_ITEM_X, y + 24.0f, PX_LABEL, C_DIM);
+        break;
     default:
         break;
     }
@@ -250,6 +259,10 @@ static void options_draw(const UiConfirm *confirm)
             break;
         case UI_CHOICE_SAVE_DUPLICATE:
             label = "SAVE DUPLICATES";
+            primary = 1;
+            break;
+        case UI_CHOICE_MOVE:
+            label = "MOVE";
             primary = 1;
             break;
         default:

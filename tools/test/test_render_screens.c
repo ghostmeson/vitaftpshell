@@ -325,17 +325,39 @@ static void test_actions(void)
     CHECK(trace_text_at("REMOTE ACTIONS", 32.0f, 84.0f));
     CHECK(trace_text_at("DOWNLOAD", 50.0f, 130.0f));
     CHECK(trace_text_at("TO LOCAL PANE", 50.0f, 147.0f));
-    CHECK(trace_text_at("NEW FOLDER", 50.0f, 174.0f));
-    CHECK(trace_text_at("RENAME", 50.0f, 218.0f));
-    CHECK(trace_text_at("DELETE", 50.0f, 262.0f));
-    CHECK(trace_text_at("REFRESH", 50.0f, 306.0f));
-    CHECK(trace_text_at("DISCONNECT", 50.0f, 350.0f));
-    CHECK(trace_text_at("SWITCH TO LOCAL", 50.0f, 394.0f));
-    CHECK(trace_text_at("THE RIGHT PANE", 50.0f, 411.0f));
+    CHECK(trace_text_at("MOVE", 50.0f, 174.0f));
+    CHECK(trace_text_at("NEW FOLDER", 50.0f, 218.0f));
+    CHECK(trace_text_at("RENAME", 50.0f, 262.0f));
+    CHECK(trace_text_at("DELETE", 50.0f, 306.0f));
+    CHECK(trace_text_at("REFRESH", 50.0f, 350.0f));
+    CHECK(trace_text_at("DISCONNECT", 50.0f, 394.0f));
+    /* Eight rows at the unchanged pitch: the switch is the eighth and sits
+     * below the panel until the window follows the selection (KTD6). */
+    CHECK(!trace_has_text("SWITCH TO LOCAL"));
+    CHECK(trace_has_rect(564.0f, 124.0f, 2.0f, 308.0f, C_HAIR));
+    CHECK(trace_has_rect(564.0f, 124.0f, 2.0f, 269.5f, C_DIM));
 
-    /* The seventh row sits inside the frame, and its target is a pane. */
+    /* R10/R12: the MOVE row targets the left local view and its consequence
+     * says the source is deleted only after the copy verifies. */
+    s_state.actions.selected = UI_ACTION_MOVE;
+    render();
+    CHECK(trace_text_at("MOVE", 50.0f, 174.0f));
+    CHECK(trace_text_at("TO LOCAL PANE", 50.0f, 191.0f));
+    CHECK(trace_text_right("ux0:data", 928.0f, 224.0f, PX_MICRO, C_CYAN));
+    CHECK(trace_text_at("DELETES THE SOURCE AFTER", 596.0f, 320.0f));
+    CHECK(trace_text_at("THE COPY VERIFIES.", 596.0f, 332.0f));
+
+    /* Scrolled one row, the window starts at MOVE and the switch fits. */
+    s_state.actions.first = 1;
     s_state.actions.selected = UI_ACTION_SWITCH_LOCAL;
     render();
+    CHECK(!trace_has_text("DOWNLOAD"));
+    CHECK(trace_text_at("MOVE", 50.0f, 130.0f));
+    CHECK(trace_text_at("SWITCH TO LOCAL", 50.0f, 394.0f));
+    CHECK(trace_text_at("THE RIGHT PANE", 50.0f, 411.0f));
+    CHECK(trace_has_rect(564.0f, 162.5f, 2.0f, 269.5f, C_DIM));
+
+    /* The eighth row is inside the frame and its target is a pane. */
     CHECK(trace_has_rect(19.0f, 388.0f, 550.0f, 44.0f, C_CYAN));
     CHECK(trace_text_at("PANE", 596.0f, 108.0f));
     CHECK(trace_text_at("--", 596.0f, 126.0f));
@@ -344,6 +366,24 @@ static void test_actions(void)
     CHECK(trace_text_right("--", 928.0f, 224.0f, PX_MICRO, C_CYAN));
     CHECK(trace_text_at("SWITCH TO LOCAL", 596.0f, 300.0f));
     CHECK(trace_text_at("THE OTHER VIEW KEEPS ITS PLACE.", 596.0f, 320.0f));
+
+    /* R10/R19: a local clipboard armed puts PASTE in DOWNLOAD's first slot;
+     * DOWNLOAD is not drawn at all. */
+    setup();
+    s_state.screen = UI_SCREEN_ACTIONS;
+    s_state.active_pane = UI_PANE_REMOTE;
+    s_state.panes[UI_PANE_REMOTE].selected = 1;
+    s_state.clip_mode = UI_CLIP_COPY;
+    s_state.clip_count = 2;
+    ui_actions_prepare(&s_state);
+    render();
+    CHECK(s_state.actions.visible_count == 8);
+    CHECK(trace_text_at("PASTE", 50.0f, 130.0f));
+    CHECK(trace_text_at("COPY HERE", 50.0f, 147.0f));
+    CHECK(!trace_has_text("DOWNLOAD"));
+    CHECK(trace_text_at("MOVE", 50.0f, 174.0f));
+    CHECK(trace_text_at("2", 596.0f, 148.0f));
+    CHECK(trace_text_at("CLIPBOARD", 596.0f, 169.0f));
 
     /* The right local view is still a LOCAL ledger and a LOCAL target. */
     setup();
@@ -564,6 +604,42 @@ static void test_confirm(void)
     CHECK(trace_has_line(256.0f, 362.0f, 464.0f, 362.0f, C_WHITE));
     CHECK(trace_has_rect(500.0f, 366.0f, 200.0f, 40.0f, C_YELLOW));
 
+    /* R15: the move question names the roots and the walk's count, and its
+     * warning is the one rule that keeps every source when anything is
+     * missing. */
+    memset(confirm, 0, sizeof(*confirm));
+    confirm->kind = UI_CONFIRM_MOVE;
+    snprintf(confirm->title, sizeof(confirm->title), "MOVE");
+    snprintf(confirm->context, sizeof(confirm->context), "4 ENTRIES");
+    snprintf(confirm->warning, sizeof(confirm->warning),
+             "IF ANY ENTRY IS SKIPPED OR UNVERIFIED, NO SOURCE IS DELETED.");
+    confirm->items = s_items;
+    confirm->item_count = 2;
+    s_items[0].name = "SRC";
+    s_items[0].size = 0;
+    s_items[0].size_known = 0;
+    s_items[0].stays = 0;
+    s_items[1].name = "OTHER";
+    s_items[1].size = 0;
+    s_items[1].size_known = 0;
+    s_items[1].stays = 0;
+    confirm->choices[0] = UI_CHOICE_CANCEL;
+    confirm->choices[1] = UI_CHOICE_MOVE;
+    confirm->choice_count = 2;
+    render();
+    CHECK(trace_text_at("MOVE", 210.0f, 140.0f));
+    CHECK(trace_text_at("4 ENTRIES", 210.0f, 168.0f));
+    CHECK(trace_text_at("SRC", 210.0f, 190.0f));
+    CHECK(trace_text_at("OTHER", 210.0f, 214.0f));
+    CHECK(trace_text_right("DIR", 750.0f, 190.0f, PX_MICRO, C_DIM));
+    CHECK(trace_text_at("2 ITEMS", 210.0f, 314.0f));
+    CHECK(trace_text_at_color(
+        "IF ANY ENTRY IS SKIPPED OR UNVERIFIED, NO SOURCE IS DELETED.",
+        210.0f, 336.0f, C_YELLOW));
+    CHECK(trace_has_text("CANCEL"));
+    CHECK(trace_has_text("MOVE"));
+    CHECK(trace_has_rect(500.0f, 366.0f, 200.0f, 40.0f, C_YELLOW));
+
     memset(confirm, 0, sizeof(*confirm));
     confirm->kind = UI_CONFIRM_CANCEL_XFER;
     snprintf(confirm->title, sizeof(confirm->title), "CANCEL THE TRANSFER");
@@ -579,6 +655,13 @@ static void test_confirm(void)
     CHECK(trace_has_text("KEEP DOWNLOADING"));
     CHECK(trace_text_at("KEEP LEAVES IT RUNNING.", 210.0f, 220.0f));
     CHECK(trace_text_at_color("THE TRANSFERRED FILE IS REMOVED.", 210.0f,
+                              336.0f, C_YELLOW));
+
+    /* R3: the phase copy rides the same warning slot. */
+    snprintf(confirm->warning, sizeof(confirm->warning),
+             "THE COPIES STAY. NO SOURCE IS DELETED.");
+    render();
+    CHECK(trace_text_at_color("THE COPIES STAY. NO SOURCE IS DELETED.", 210.0f,
                               336.0f, C_YELLOW));
 
     memset(confirm, 0, sizeof(*confirm));

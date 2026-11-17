@@ -138,6 +138,10 @@ typedef struct {
     int batch_index;
     int batch_total;
     int batch_last;
+    /* A remote MOVE is a DOWNLOAD that verifies and then deletes its source
+     * (R12). The action stays DOWNLOAD so a plain download and a move share
+     * one transfer path; this flag is the only difference. */
+    int move;
     char path[PATH_MAX_LEN];
     char path2[PATH_MAX_LEN];
     char text[256];
