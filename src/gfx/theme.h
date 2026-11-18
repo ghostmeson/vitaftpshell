@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: GPL-3.0-only
  *
- * Portions adapted from COCKPIT, Copyright (c) 2026 Upakul Talukdar,
+ * Portions adapted from COCKPIT, Copyright (c) 2026 ghostmeson,
  * licensed under the MIT License. See LICENSES/COCKPIT-MIT.txt.
  */
 

@@ -492,7 +492,7 @@ vitaFTPShell is free software under the **GNU General Public License, version
 3.0 only**. See [`LICENSE`](LICENSE).
 
 The graphics base under `src/gfx/` is adapted from COCKPIT, Copyright (c) 2026
-Upakul Talukdar, and retains its MIT notice in
+ghostmeson, and retains its MIT notice in
 [`LICENSES/COCKPIT-MIT.txt`](LICENSES/COCKPIT-MIT.txt). VitaShell and libftpvita
 are behavioral references only; no code from them is vendored.
 

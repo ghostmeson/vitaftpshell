@@ -8,7 +8,7 @@ layer is adapted rather than invented.
 
 | Project | License | Use | Status |
 |---|---|---|---|
-| COCKPIT — Copyright (c) 2026 Upakul Talukdar | MIT | `src/gfx/` is adapted from its `draw`, `font`, and `theme` | Adapted, with the notice in [`LICENSES/COCKPIT-MIT.txt`](../LICENSES/COCKPIT-MIT.txt) |
+| COCKPIT — Copyright (c) 2026 ghostmeson | MIT | `src/gfx/` is adapted from its `draw`, `font`, and `theme` | Adapted, with the notice in [`LICENSES/COCKPIT-MIT.txt`](../LICENSES/COCKPIT-MIT.txt) |
 | [VitaShell](https://github.com/TheOfficialFloW/VitaShell) | GPLv3 | Behavioral reference for the file manager and server commands | Reference only; not vendored |
 | [libftpvita](https://github.com/xerpi/libftpvita) | MIT | Behavioral reference for server commands | Reference only; not used |
 
@@ -37,7 +37,7 @@ VitaShell code later without a relicense.
 
 ## Product references
 
-- COCKPIT — Copyright (c) 2026 Upakul Talukdar — the design system that shapes
+- COCKPIT — Copyright (c) 2026 ghostmeson — the design system that shapes
   the palette, type, spacing, and restraint rules. vitaFTPShell restates the
   rules it uses in [`DESIGN.md`](DESIGN.md); the derived graphics code keeps its
   MIT notice in [`LICENSES/COCKPIT-MIT.txt`](../LICENSES/COCKPIT-MIT.txt).
