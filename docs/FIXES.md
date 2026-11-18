@@ -8,7 +8,7 @@ This file is an **index**, not the full evidence record:
 - [`VERIFICATION.md`](VERIFICATION.md) owns the hardware matrix, the logs, the
   core-dump analysis, and the host-test evidence.
 - [`DECISIONS.md`](DECISIONS.md) owns the numbered product and architecture
-  choices (D53–D99 for this period).
+  choices (D53–D104 for this period).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the layering and port rules.
 - [`DESIGN.md`](DESIGN.md) owns the settled layout, states, and input.
 
@@ -28,7 +28,7 @@ passes.
 ## Current state
 
 - **Current artifact:** `vitaftpshell-v01.00-b85.vpk`, 303,055 bytes,
-  SHA-256 `a79015c55ac8ed4ce39032604ee7fd084a0f8e72e511e52e8f569c6fb658a33c`.
+  SHA-256 `289e43950d3d045f5fcbde73965890c9bb27c04e2f0f4fa7247bef4f162b39b3`.
 - **Latest hardware-observed build:** b77 (operator report, 2026-11-17,
   PCH-1000): copy, paste, new folder, rename, and delete work across both local
   panes; the remote client and the server work; the ACTIONS menu works; the
@@ -54,8 +54,9 @@ passes.
   FileZilla's browse and transfer connections both connect, and its upload and
   download pass. b77 ran on a PCH-1000 on 2026-11-17 and moves M25, M26, and M27
   to PART; its report does not exercise M24's mount and read-only surface, and
-  M27's site-book wrap, dock entry, and clamping remain unobserved. The b82
-  feature rows M28-M32 are PENDING. M5 remains
+  M27's site-book wrap, dock entry, and clamping remain unobserved. The feature
+  rows M28-M32 (b85) are PENDING. The launcher and LiveArea rows M33-M34 are
+  PENDING; the art has not been seen on a console. M5 remains
   PART only for a FileZilla rename/delete and the full three-volume browse;
   M10, M13, M14, M25, M26, and M27 are partly observed; every other row awaits
   the code-freeze pass (D95).
@@ -64,8 +65,8 @@ passes.
 
 The code review of `feat-cross-pane-transfer` (run 20261117-211726-a03f9813)
 returned 19 primary findings. The correctness, data-safety, and gate fixes
-below are applied on the branch; b85 is the current host-tested artifact. The
-new rows M28-M32 stay PENDING and no console row is claimed.
+below are applied in `9236f0e` on `main`; b85 is the current host-tested
+artifact. The new rows M28-M32 stay PENDING and no console row is claimed.
 
 | Build | Symptom | Cause and fix | Evidence | Status |
 |---|---|---|---|---|

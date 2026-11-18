@@ -13,8 +13,9 @@ read-write FTP server on `ux0:`, `ur0:`, and `uma0:`. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
 suites pass. The local workspace and the cross-pane folder transfer — recursive
 download and upload, the verified move, the report, and the per-folder
-read-only state — are host-complete. The console matrix runs once at v1 code
-freeze (D95), so the project is `building`, not `verified`.
+read-only state — are host-complete, and the cross-pane code review's fixes are
+applied on `main`. The console matrix runs once at v1 code freeze (D95), so the
+project is `building`, not `verified`.
 
 The live state and the single next action are on [the board](PROJECTS.md); the
 hardware evidence is in [the evidence record](docs/VERIFICATION.md).
@@ -287,7 +288,8 @@ D95 records the one-pass verification sequencing; D96-D99 record the volume
 scope, the right-pane view model, the same-folder prompt, and the `app0:` alias.
 D100-D102 record the one folder job and the eight-row ledger, the verified move
 and the `skipped.txt` report, and the per-folder read-only state with the
-free-space preflight.
+free-space preflight. D103 and D104 record the launcher mark and the LiveArea
+composition with its boot frame.
 
 These remain open by design and belong to implementation, not to an agent's
 judgment call:
@@ -301,6 +303,10 @@ judgment call:
 - directory sync after a rename: `FsPort` has no call for it, so power-loss
   durability needs a port extension or a confirmed platform guarantee;
 - the mksfoex flags this SDK build needs.
+
+One verification-exit question is not an implementation call: M24's `imc0:` leg
+is BLOCKED on a PCH-1000, and `verified` requires every row PASS, so v1 needs
+either a PCH-2000 run or a decision that supersedes D95 for that leg.
 
 ## Directory map
 
@@ -338,7 +344,7 @@ vitaFTPShell/
     PROJECT.md         scope, non-goals, roadmap, failure policy
     ARCHITECTURE.md    layers, ports, allowed platform files
     DESIGN.md          the settled layout, states, and input
-    DECISIONS.md       numbered decisions, D1-D102
+    DECISIONS.md       numbered decisions, D1-D104
     FIXES.md           chronological fix index with HW/HOST/PENDING status
     VERIFICATION.md    hardware matrix, build evidence, and the test record
     THIRD_PARTY.md     reused code, licenses, protocol references

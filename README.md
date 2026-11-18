@@ -25,8 +25,9 @@ read-write FTP server on `ux0:`, `ur0:`, and `uma0:`. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
 suites pass. The local workspace and the cross-pane folder transfer — recursive
 download and upload, the verified move, the report, and the per-folder
-read-only state — are host-complete. The console matrix runs once at v1 code
-freeze (D95), so the project is `building`, not `verified`.
+read-only state — are host-complete, and the cross-pane code review's fixes are
+applied on `main`. The console matrix runs once at v1 code freeze (D95), so the
+project is `building`, not `verified`.
 
 The live state and the single next action are on [the board](PROJECTS.md); the
 hardware evidence is in [the evidence record](docs/VERIFICATION.md).
@@ -164,7 +165,7 @@ tools/test/      layering guard, docs guard, host suites, and the app/worker int
 tools/fake/      controllable NetPort, FsPort, input, IME, clock, log, and FTP peers
 tools/preview/   software vita2d shim and the 960x544 preview
 docs/            architecture, design, decisions, plan, third-party notices
-sce_sys/         placeholder LiveArea art
+sce_sys/         launcher icon, LiveArea art, and boot frame (D103, D104)
 ```
 
 ## Documentation
@@ -177,6 +178,8 @@ sce_sys/         placeholder LiveArea art
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Layers, ports, threading, handoff, and module rules |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | The settled layout, states, and input |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Numbered decisions with context and consequences |
+| [`docs/FIXES.md`](docs/FIXES.md) | Chronological fix index with each defect's evidence and hardware status |
+| [`docs/VERIFICATION.md`](docs/VERIFICATION.md) | The console matrix, build evidence, and per-build test record |
 | [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) | Reused code, licenses, and protocol references |
 | [`AGENTS.md`](AGENTS.md) | The project contract for agents and contributors |
 | [`docs/README.md`](docs/README.md) | The documentation map |

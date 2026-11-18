@@ -294,7 +294,9 @@ Every unverified Vita behaviour is a `[C]` comment in the adapter that owns it:
   `app0:`, reports unknown and the worker caches the value per volume so the UI
   renders `--` (D59); `mtime` is reported unknown; `sceIoRename`
   replace-on-existing is unverified, so `rename_replaces()` returns 0 and the
-  aside fallback is always used (D48).
+  aside fallback is always used (D48); a spelling's trailing dots and spaces are
+  not folded by policy, so platform folding of a denied spelling is unverified;
+  and AE14 assumes a removed mount answers `ENOENT` rather than `ENODEV`.
 - `psp2_input.c`: the plain peek reports shoulders as L1/R1; the wide analog
   mode reports 0..255 centred at 128.
 - `psp2_ime.c`: the adapter follows the SDK IME sample — `sceAppUtilInit`, then
@@ -497,6 +499,10 @@ so a rendered state is the shipped composition, not a copy.
   verify. Incrementing is always safe; a number is never reused for different
   sources.
 - Artifact `vitaftpshell-v<version>-b<build>.vpk`; `build/` keeps exactly one.
+- The VPK is not byte-reproducible: the packaging step stamps each entry with
+  its build time, so a rebuild of identical sources yields a different SHA-256.
+  The build number is the stable identity; a recorded hash names the file
+  packaged at that moment.
 - The unstripped ELF is kept.
 - Host tests are a separate script and never enter the VPK.
 - `src/main.c` is the composition root: it constructs each adapter once, calls
@@ -535,6 +541,15 @@ asserts:
 - executor overwrite with and without replace-on-rename, stale-aside recovery,
   cancel mid-copy, a kill at each write step, the destination sync, per-file
   move semantics, rollback, partial delete reporting, and `MOVE INCOMPLETE`;
+- the recursive transfer plan: the iterative walk and its 4,096-entry cap, the
+  one conflict question, the destination scan's case folding, the move's
+  re-listing verification, a skipped or unverified entry keeping every source,
+  the bottom-up delete order, the report's free-name and sidecar ownership
+  rules, and the free-space preflight;
+- the folder job on the real worker and reducer: copy and move in both
+  directions, SCANNING / VERIFYING / DELETING counts with no byte figure, the
+  cancel terminal, a partial that keeps its verb, a read-only folder and
+  destination subtree, and the eight-row remote ledger;
 - the input repeat decoder, every input-table row, the stick step, list wrapping,
   marks across CWD/L/R and a view switch, volume and connection clearing, dock
   focus, the SITES stick and window reset, confirm scrolling, IME cancel, and

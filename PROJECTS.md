@@ -12,7 +12,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Project | Status | Last job | Next | Notes |
 |---|---|---|---|---|
-| `vitaFTPShell` | `building` | 2026-11-17 — the cross-pane code review's correctness and safety fixes are applied on `feat-cross-pane-transfer` (report sidecar ownership, queued-action admission, delete-index race, zero-byte partial cleanup, cause classes, verified-move report rows, phase counts, cancel/partial terminals, case-folded conflict scan, capped-scan stop, the stack gate's real chain, and cdir-only perm facts); b85 builds with all 28 host suites green | Test b85 on the PCH-1000: folder copy and move both directions, the report, read-only folders, the eight-row ledger, the phase counts, and the cancel terminal; record M28-M32 | GPLv3. One UNSAFE eboot. b85 (303,055 bytes, SHA-256 `a79015c5…`) is the current host-tested artifact; M28-M32 stay PENDING and no console row is claimed. Two P2 review findings remain open (the folder-runtime extraction and the per-parent name index); `imc0:` is BLOCKED on the PCH-1000. Public repo: https://github.com/ghostmeson/vitaftpshell |
+| `vitaFTPShell` | `building` | 2026-11-18 — docs truth pass: b85 is the recorded artifact, and the status block, phase table, traceability rows, repo map, and job log now name the cross-pane review fixes merged in `9236f0e`; the M24 `imc0:` exit question is recorded | Test b85 on the PCH-1000: folder copy and move both directions, the report, read-only folders, the eight-row ledger, the phase counts, and the cancel terminal; record M28-M32 | GPLv3. One UNSAFE eboot. b85 (303,055 bytes, SHA-256 `289e4395…`) is the current host-tested artifact; M28-M32 stay PENDING and no console row is claimed. Two P2 review findings remain open (the folder-runtime extraction and the per-parent name index); `imc0:` is BLOCKED on the PCH-1000, so v1 cannot reach `verified` on this console without a PCH-2000 run or a superseding decision. Public repo: https://github.com/ghostmeson/vitaftpshell |
 
 ## Phases
 
@@ -27,7 +27,7 @@ target console with evidence. Host tests alone cannot promote it.
 | 3. Protocol engines | done | Client and server machines against scripted peers |
 | 4. Operations and state | done | Queue, planner, executor, reducer, handoff |
 | 5. Screens and composition | done | Seven surfaces, adapters, runtime, host integration test |
-| 6. Hardware verification | in progress | b60 proved FileZilla and app-local transfers; b66–b72 are host-tested; the full matrix transcription on b72 is the open row |
+| 6. Hardware verification | in progress | the code is host-complete through the cross-pane transfer and its review remediation; b77 is the latest hardware-observed build; the full 34-row matrix runs once on the code-freeze build (D95) |
 
 ## Current state
 
@@ -37,7 +37,8 @@ target console with evidence. Host tests alone cannot promote it.
 - **Architecture:** settled. The plan holds the Key Technical Decisions, the
   thread and handoff model, the command table, the implementation units, and the
   six phases. `docs/ARCHITECTURE.md` is the module contract.
-- **Build:** Phases 1-5 are done. `./build.sh` emits one uniquely named VPK with
+- **Build:** Phases 1-5 are done and Phase 6 is host-complete, including the
+  cross-pane transfer and its review remediation. `./build.sh` emits one uniquely named VPK with
   the real app linked and keeps the unstripped ELF. `./tools/test/run.sh` runs
   the layering guard, the docs guard, and the host suites;
   `./tools/preview/run.sh` renders the settled screen states;
@@ -48,8 +49,9 @@ target console with evidence. Host tests alone cannot promote it.
   site — with a site manager, transfer dock, local file manager, and an
   anonymous FTP server.
 - **Fix history:** `docs/FIXES.md` is the chronological index of every
-  Phase 5–6 defect, its root cause, its evidence, and its `HW`/`HOST`/`PENDING`
-  status. Read it before re-debugging a failure.
+  Phase 5–6 defect, including the cross-pane review rows, its root cause, its
+  evidence, and its `HW`/`HOST`/`PENDING` status. Read it before re-debugging a
+  failure.
 - **Primary user:** the anonymous-first collector pulling homebrew, patches, and
   media from public FTP sites without a PC.
 - **Secondary user:** the Vita-as-a-drive user who serves the console's files to
@@ -69,7 +71,7 @@ target console with evidence. Host tests alone cannot promote it.
 
 | Risk | Why it matters | Mitigation |
 |---|---|---|
-| Anonymous read-write server | Anyone on the LAN can change files while it is ON | Off by default, visible ON state, client count, warning, protected-path denial |
+| Anonymous read-write server | Anyone on the LAN can change files while it is ON | Off by default, visible ON state, client count, and protected-path denial; system roots and `boot_config.txt` stay excluded (D87, D88) |
 | Plaintext passwords | Saved credentials are readable on the card | Say so before the first save; never log them; no false claim of encryption |
 | WiFi path evidence | b37 was reported hardware-tested, but the row-level connect/PASV/upload/download/timeout results are not transcribed | Record each observed result and the pulled logs in `docs/VERIFICATION.md` |
 | Public FTP decline | The anonymous-first flow depends on public sites | Personal servers keep the product useful; no protocol widening in v1 |
@@ -108,7 +110,11 @@ target console with evidence. Host tests alone cannot promote it.
 | 2026-11-15 | Warning trim (b62) | Removed the separate app-data/`tai` lines from the SERVER warning; the general anonymous read-write line and `boot_config.txt` denial remain. `vitaftpshell-v01.00-b62.vpk`; hardware retry pending. |
 | 2026-11-15 | Warning panel removed (b63) | Removed the SERVER warning region; the client panel takes 582,76,360×352, while STATUS keeps ACCESS READ-WRITE, ON/OFF, and the client count (D88). `vitaftpshell-v01.00-b63.vpk`; hardware retry pending. |
 | 2026-11-16 | Residual sweep (b72) | Closed the non-hardware open issues: app listing-slot hold and reconnect tests, dropped-PASS and ACTIVE owner-RETR tests, truthful cancel/FEAT wording, PASV address refresh, per-lane cancel slots, `ASIDE` debris and aside notice, dead queue latches removed, shared confirm resolver, TSan app run, and the SIZE upload fallback (D91). Twenty-one host suites, ASan/UBSan, TSan, preview 40, zero warnings. `vitaftpshell-v01.00-b72.vpk`; console run pending. |
+| 2026-11-17 | Phase 6 — b77 hardware pass (U14) | The operator installed b77 on a PCH-1000 and exercised the local workspace and the network roles: copy, paste, new folder, rename, and delete across both local panes; the remote client and the server; the ACTIONS menu; the local/remote switch preserving state; the SITES connect return; and the stick with workspace wrap. M25, M26, and M27 move to PART. No crash dump reported. `vitaftpshell-v01.00-b77.vpk`. |
+| 2026-11-17 | Phase 6 — cross-pane folder transfer (b82, host) | Implemented R22/R23: the walk-first recursive plan, the verified move, `skipped.txt`, the per-folder read-only state, and the eight-row remote ledger (D100-D102). Twenty-four host suites, ASan, TSan, the docs gate, and preview pass. `vitaftpshell-v01.00-b82.vpk`; M28-M32 PENDING. |
 | 2026-11-17 | Launcher and LiveArea art (b83) | Replaced D84's two-arrow mark with the file-stack icon: three chamfered sheets, cyan front document with `VTPS` vertical in the 5×7 face and four ruled lines, 83×83 centred and mask-safe (D103). Replaced the placeholder LiveArea with composition A — wordmark, descriptor, two ledgers with a cyan cursor row, `UX0: UR0: UMA0:` and `READ-WRITE` above the gate — and added the missing `pic0` boot frame and a gate thumbnail (D104). New `tools/art/build_launcher_art.py` generates all four as indexed 8-bit PNGs; `pic0.png` joins the VPK and the asset guard. `vitaftpshell-v01.00-b83.vpk`; the launcher and LiveArea rows are PENDING on console. |
+| 2026-11-17 | Phase 6 — cross-pane review fixes (b85, host) | Applied the code review's 16 correctness, data-safety, and gate findings: report sidecar ownership, queued-action admission, delete-index ordering, zero-byte STOR cleanup, cause classes, verified-move report rows, phase counts, cancel and partial terminals, case-folded conflict scan, capped-scan stop, the stack gate's real chain, and cdir-only perm facts. Merged to `main` as `9236f0e`. Twenty-four host suites, ASan, and TSan pass. `vitaftpshell-v01.00-b85.vpk`; M28-M32 PENDING. |
+| 2026-11-18 | Docs truth pass | Recorded b85 as the current artifact and refreshed every document that named a stale fact: the shared status block, the phase table, the traceability citations, the repo map, and this log; named `9236f0e` as the review fixes' home after the feature branch was deleted; and added the M24 `imc0:` exit question to the evidence page. The docs gate and host suites pass; no matrix row changed. |
 
 ## Links
 

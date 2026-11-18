@@ -1,17 +1,19 @@
 # Verification
 
-**Build:** vitaftpshell-v01.00-b82.vpk (packaged 2026-11-17)
-**SHA-256:** dde3c491f35ad8929caec227ac105a22b2d6f2ab7e0f2e7c553601ad8673038b
-**ELF:** build/vitaftpshell, 586,964 bytes
+**Build:** vitaftpshell-v01.00-b85.vpk (packaged 2026-11-18)
+**SHA-256:** 289e43950d3d045f5fcbde73965890c9bb27c04e2f0f4fa7247bef4f162b39b3
+**ELF:** build/vitaftpshell, 591,404 bytes
+**Commit:** `9236f0e` on `main` (the cross-pane review fixes merged from the
+feature branch)
 **Console:** PS Vita 3.65 Enso; the system version string may read 3.74 (spoofed)
-**Date:** 2026-11-17
-**Status:** b82 is the current host-tested artifact; b77 is the latest
+**Date:** 2026-11-18
+**Status:** b85 is the current host-tested artifact; b77 is the latest
 hardware-observed build and ran on a PCH-1000 on 2026-11-17. The operator report
 confirms both local panes' file operations, the ACTIONS menu, the local/remote
 switch with its state preserved, the SITES connect return, and the remote client
-and server. The b82 feature rows M28-M32 are PENDING. M25, M26, and M27 are
-PART; M5, M10, M13, and M14 remain PART from earlier builds; every other row is
-PENDING until the v1 code-freeze pass (D95). `imc0:` stays BLOCKED on this
+and server. No row is PASS: 27 are PENDING and 7 are PART (`M5`, `M10`, `M13`,
+`M14`, `M25`, `M26`, `M27`). The feature rows M28-M32 and the art rows M33-M34
+are PENDING until the v1 code-freeze pass (D95). `imc0:` stays BLOCKED on this
 console.
 
 This file is the U14 evidence record and the one home for the matrix. A row is
@@ -51,6 +53,27 @@ was not exercised and stays PENDING; `imc0:` stays BLOCKED on the PCH-1000. No
 crash dump was reported, but M13 is not advanced because the cross-volume crash
 pass was not run. The project stays `building`; `verified` still needs every row
 PASS.
+
+## Cross-pane review fixes (b85, host)
+
+**Date:** 2026-11-17
+**Build:** `vitaftpshell-v01.00-b85.vpk`, 303,055 bytes, SHA-256
+`289e43950d3d045f5fcbde73965890c9bb27c04e2f0f4fa7247bef4f162b39b3`
+**Commit:** `9236f0e` on `main`
+
+**Scope:** the correctness, data-safety, and gate findings from the code review
+of the cross-pane folder transfer (run 20261117-211726-a03f9813). The 13 rows
+in `docs/FIXES.md` § Cross-pane review fixes carry the per-defect symptom, cause,
+and test name; this section records the run.
+
+**Result:** 24 host suites pass, `tools/test/asan.sh` and `tools/test/tsan.sh`
+report clean, the docs gate reports OK, and the stack gate measures
+`handle_action 36 B, fixed chain 36,308 B, scan 1,188 B, UI 88 B, all inside
+budget`. This is host evidence only.
+
+**Matrix effect:** none. **M28-M32 stay PENDING.** The reviewed code paths are
+the ones those rows exercise, but no console run of b85 exists, so no row is
+advanced and the project stays `building`.
 
 ## Residual open-issues sweep (b72, host)
 
@@ -424,11 +447,17 @@ evidence are recorded here. The project therefore stays `building`.
 Rows are added with the behavior they prove and executed once at v1 code
 freeze (D95). M17-M27 cover the surfaces the first sixteen rows did not
 exercise; M28-M32 cover the cross-pane folder transfer, the verified move, the
-report, the read-only folder state, and the eight-row ledger, and they are
-PENDING. A row's title names the behavior; the build it was observed on lives
+report, the read-only folder state, and the eight-row ledger; M33-M34 cover the
+launcher and LiveArea art shipped in `sce_sys/`. All are PENDING. A row's title names the behavior; the build it was observed on lives
 in its evidence. M24's
 `imc0:` leg is BLOCKED on the PCH-1000: the test console cannot mount that
 volume, so it stays host-only evidence and is never PASS.
+
+**Open exit condition.** `verified` requires every row PASS, but M24's `imc0:`
+leg is BLOCKED on a PCH-1000 and can never become PASS there. The v1 exit needs
+one of two recorded choices: run M24 on a PCH-2000, or add a decision that
+supersedes D95 for that leg and states what v1's evidence covers. Until one
+exists, the project stays `building`.
 
 | Row | Setup | Expected | Observed | Evidence | Result |
 |---|---|---|---|---|---|
@@ -464,6 +493,8 @@ volume, so it stays host-only evidence and is never PASS.
 | M30 | `skipped.txt` | A copy with an unsafe name in the tree; a partial move; a cancel before the first byte; a folder transfer whose local folder is read-only. Passes when: the report sits in the folder above the root with the direction, both roots, the count, and one line per missing entry; a pre-copy cancel writes none; a complete transfer says so; a directory named `skipped.txt` is not replaced and a file the transfer wrote takes `skipped 2.txt`; a read-only location leaves the transfer unchanged with the dock notice | pending | pending | PENDING |
 | M31 | Read-only remote folder | A server that reports `perm`; a folder that grants no write; a server that reports no `perm`. Passes when: the read-only folder dims UPLOAD, PASTE, MOVE, NEW FOLDER, RENAME, and DELETE with `READ ONLY` while DOWNLOAD and REFRESH stay live; the armed PASTE holds DOWNLOAD's row and CLEAR restores it; a 550 fails only its entry; a folder that reports nothing stays enabled; a read-only destination subtree is skipped in the walk and named in the report | pending | pending | PENDING |
 | M32 | Eight-row ledger and folder actions | The remote ACTIONS panel at a connected site; a local folder; a running folder job. Passes when: the remote ledger reads DOWNLOAD, MOVE, NEW FOLDER, RENAME, DELETE, REFRESH, DISCONNECT, SWITCH and scrolls to the eighth row in whole rows; a folder DOWNLOAD and UPLOAD are live; MOVE reads `TO LOCAL PANE` and warns about the delete; an armed PASTE takes DOWNLOAD's row; during a job a folder open and the write rows dim with `TRANSFER IN PROGRESS` while cursor, marks, and the switch stay live; the dock shows `SCANNING`, `VERIFYING`, `DELETING`, and `MOVED` | pending | pending | PENDING |
+| M33 | Launcher tile and gate thumbnail | The VPK installed, the bubble at 128 px, and the list row at 32 px. Passes when: the tile reads as stacked sheets with the cyan document on top, no red or green appears, the mark stays inside the bubble's corner cut at both sizes, and the gate thumbnail shows the mark, the wordmark, and one line with no data or state | pending | pending | PENDING |
+| M34 | LiveArea page and boot frame | The app's LiveArea page, then a launch. Passes when: the page shows the wordmark, the descriptor, two panes with the cyan cursor row, and `UX0: UR0: UMA0:` above the gate with nothing clipped; the boot frame shows the mark, the wordmark, and the descriptor on the field black, and reports no version or progress | pending | pending | PENDING |
 
 ## Install and launch
 

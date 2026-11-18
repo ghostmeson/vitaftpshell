@@ -2409,7 +2409,7 @@ hand.
 ## D102. Read-only is per folder, and free space is a preflight
 
 **Date:** 2026-11-17
-**Status:** accepted. The console rows are PENDING.
+**Status:** accepted. The console rows M28-M32 are PENDING.
 
 **Context:** A server can be writable in one folder and not another, and FTP
 answers `550` for a missing path as readily as a denied one. A session-wide
@@ -2439,7 +2439,7 @@ server that reports nothing is never dimmed by a guess.
 ## D103. The launcher mark is a stack of files
 
 **Date:** 2026-11-17
-**Status:** accepted. The console rows are PENDING.
+**Status:** accepted. The console row M33 is PENDING.
 
 **Context:** D84's two-arrow mark reads as a transfer glyph — the symbol any
 FTP or sync app uses — and says nothing about files. The launcher is where a
@@ -2468,7 +2468,7 @@ the icon. The art is reproducible: the script reads the palette from
 ## D104. The LiveArea shows the workspace, and pic0 is the boot frame
 
 **Date:** 2026-11-17
-**Status:** accepted. The console rows are PENDING.
+**Status:** accepted. The console row M34 is PENDING.
 
 **Context:** `bg.png` and `startup.png` were two dark rectangles with a yellow
 rule, and `pic0.png` did not exist. A LiveArea is the only place a person sees

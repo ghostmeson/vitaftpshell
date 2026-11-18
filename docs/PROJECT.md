@@ -20,8 +20,9 @@ read-write FTP server on `ux0:`, `ur0:`, and `uma0:`. The seven screens, the
 app/worker runtime, and the six Vita adapters are implemented, and the host
 suites pass. The local workspace and the cross-pane folder transfer — recursive
 download and upload, the verified move, the report, and the per-folder
-read-only state — are host-complete. The console matrix runs once at v1 code
-freeze (D95), so the project is `building`, not `verified`.
+read-only state — are host-complete, and the cross-pane code review's fixes are
+applied on `main`. The console matrix runs once at v1 code freeze (D95), so the
+project is `building`, not `verified`.
 
 The live state and the single next action are on [the board](../PROJECTS.md); the
 hardware evidence is in [the evidence record](VERIFICATION.md).
@@ -66,8 +67,8 @@ rows that prove them on hardware.
 
 | Feature | Requirements | Matrix |
 |---|---|---|
-| FTP client — saved sites, browse, download, upload, mutations | R11, R13, R41 | M1, M2, M3, M14, M17, M18, M20, M22, M26 |
-| Local file manager — browse, marks, copy/move, rename, delete, new folder | R30, R31, R39 | M11, M12, M13, M19, M23, M24, M25, M27 |
+| FTP client — saved sites, browse, download, upload, mutations, recursive folders | R11, R13, R22, R23, R41 | M1, M2, M3, M14, M17, M18, M20, M22, M26, M28, M29, M30, M31, M32 |
+| Local file manager — browse, marks, copy/move, rename, delete, new folder, recursive folders | R30, R31, R39 | M11, M12, M13, M19, M23, M24, M25, M27, M28, M29 |
 | Anonymous FTP server — four sessions, per-session data ports, path guard | R50, R51 | M5, M6, M7, M21 |
 
 ## Roadmap
@@ -83,7 +84,7 @@ rows that prove them on hardware.
 | Phase 3: Protocol engines | Client and server machines against scripted peers — done |
 | Phase 4: Operations and state | Queue, planner, executor, reducer, handoff — done |
 | Phase 5: Screens and composition | Seven surfaces, adapters, runtime, host integration test — done |
-| Phase 6: v1 completion and verification | The local workspace is host-complete: a second local pane, the seven user mounts, the connect return, and list navigation. R22 and R23 are host-complete; the new matrix rows are the open work, and the full matrix runs once on the code-freeze build (D95) |
+| Phase 6: v1 completion and verification | The code is host-complete: the local workspace, the cross-pane folder transfer, and its review remediation. The open work is the 34-row console matrix, which runs once on the code-freeze build (D95); M24's `imc0:` leg cannot be observed on a PCH-1000 |
 
 ## Failure policy
 
@@ -108,8 +109,10 @@ The v1 matrix in [`VERIFICATION.md`](VERIFICATION.md) is the definition of
 done: anonymous
 download from `ftp.gnu.org`, upload to a login site, local batch work, anonymous
 server access from a PC, cancellation, and protected-path refusal, all on
-hardware. The strategy metrics are transfer completion rate, crash-free
-sessions, connect-to-first-listing, and server-matrix pass.
+hardware. Every row must be PASS; M24's `imc0:` leg is the one exception that
+needs a recorded decision or a PCH-2000 run before v1 can close. The strategy
+metrics are transfer completion rate, crash-free sessions, connect-to-first-
+listing, and server-matrix pass.
 
 ## Risks
 
@@ -118,6 +121,7 @@ sessions, connect-to-first-listing, and server-matrix pass.
 | Anonymous read-write server exposes the three Vita volumes, including app data and `tai` | OFF by default, visible ON state, `ACCESS READ-WRITE`, client count; the warning panel is removed (D88); `boot_config.txt` and system roots stay protected |
 | Passwords stored unencrypted | State it before the first save; never log them; no false encryption claim |
 | WiFi path has a hardware report but no row-level evidence yet | Record connect, PASV, transfer, and timeout results in `VERIFICATION.md` |
+| The v1 exit needs every matrix row PASS, but M24's `imc0:` leg is BLOCKED on a PCH-1000 | Run M24 on a PCH-2000, or record an exception that supersedes D95 for that leg |
 | Public FTP may decline | Personal servers keep the product useful; no protocol widening in v1 |
 | Controller-only density | Design phase reviews each screen before implementation |
 | Cross-volume batch move is not all-or-nothing | Each file is atomic; a batch failure leaves completed moves and reports `n OF m MOVED`, never deletes a moved file (D45) |
