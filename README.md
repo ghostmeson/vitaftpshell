@@ -19,12 +19,12 @@
 
 vitaFTPShell is one PS Vita app with three roles: a passive FTP client, a local
 file manager over every mounted user volume, and an anonymous read-write FTP
-server. The console is the workspace — not a remote endpoint driven from a PC.
+server. The console is the workspace, not a remote endpoint driven from a PC.
 
 Two live ledgers put the console's own storage beside a saved FTP site, so a
 file moves between them in one action. The interface is a 960×544 Cyberpunk HUD
-built for the controller: no pointer, no desktop layout, and no hidden state in
-the transfer dock.
+built for the controller. There is no pointer and no desktop layout, and the
+dock reports each transfer without hiding the lists.
 
 ![WORKSPACE with two marked files and the transfer dock idle](docs/design/2026-11-08-workspace-a-idle.png)
 
@@ -73,8 +73,8 @@ hardware evidence is in [the evidence record](docs/VERIFICATION.md).
 <!-- status:end -->
 
 Every behavior on this page is implemented and covered by the host suites or
-the build-time guards. The 34-row console matrix — 27 `PENDING`, 7 `PART`,
-0 `PASS` — is the remaining evidence gate; a host pass is never reported as a
+the build-time guards. The 34-row console matrix (27 `PENDING`, 7 `PART`,
+0 `PASS`) is the remaining evidence gate. A host pass is never reported as a
 hardware result. See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the
 row-by-row record.
 
@@ -85,25 +85,25 @@ row-by-row record.
 - **Saved sites.** Anonymous or username/password logins, a seeded
   `ftp.gnu.org` example, and a six-row site book that wraps at both ends. A
   successful connect returns to the workspace with the remote pane active.
-- **Site management.** A six-field editor for name, host, port, anonymous mode,
-  username, and password; validation focuses the first invalid field, password
-  entry is masked, a dirty editor asks before discarding, and deletion is
-  confirmed.
+- **Site management.** A six-field editor covers name, host, port, anonymous
+  mode, username, and password. Validation focuses the first invalid field,
+  password entry is masked, a dirty editor asks before discarding, and deletion
+  is confirmed.
 - **Passive FTP over SceNet.** MLSD first, then LIST fallback with Unix and DOS
   listing parsing. Multiline replies, passive-mode negotiation, and timeouts
   are handled by one protocol engine.
-- **Full remote browsing.** Open folders, move the cursor, mark rows, refresh,
+- **Remote browsing.** Open folders, move the cursor, mark rows, refresh,
   and disconnect. The remote band shows the site, path, and connection state.
-- **Remote mutations.** Upload, create folder, rename, and delete, each with a
-  named confirmation. Upload overwrites are checked with MLST or SIZE when the
-  server advertises them.
+- **Remote changes.** Upload, create folder, rename, and delete, each with a
+  named confirmation. The app checks an upload overwrite with MLST or SIZE when
+  the server advertises them.
 - **Download and upload queues.** An ordered batch with one active item,
   progress, bytes, rate, and cancel.
 - **Session recovery.** A lost control channel shows `SESSION LOST` with
   `RECONNECT` or `DISMISS`, while a data-channel failure leaves the session up
   and the item retryable.
-- **Honest values.** A size or free-space figure the server or platform cannot
-  report renders `--`, never a guess.
+- **Unknown values.** A size or free-space figure the server or platform cannot
+  report renders `--` instead of a guess or a zero.
 
 ### Local file manager
 
@@ -111,38 +111,39 @@ row-by-row record.
   `gro0:`, `grw0:`, and `app0:` in table order. An absent mount is an absent
   row; save data (`savedata0:`) and the protected system partitions never
   appear.
-- **Read-only mounts.** `gro0:` and `app0:` carry `DRIVE RO`; a write, create,
+- **Read-only mounts.** `gro0:` and `app0:` carry `DRIVE RO`. A write, create,
   paste, rename, move, delete, or download destination there is refused with
-  `READ-ONLY MOUNT`, while reads and COPY stay live.
+  `READ-ONLY MOUNT`; reads and COPY stay live.
 - **A second local pane.** The right pane can become another local browser over
   the same session. The switch preserves each view's folder, cursor, scroll,
-  marks, and listing, and a running transfer survives it.
+  marks, and listing. A running transfer survives it.
 - **Marks and one clipboard.** View-scoped marks with a count and known total,
   plus COPY, MOVE, PASTE, and CLEAR across both local views.
-- **Recursive local folders.** Copy, move, and delete a whole tree, with a
-  walk-first plan, rollback, and a bottom-up delete. A copy into its own
-  subtree is refused before anything is touched.
-- **Create, rename, delete.** New folder, rename, and delete on the focused
-  item or the marked set. Delete names every full path, including marks from
-  another folder, and says it cannot be undone.
+- **Recursive local folders.** Copy, move, and delete a whole tree. The app
+  lists the tree before it copies anything, rolls back a failed run, and deletes
+  from the deepest entry upward. A copy into its own subtree is refused before
+  anything is touched.
+- **Local changes.** New folder, rename, and delete work on the focused item or
+  the marked set. Delete names every full path, including marks from another
+  folder, and says it cannot be undone.
 - **Duplicate handling.** A same-folder paste asks `CANCEL` or
   `SAVE DUPLICATES` and uses the copy-name rule (`A copy.TXT`, then
   `A copy 2.TXT`). A mixed batch asks one conflict question and records the
   already-here items as skipped.
 - **Protected paths.** Volume roots, `ur0:data`, `ux0:data`, `imc0:data`,
   `ur0:tai`, and `ux0:tai` cannot be renamed, moved, or deleted. The `tai`
-  contents and the app data folder remain writable by design; every check uses
-  the canonical path and a rename checks both operands.
-- **Risk marks.** High-risk paths — the `tai` folders, volume roots, the data
-  folders themselves, and the files that control loading — draw a yellow
+  contents and the app data folder remain writable by design. Every check uses
+  the canonical path, and a rename checks both operands.
+- **Risk marks.** High-risk paths (the `tai` folders, volume roots, the data
+  folders themselves, and the files that control loading) draw a yellow
   diamond.
-- **Free space.** `ux0:` reports free space and the transfer preflight refuses a
-  known shortfall with `NOT ENOUGH SPACE`. Every other volume renders `--`.
+- **Free space.** `ux0:` reports free space. Before a download, the app refuses
+  a known shortfall with `NOT ENOUGH SPACE`. Every other volume renders `--`.
 - **No half-written files.** Downloads and uploads write a `.vftp.part` file,
   sync, and rename into place. A kept `.vftp.old` aside is drawn as `ASIDE` so
   it is reachable and never mistaken for the user's file.
 - **Two navigation models.** D-pad row-by-row with wrap, and an analog stick
-  step of one to five rows at a 100 ms cadence. Down from the last row enters
+  step of one to five rows, repeating every 100 ms. Down from the last row enters
   the dock only while a lane is busy.
 
 ### Cross-pane folder transfers
@@ -163,26 +164,26 @@ row-by-row record.
   source. Each destination folder is re-listed; a file counts only when its
   exact name and moved bytes match. The delete runs bottom-up, checks every
   source root, stops at the first failure, and never removes a verified copy.
-- **The report is the record.** `skipped.txt` lands in the folder above the
+- **Report file.** `skipped.txt` lands in the folder above the
   transferred root, with the direction, both roots, every entry the transfer
   did not complete, and its reason. It is replaced on every transfer that
   reaches its copy phase; a directory is never replaced, and a name collision
   takes `skipped 2.txt`.
-- **Read-only is per folder.** A folder whose `perm` facts grant no write dims
-  UPLOAD, PASTE, MOVE, NEW FOLDER, RENAME, and DELETE with `READ ONLY`;
-  DOWNLOAD and REFRESH stay live. A server that reports no `perm` stays
-  enabled.
-- **Free-space preflight.** A download sums its known bytes before the first
-  byte and refuses a known shortfall.
+- **Read-only is per folder.** A folder whose MLSD `perm` facts grant no write
+  access dims UPLOAD, PASTE, MOVE, NEW FOLDER, RENAME, and DELETE with
+  `READ ONLY`; DOWNLOAD and REFRESH stay live. A server that reports no `perm`
+  stays enabled.
+- **Free-space check.** A download sums its known bytes before the first byte
+  and refuses a known shortfall with `NOT ENOUGH SPACE`.
 - **One lane at a time.** The folder job owns the network lane from `SCANNING`
-  to its terminal; a second folder transfer is dim with
+  until it finishes. A second folder transfer is dim with
   `TRANSFER IN PROGRESS`. A file download may queue behind it.
 
 ### FTP server
 
-- **Anonymous read-write FTP.** Passive mode, OFF at launch, started by an
-  explicit action. While it runs, its ON state, `ACCESS READ-WRITE` readout, and
-  client count stay visible on every screen.
+- **Anonymous read-write FTP.** Passive mode, OFF at launch, and started only
+  when the user asks. While it runs, its ON state, `ACCESS READ-WRITE` readout,
+  and client count stay visible on every screen.
 - **Three mounted volumes.** The server exposes `ux0:`, `ur0:`, and `uma0:` as
   `UX0:`, `UR0:`, and `UMA0:` under a virtual `/`. The local manager sees all
   seven user volumes; the server deliberately does not.
@@ -190,7 +191,7 @@ row-by-row record.
   passive data port. A fifth client receives a busy reply.
 - **Editable port.** Default `1337`, adjustable in the range 1024–65531 so
   every derived session port stays valid.
-- **Broad command support.** USER, PASS, SYST, NOOP, OPTS, FEAT, QUIT, PWD, CWD,
+- **FTP commands.** USER, PASS, SYST, NOOP, OPTS, FEAT, QUIT, PWD, CWD,
   CDUP, TYPE, MODE, STRU, PASV, LIST, NLST, MLSD, RETR, STOR, DELE, MKD, RMD,
   RNFR, RNTO, SIZE, MDTM, MLST, and ABOR.
 - **Safe writes.** STOR writes a temporary file and renames on close. A reset
@@ -198,7 +199,7 @@ row-by-row record.
 - **Visible state.** `OFF`, `STARTING`, and `ON` with the LAN address, port,
   client count, and current client operation. Bind failures and missing Wi-Fi
   are reported by name.
-- **One path table.** Client, server, and local manager share the same
+- **Shared path rules.** Client, server, and local manager share the same
   canonical-path and denial rules. A denial answers exactly as a missing path
   and creates nothing.
 
@@ -206,28 +207,28 @@ row-by-row record.
 
 - **Seven surfaces.** WORKSPACE, SITES, SITE EDITOR, SERVER, ACTIONS, CONFIRM,
   and system TEXT ENTRY, plus inline error and reconnect states.
-- **Cyberpunk HUD.** 960×544, a hand-built 5×7 bitmap face, a restrained
-  palette: yellow for network activity, risk, and waiting work; cyan for the
+- **Cyberpunk HUD.** 960×544, a hand-built 5×7 bitmap face, and three signal
+  colors: yellow for network activity, risk, and waiting work; cyan for the
   cursor and a running local job; red for failure and refusal.
-- **A transfer dock that never takes over.** Progress, bytes, percentage, rate,
-  elapsed time, item count, and phase counts; `SCANNING`, `VERIFYING`, and
-  `DELETING` for folder jobs; terminal words that keep the operation and its
-  reason. It is never modal and never covers a row.
+- **Transfer dock.** Progress, bytes, percentage, rate, elapsed time, item
+  count, and phase counts. Folder jobs show `SCANNING`, `VERIFYING`, and
+  `DELETING`; result words keep the operation and its reason. The dock is
+  never modal and never covers a row.
 - **Context actions.** A seven-row local ledger and an eight-row remote ledger.
   The remote rows are DOWNLOAD, MOVE, NEW FOLDER, RENAME, DELETE, REFRESH,
   DISCONNECT, and SWITCH. Every disabled row carries its reason, and the target
-  panel is the single source of truth for where an action goes.
+  panel always shows where the action goes.
 - **One confirmation surface.** Delete, batch conflict, items already here,
   move, cancel a transfer, stop the server during a write, and discard editor
-  changes. The safe option is focused first; the destructive or committing
+  changes. The safe option is focused first. The destructive or committing
   action is the yellow slab.
 - **Two lanes in one dock.** One network transfer and one local job may run
   together. The local lane becomes a compact badge while the network lane owns
-  the bar; a collision on the same canonical path asks `WAIT`, `SKIP`, or
+  the bar. A collision on the same canonical path asks `WAIT`, `SKIP`, or
   `CANCEL`.
 - **Focusable cancel.** Down from the last row enters the dock while a lane is
-  busy. Cross opens the phase-aware cancel confirmation; the terminal state
-  stays until the next transfer starts.
+  busy. Cross opens a cancel confirmation whose warning follows the folder
+  phase. The result stays until the next transfer starts.
 - **System text entry.** The Vita IME handles names, hosts, ports, usernames,
   passwords, new folders, and renames. Cancellation keeps the previous value;
   passwords use masked mode and never reach the session log.
@@ -238,8 +239,8 @@ row-by-row record.
 ### Reliability and diagnostics
 
 - **One worker thread.** The main thread owns only the UI. The worker owns
-  network, filesystem, transfers, and the session; snapshot handoff rings carry
-  state between them. One writer owns each piece of shared state.
+  network, filesystem, transfers, and the session. State snapshots pass between
+  the two threads. One writer owns each piece of shared state.
 - **Policy testable on the host.** The core compiles without a Vita header. Six
   adapters own the SDK calls, and a layering guard fails the build if any other
   file includes `psp2/` or `vita2d.h`.
@@ -251,9 +252,9 @@ row-by-row record.
   `ux0:data/vitaFTPShell/sites.cfg` and `settings.cfg`, saved through a
   temporary file, sync, and rename. A failed save leaves the previous file
   byte-identical.
-- **Cause classes.** Every started transfer records one cause — app, server,
-  network, storage, or user — and the stage it reached, so the dock, the log,
-  and the release metric cannot drift.
+- **Failure attribution.** Every started transfer records one cause (app,
+  server, network, storage, or user) and the stage it reached, so the dock, the
+  log, and the release metric cannot drift.
 - **Build gates.** The build checks the linked ELF's worker stack budget, keeps
   exactly one VPK, and refuses to upload an artifact whose build number does not
   match `BUILD_NUMBER`.
@@ -276,8 +277,8 @@ These are product rules enforced in the policy layer, not conventions:
   cannot be undone. Cancel changes nothing.
 - **No secrets in logs.** Passwords are stored unencrypted on the console by
   design, and never enter the session log or an error message.
-- **No kernel surface.** No taiHEN plugin, `*KERNEL` entry, background daemon,
-  or boot-time component.
+- **No kernel component.** No taiHEN plugin, `*KERNEL` entry, background daemon,
+  or boot-time code.
 - **Atomic writes.** A failed transfer never leaves a partial file looking
   complete, and a failed local plan rolls back what it applied.
 
@@ -438,13 +439,13 @@ sce_sys/         launcher icon, LiveArea art, and boot frame
 
 - **Plain FTP only.** No FTPS, SFTP, HTTP, WebDAV, or SMB in v1.
 - **No background work.** No daemon, taiHEN plugin, boot-time server, resume,
-  sync, or sleep/resume transfer. Transfers live and die with the app.
-- **Two lanes, not a farm.** One network transfer and one local job at a time.
+  sync, or sleep/resume transfer. A transfer stops when the app closes.
+- **One network transfer and one local job.** Only one of each runs at a time.
   Remote-to-remote copy is not offered; FTP has no copy command.
 - **Bounded listings.** A folder longer than 2,000 rows shows `FIRST 2000`; a
   folder plan beyond 4,096 entries is refused before the first byte.
 - **Partial free-space knowledge.** Only `ux0:` reports free space. An unknown
-  value skips the preflight and renders `--`.
+  value skips the check and renders `--`.
 - **Sizes are required to verify a move.** A server that reports no file sizes
   can copy, but a move cannot be verified and keeps its sources.
 - **Passwords are stored unencrypted.** They are never logged, but the site
