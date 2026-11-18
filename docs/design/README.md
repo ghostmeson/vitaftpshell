@@ -123,3 +123,9 @@ view, the seven user mounts with `DRIVE RO` on `app0:` and `gro0:`, and the
 right ACTIONS ledger's seventh switch row at a 360 px panel height (D96-D99).
 The 2026-11-08 WORKSPACE and ACTIONS sheets remain the historical three-mount,
 six-row record.
+
+**2026-11-18 amendment:** D105 moves the workspace row to a 16×16 file icon at
+`x+14`, the batch square and the red risk diamond to the `x+31` rail, the name to
+`x+42`, and filenames to Spleen 6×12 at 1.5. The 2026-11-17 local-workspace
+sheet and the earlier workspace sheets predate the row; they remain the layout
+record.

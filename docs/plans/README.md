@@ -12,6 +12,7 @@ unit; do not use this folder as a scratchpad.
 | Plan | Kind | Status |
 |---|---|---|
 | [`2026-11-08-1103-feat-vitaftpshell-v1-plan.md`](2026-11-08-1103-feat-vitaftpshell-v1-plan.md) | Implementation-ready unified plan | Behavior source of truth; the 2026-11-14 and 2026-11-16 correction passes applied; R22/R23 are built on the host and the console matrix is the open row |
+| [`2026-11-18-0727-feat-ui-type-assets-plan.md`](2026-11-18-0727-feat-ui-type-assets-plan.md) | Implementation-ready unified plan | Approved 2026-11-18 (D105); its units not started; the console rows are PENDING |
 
 Completed plans move to [`archive/`](archive/README.md), one index row each.
 A plan is archived only after its units are absorbed by `../DECISIONS.md`,

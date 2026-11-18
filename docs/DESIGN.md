@@ -22,12 +22,17 @@ settled value is a design change and needs a numbered decision.
 - **Field:** true black `C_FIELD`. Panels use `C_PANEL`.
 - **Palette:** `C_FIELD`, `C_PANEL`, `C_HAIR`, `C_DIM`, `C_WHITE`, `C_YELLOW`,
   `C_CYAN`, `C_GREEN`, `C_GREEN_DIM`, `C_RED`. Yellow marks network activity,
-  risk, warnings, and waiting local work; cyan marks the cursor row and a
-  running local job; red marks a failure or a refusal.
-- **Type:** the hand-built 5×7 bitmap face. Uppercase, ASCII labels, `..` for
-  truncation. Sizes come from the COCKPIT ladder; do not invent a size between
-  steps. The face has no `?` or `!`; a UI title is a statement (`DELETE 3 ITEMS`,
-  `DISCARD CHANGES`).
+  warnings, waiting local work, and the batch mark; cyan marks the cursor row
+  and a running local job; red marks a failure, a refusal, and the high-risk
+  diamond (D105).
+- **Type:** two faces with two jobs (D105). The 5×7 stencil carries uppercase
+  labels, titles, values, buttons, and the wordmark; it has no `?` or `!`, so a
+  UI title is a statement (`DELETE 3 ITEMS`, `DISCARD CHANGES`). Spleen 6×12 at
+  `PX_MICRO` 1.5 carries filenames, paths, hosts, and site names: a 12 px cap, a
+  9 px x-height, a 9 px advance, every ASCII mark, Latin-1 accents, and one tofu
+  per unsupported codepoint. Names sit at `y+10` on the 22 px baseline; paths
+  at `y+24.5`. Sizes come from the COCKPIT ladder; do not invent a size between
+  steps. Truncation is `..`.
 - **Spacing:** `SP_1`–`SP_6` from the COCKPIT theme. A gap off the scale is a
   bug.
 - **Panel language:** satellite panels get one chamfer; the hero treatment is
@@ -71,24 +76,28 @@ Margin 18; pane gutter 12; dock gap 12; legend gap 8. Panes are satellites: a
   inside it. `gro0:` and `app0:` are read-only: the row value reads `DRIVE RO`,
   and a write, create, paste, rename, move, delete, or download destination
   there is refused with `READ-ONLY MOUNT`; COPY stays live and a read is
-  allowed.
+  allowed. Each volume row carries its storage class icon: a card for `ux0:`
+  and `imc0:`, a drive for `ur0:`, `uma0:`, and `app0:`, and a game card for
+  `gro0:` and `grw0:` (D105).
 - **Band:** title at `y+8` (px 2, tracked 2); path at `y+26` (px 1.5); a hairline
   at `y+43`; rows from `y+48`.
-- **Row:** 30 px pitch; ten visible. Name at `x+40` (px 2). Type, size, or the
+- **Row:** 30 px pitch; ten visible. A 16×16 icon at `x+14`, `y+7` (D105). Name
+  at `x+42` in Spleen 1.5, top `y+10` on the 22 px baseline. Type, size, or the
   read-only value right-aligned at `x+w-14` (px 1.5): `DIR`, `UP`, `ASIDE`,
   `DRIVE RO`, a size, or `--`. A kept `.vftp.old` copy draws `ASIDE` in yellow
   instead of a size, so the debris is reachable and never mistaken for the
-  user's file (D81). The mark
-  square is 6×6 at `x+19`; the risk diamond is 6×6 at `x+27`; the scrollbar is
-  2 px at `x+w-6`. The name column starts at `x+40` on every row so names stay
-  aligned when a risk mark appears. The active cursor row is a cyan slab from
-  `x+1` to `x+w-1`, with near-black name and value text. On the slab the mark
-  square and risk diamond stay yellow behind a 1 px dark keyline. The inactive
-  cursor keeps a 2 px `C_HAIR` bar at `x+8` and a 2.5 % wash.
-- **Risk mark:** a path the shared risk table classifies high draws a 6×6 yellow
-  diamond at `x+27` (D31). It marks the `tai` folders and their contents, volume
-  roots, the `ur0:data`, `ux0:data`, and `imc0:data` folders themselves, and the
-  files that control loading. The mark never replaces the type or size column.
+  user's file (D81). The batch square is 6×6 at `x+31`, `y+18`; the red risk
+  diamond is 8×8 at `x+31`, `y+4`; the scrollbar is 2 px at `x+w-6`. The name
+  column starts at `x+42` on every row so names stay aligned when a risk mark
+  appears. The active cursor row is a cyan slab from `x+1` to `x+w-1`, with
+  near-black name and value text. On the slab the square and the diamond sit
+  behind a field cutout. The inactive cursor keeps a 2 px `C_HAIR` bar at `x+8`
+  and a 2.5 % wash.
+- **Risk mark:** a path the shared risk table classifies high draws an 8×8
+  `C_RED` diamond at `x+31`, `y+4` (D31, D105). It marks the `tai` folders and
+  their contents, volume roots, the `ur0:data`, `ux0:data`, and `imc0:data`
+  folders themselves, and the files that control loading. The mark never
+  replaces the type or size column.
 - **Truncated listing:** a directory longer than the 2000-row cap shows
   `FIRST 2000` in yellow on the band, left of the mark count. The rows shown are
   the first 2000 in the source's order.

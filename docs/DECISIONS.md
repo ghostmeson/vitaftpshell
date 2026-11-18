@@ -2497,3 +2497,84 @@ loading frame all ship empty-handed today.
 still reads at a glance. The bottom fifth is deliberately empty. The rejected
 poster and ledger-field compositions are recorded in the design sheet and can
 return as additional LiveArea pages if the gate ever gets a second page.
+
+## D105. The file list gets a reading face, a 19-mask icon set, and a red risk mark
+
+**Date:** 2026-11-18
+**Status:** accepted; the plan's units are not started. The console rows are PENDING.
+
+**Context:** The 5x7 stencil was drawn for labels. Used for filenames it folds
+case (`lookup()` upper-cases every letter), so `README.md` and `readme.md` are
+one row; it carries 51 glyphs and advances over the nineteen marks ordinary
+filenames use; it has no lowercase, no descenders, and no accents. A CJK name
+draws nothing. The name sits at `y+8` in a 30 px row, so the whole glyph box is
+22 px at the settled 2.0 step; most 12- and 13-row bitmap faces do not fit.
+
+The review measured Spleen 5x8 and 6x12, GohuFont 11, and Terminus 6x12 in the
+actual row. Spleen 5x8 fits at 2.0 but every accented Latin letter is an empty
+placeholder (99 empty slots in all); Spleen 6x12 is fully covered and fits at
+1.5; Gohu is taller; Terminus is a slab. The chosen face is Spleen 6x12 at 1.5:
+548 glyphs, 544 inked, BSD-2-Clause, a 12 px cap, a 9 px x-height, a 9 px
+advance, and 37 cells beside `4.0 MB`.
+
+For the row's left gutter the review rasterised Heroicons 16/solid, Octicons 16,
+and Bootstrap Icons at 16x16 in the same row. The page-with-glyph sets lose the
+type at 1x in monochrome; Heroicons' silhouettes read. Heroicons has no card,
+drive, or USB vocabulary; Bootstrap's device set does. The review chose 14
+Heroicons for content, Bootstrap `sd-card-fill` and `device-ssd-fill` for the
+storage pair, and three drawn shapes (gamepad, disc, game-card cartridge). The
+user chose three volume classes, white navigation icons, the chip for plugins,
+the drawn gamepad and disc, no extra content categories, the square for the
+batch mark, and a red risk diamond.
+
+**Decision:**
+
+1. **Spleen 6x12 at `PX_MICRO` 1.5 carries names and paths.** A name's top is
+   `y+10`, its baseline 22 px; a path's top is `y+24.5`, its baseline 36.5. The
+   stencil keeps labels, titles, values, buttons, the wordmark, and the legend.
+   The numeric sizes stay white. `FONT_GLYPH_H` stays 7, so `LINE_H`,
+   `READOUT_STRIDE`, and the panel rhythm do not move.
+2. **The workspace panes are first.** Sites, the editor host, the server path,
+   the dock, the confirm, and the actions are a later per-screen review; the
+   confirm and the dock take the face at 1.5 when that review reaches them.
+3. **Case, marks, and accents are correctness.** Case is preserved; every ASCII
+   mark draws; Latin-1 accents draw; an unsupported codepoint is one tofu box,
+   decoded as UTF-8, never one silent cell per byte. Truncation ends in `..` at
+   the face's 9 px advance.
+4. **The mark stays a 6x6 square; the star is a future favorite.** The square is
+   `C_YELLOW` at `x+31`, `y+18`; the risk diamond is `C_RED`, 8x8 at `x+31`,
+   `y+4`. The icon is 16x16 at `x+14`, `y+7`; the name moves to `x+42`; the
+   value stays at `x+w-14`. The rail is the only row-geometry change.
+5. **The icon set is 19 masks.** Fourteen Heroicons (up, folder, generic, text,
+   image, audio, video, archive, code, binary, plugin, package, exe, unknown),
+   Bootstrap `sd-card-fill` and `device-ssd-fill`, and the drawn gamepad, disc,
+   and cartridge. The plugin is `cpu-chip` for `skprx`, `suprx`, and `prx`.
+   Folder, volume, and up are `C_WHITE`; files are `C_DIM`; the selected row is
+   `C_FIELD`.
+6. **Three storage classes.** `ux0:` and `imc0:` are cards; `ur0:`, `uma0:`, and
+   `app0:` are the drive; `gro0:` and `grw0:` are the game card. The class is
+   shape only; the value still says `DRIVE` or `DRIVE RO`.
+7. **The extension map** covers text, image, audio, video, archive, code,
+   binary, plugin, package, game, disc, exe, and generic. It adds `at9`, `vag`,
+   `oma`, `pmf`, `pbp`, `chd`, `gdi`, `cdi`, `wbfs`, `wad`, and `gcm`; `.bin`
+   stays binary. PDFs, fonts, and VM disks stay in the existing categories.
+8. **Provenance.** The Spleen table is generated from a vendored BDF by
+   `tools/font/import_spleen.py` with a `--check` gate. The icons are vendored
+   SVGs rasterised once to 16x16 1-bit masks; the drawn masks are project work.
+   The notices are `LICENSES/SPLEEN-BSD-2.txt`, `LICENSES/HEROICONS-MIT.txt`,
+   and `LICENSES/BOOTSTRAP-MIT.txt`; `docs/THIRD_PARTY.md` lists them.
+9. **The reading face is positioned by baseline.** A baseline-positioned entry
+   point derives the top from the face's cap height; call sites pass 22 or 36.5,
+   not a guessed top.
+
+**Consequences:** The file list gains case, marks, accents, and eleven
+characters; `VitaShell-1.74-2026-11-17.vpk` fits without an ellipsis. Names lose
+two pixels of cap height (14 to 12) and move to the micro step; the 1.5 scale is
+the one console check, with Spleen 5x8 at 2.0 plus a composed accent block as the
+documented fallback. The risk diamond moves from yellow to red, sharing the
+failure and refusal colour; yellow keeps network activity, waiting local work,
+and the batch square. The star is not shipped; a favorites feature needs its own
+decision. The icon rail is x 14 / x 31 / x 42; the name still fits 37 cells. The
+two icon families are divided by role (content versus storage), both MIT and
+filled 16 px. The plan's units are not started; the console rows for the 1.5 verdict and
+the icons are PENDING, so the project stays `building`.
