@@ -76,6 +76,6 @@ spoke a different vocabulary (`FOLDER NOT SUPPORTED`).
 
 ## Plan
 
-[`2026-11-17-1111-feat-cross-pane-folder-transfer-plan.md`](../plans/2026-11-17-1111-feat-cross-pane-folder-transfer-plan.md)
+[`2026-11-17-1111-feat-cross-pane-folder-transfer-plan.md`](../plans/archive/2026-11-17-1111-feat-cross-pane-folder-transfer-plan.md)
 owns the Product Contract, KTD1 through KTD11, the eight units, and the
 verification contract.

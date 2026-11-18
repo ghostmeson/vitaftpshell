@@ -70,7 +70,7 @@ the user.
 
 ## Requirements
 
-The [local workspace plan](../plans/2026-11-16-2011-feat-local-workspace-plan.md)
+The [local workspace plan](../plans/archive/2026-11-16-2011-feat-local-workspace-plan.md)
 owns the numbered requirements, R1 through R26:
 
 - **Volumes:** the seven-mount list, the read-only value and refusal, the
@@ -139,4 +139,4 @@ Outside the product: a PC-first workflow, and SFTP, FTPS, HTTP, WebDAV, or SMB.
 
 ## Plan
 
-[`2026-11-16-2011-feat-local-workspace-plan.md`](../plans/2026-11-16-2011-feat-local-workspace-plan.md).
+[`2026-11-16-2011-feat-local-workspace-plan.md`](../plans/archive/2026-11-16-2011-feat-local-workspace-plan.md).

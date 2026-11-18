@@ -16,7 +16,7 @@ deepened: 2026-11-14
 **Product Contract preservation (2026-11-14 correction pass):** changed: R35, R38, R39, R40, R67, R68; added R74 and a copy/move Key Decision; updated the "Serialize transfers" and "Multi-select" Key Decisions, the multiple-transfer boundary, AE8, F2, the connect-to-first-listing budget, and the dock Select binding for the existing clear-queue command. The user reported five behavior and visual defects and chose the corrections: cursor-based COPY/MOVE, operation-accurate dock words with one batch result, full local cancel, a cyan cursor slab, an active-pane glow, and red failures. b41 also allows one local job beside one network transfer, superseding the single-slot rule. No other requirement changed.
 
 **Behavior source correction (2026-11-17):** the [local workspace
-plan](2026-11-16-2011-feat-local-workspace-plan.md) settles the volume scope,
+plan](archive/2026-11-16-2011-feat-local-workspace-plan.md) settles the volume scope,
 the second local view over one FTP session, the same-folder duplicate prompt,
 and the `app0:` alias (D96-D99). A2, R5, R10, and R28 below describe the shipped
 behavior; the server's three-mount exposure is unchanged.
